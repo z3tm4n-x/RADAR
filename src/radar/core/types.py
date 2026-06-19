@@ -20,10 +20,25 @@ class RadiationSource(StrEnum):
 
 
 class RadiationQuantityMode(StrEnum):
-    """High-level calculation mode inherited from the source spectrum meaning."""
+    """Quantity class of a radiation product."""
 
     FLUENCE = "fluence"
     FLUX = "flux"
+
+
+class RadiationProductKind(StrEnum):
+    """Named radiation products required by OST/GOST calculation chains."""
+
+    MISSION_FLUENCE = "mission_fluence"
+    ORBIT_AVERAGED_FLUX = "orbit_averaged_flux"
+    MEAN_FLUX = "mean_flux"
+    MAXIMUM_FLUX = "maximum_flux"
+    PEAK_FLUX = "peak_flux"
+
+    MISSION_LET_FLUENCE = "mission_let_fluence"
+    MEAN_LET_FLUX = "mean_let_flux"
+    MAXIMUM_LET_FLUX = "maximum_let_flux"
+    PEAK_LET_FLUX = "peak_let_flux"
 
 
 class SpectrumQuantity(StrEnum):

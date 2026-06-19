@@ -1,6 +1,6 @@
 ﻿"""Project-wide constants for RADAR."""
 
-from radar.core.types import DoseQuantity, RadiationQuantityMode, ShieldGeometry
+from radar.core.types import DoseQuantity, ShieldGeometry
 from radar.core.units import Unit
 
 DEFAULT_KP = 3
@@ -18,7 +18,6 @@ DEFAULT_SHIELD_THICKNESSES_G_CM2 = (
     10.0,
 )
 
-DEFAULT_RADIATION_QUANTITY_MODE = RadiationQuantityMode.FLUENCE
 DEFAULT_DOSE_QUANTITY = DoseQuantity.ACCUMULATED_DOSE
 DEFAULT_DOSE_UNIT = Unit.RAD
 DEFAULT_SHIELD_GEOMETRY = ShieldGeometry.SPHERE

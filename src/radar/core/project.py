@@ -8,7 +8,6 @@ from radar.core.constants import (
     DEFAULT_DOSE_QUANTITY,
     DEFAULT_DOSE_UNIT,
     DEFAULT_KP,
-    DEFAULT_RADIATION_QUANTITY_MODE,
     DEFAULT_SEP_EXCEEDANCE_PROBABILITY,
     DEFAULT_SHIELD_GEOMETRY,
     DEFAULT_SHIELD_THICKNESSES_G_CM2,
@@ -16,15 +15,9 @@ from radar.core.constants import (
     MIN_KP,
     MIN_LIFETIME_YEARS,
 )
-from radar.core.dose_units import validate_dose_settings_for_radiation_quantity_mode
+from radar.core.dose_units import validate_dose_unit_for_quantity
 from radar.core.profiles import DEFAULT_METHODOLOGY_PROFILE, MethodologyProfile
-from radar.core.types import (
-    DoseQuantity,
-    OrbitType,
-    RadiationQuantityMode,
-    ShieldGeometry,
-    SolarActivityLevel,
-)
+from radar.core.types import DoseQuantity, OrbitType, ShieldGeometry, SolarActivityLevel
 from radar.core.units import Unit
 
 
@@ -159,7 +152,6 @@ class CalculationConfig:
     shielding: ShieldingConfig = ShieldingConfig()
     methodology: MethodologyConfig = MethodologyConfig()
     kp: int = DEFAULT_KP
-    radiation_quantity_mode: RadiationQuantityMode = DEFAULT_RADIATION_QUANTITY_MODE
     dose_quantity: DoseQuantity = DEFAULT_DOSE_QUANTITY
     dose_unit: Unit = DEFAULT_DOSE_UNIT
 
@@ -172,12 +164,7 @@ class CalculationConfig:
             msg = "Kp must be in the range 0..9."
             raise ValueError(msg)
 
-        if not isinstance(self.radiation_quantity_mode, RadiationQuantityMode):
-            msg = "Radiation quantity mode must be Flux or Fluence."
-            raise ValueError(msg)
-
-        validate_dose_settings_for_radiation_quantity_mode(
-            radiation_quantity_mode=self.radiation_quantity_mode,
+        validate_dose_unit_for_quantity(
             dose_quantity=self.dose_quantity,
             dose_unit=self.dose_unit,
         )

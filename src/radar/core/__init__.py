@@ -12,11 +12,19 @@ from radar.core.dose_units import (
     validate_dose_unit_for_quantity,
 )
 from radar.core.log import CalculationLog, CalculationLogEntry, LogLevel
+from radar.core.products import (
+    SpectrumProduct,
+    allowed_spectrum_quantities_for_product_kind,
+    default_dose_unit_for_product_kind,
+    dose_quantity_for_product_kind,
+    radiation_quantity_mode_for_product_kind,
+    validate_spectrum_matches_product_kind,
+)
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
 from radar.core.spectrum_ops import add_spectra, check_spectra_compatible, scale_spectrum
-from radar.core.types import DoseQuantity, RadiationQuantityMode
+from radar.core.types import DoseQuantity, RadiationProductKind, RadiationQuantityMode
 
 __all__ = [
     "CalculationConfig",
@@ -29,19 +37,26 @@ __all__ = [
     "MissionConfig",
     "ModelInfo",
     "OrbitConfig",
+    "RadiationProductKind",
     "RadiationQuantityMode",
     "ShieldingConfig",
     "Spectrum1D",
+    "SpectrumProduct",
     "add_spectra",
+    "allowed_spectrum_quantities_for_product_kind",
     "check_spectra_compatible",
+    "default_dose_unit_for_product_kind",
     "default_dose_unit_for_radiation_quantity_mode",
+    "dose_quantity_for_product_kind",
     "dose_quantity_for_radiation_quantity_mode",
     "dose_quantity_for_spectrum_quantity",
     "is_accumulated_dose_unit",
     "is_dose_rate_unit",
+    "radiation_quantity_mode_for_product_kind",
     "radiation_quantity_mode_for_spectrum_quantity",
     "scale_spectrum",
     "validate_dose_quantity_for_radiation_quantity_mode",
     "validate_dose_settings_for_radiation_quantity_mode",
     "validate_dose_unit_for_quantity",
+    "validate_spectrum_matches_product_kind",
 ]
