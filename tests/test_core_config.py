@@ -8,7 +8,7 @@ from radar.core.project import (
     OrbitConfig,
     ShieldingConfig,
 )
-from radar.core.types import OrbitType, ShieldGeometry, SolarActivityLevel
+from radar.core.types import DoseQuantity, OrbitType, ShieldGeometry, SolarActivityLevel
 from radar.core.units import Unit
 
 
@@ -23,6 +23,7 @@ def test_default_calculation_config() -> None:
     config = CalculationConfig(mission=mission, orbit=orbit)
 
     assert config.kp == 3
+    assert config.dose_quantity is DoseQuantity.ACCUMULATED_DOSE
     assert config.dose_unit is Unit.RAD
     assert config.shielding.geometry is ShieldGeometry.SPHERE
     assert config.shielding.thicknesses_g_cm2 == DEFAULT_SHIELD_THICKNESSES_G_CM2
@@ -44,6 +45,37 @@ def test_kp_default_and_range() -> None:
 
     with pytest.raises(ValueError, match="0..9"):
         CalculationConfig(mission=mission, orbit=orbit, kp=10)
+
+
+def test_dose_quantity_and_unit_must_match() -> None:
+    mission = MissionConfig(launch_year=2027, lifetime_years=15)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+
+    dose_rate_config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        dose_quantity=DoseQuantity.DOSE_RATE,
+        dose_unit=Unit.RAD_PER_SECOND,
+    )
+
+    assert dose_rate_config.dose_quantity is DoseQuantity.DOSE_RATE
+    assert dose_rate_config.dose_unit is Unit.RAD_PER_SECOND
+
+    with pytest.raises(ValueError, match="Accumulated"):
+        CalculationConfig(
+            mission=mission,
+            orbit=orbit,
+            dose_quantity=DoseQuantity.ACCUMULATED_DOSE,
+            dose_unit=Unit.RAD_PER_SECOND,
+        )
+
+    with pytest.raises(ValueError, match="Dose rate"):
+        CalculationConfig(
+            mission=mission,
+            orbit=orbit,
+            dose_quantity=DoseQuantity.DOSE_RATE,
+            dose_unit=Unit.RAD,
+        )
 
 
 def test_shielding_is_spherical_and_positive() -> None:

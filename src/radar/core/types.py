@@ -19,6 +19,13 @@ class RadiationSource(StrEnum):
     ERB = "erb"
 
 
+class RadiationQuantityMode(StrEnum):
+    """High-level calculation mode inherited from the source spectrum meaning."""
+
+    FLUENCE = "fluence"
+    FLUX = "flux"
+
+
 class SpectrumQuantity(StrEnum):
     """Supported spectrum quantity types."""
 
@@ -29,6 +36,13 @@ class SpectrumQuantity(StrEnum):
     MEAN_DIFFERENTIAL_FLUX = "mean_differential_flux"
     LET_DIFFERENTIAL_FLUENCE = "let_differential_fluence"
     LET_DIFFERENTIAL_FLUX = "let_differential_flux"
+
+
+class DoseQuantity(StrEnum):
+    """Supported dose result quantity types."""
+
+    ACCUMULATED_DOSE = "accumulated_dose"
+    DOSE_RATE = "dose_rate"
 
 
 class ShieldGeometry(StrEnum):

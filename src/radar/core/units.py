@@ -13,6 +13,7 @@ class Unit(StrEnum):
     LET = "MeV*cm^2/mg"
 
     SECOND = "s"
+    DAY = "day"
     YEAR = "year"
 
     THICKNESS = "g/cm^2"
@@ -23,3 +24,6 @@ class Unit(StrEnum):
     DIFFERENTIAL_LET_FLUX = "cm^-2 s^-1 (MeV*cm^2/mg)^-1"
 
     RAD = "rad"
+    RAD_PER_SECOND = "rad/s"
+    RAD_PER_DAY = "rad/day"
+    RAD_PER_YEAR = "rad/year"
