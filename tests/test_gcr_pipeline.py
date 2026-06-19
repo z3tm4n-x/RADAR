@@ -31,7 +31,7 @@ def _gcr_proton_spectrum() -> Spectrum1D:
         y=(1.0, 2.0, 3.0),
         x_unit=Unit.MEV,
         y_unit=Unit.DIFFERENTIAL_FLUX,
-        quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
         particle=Particle.PROTON,
         source=RadiationSource.GCR,
         model="gcr_proton_test",
@@ -44,7 +44,7 @@ def _gcr_hze_spectrum() -> Spectrum1D:
         y=(4.0, 5.0, 6.0),
         x_unit=Unit.GEV_PER_NUCLEON,
         y_unit=Unit.DIFFERENTIAL_FLUX,
-        quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
         particle=Particle.HZE,
         source=RadiationSource.GCR,
         model="gcr_hze_test",
@@ -135,7 +135,7 @@ def test_gcr_pipeline_result_validates_spectra() -> None:
         y=(1.0, 2.0, 3.0),
         x_unit=Unit.MEV,
         y_unit=Unit.DIFFERENTIAL_FLUX,
-        quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
         particle=Particle.ELECTRON,
         source=RadiationSource.GCR,
         model="bad_gcr_electron",
@@ -171,8 +171,8 @@ def test_gcr_pipeline_returns_model_products() -> None:
     )
 
     assert len(pipeline_result.products) == 2
-    assert pipeline_result.products[0].kind is RadiationProductKind.MODEL_FLUX
-    assert pipeline_result.products[1].kind is RadiationProductKind.MODEL_FLUX
+    assert pipeline_result.products[0].kind is RadiationProductKind.MEAN_FLUX
+    assert pipeline_result.products[1].kind is RadiationProductKind.MEAN_FLUX
     assert pipeline_result.products[0].spectrum == pipeline_result.spectra[0]
     assert pipeline_result.products[1].spectrum == pipeline_result.spectra[1]
 
@@ -193,11 +193,11 @@ def test_gcr_pipeline_result_rejects_mismatched_products() -> None:
             spectra=valid_result.spectra,
             products=(
                 SpectrumProduct(
-                    kind=RadiationProductKind.MODEL_FLUX,
+                    kind=RadiationProductKind.MEAN_FLUX,
                     spectrum=valid_result.spectra[1],
                 ),
                 SpectrumProduct(
-                    kind=RadiationProductKind.MODEL_FLUX,
+                    kind=RadiationProductKind.MEAN_FLUX,
                     spectrum=valid_result.spectra[0],
                 ),
             ),

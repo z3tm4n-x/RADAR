@@ -87,7 +87,11 @@ def _default_gcr_product_kind(spectrum: Spectrum1D) -> RadiationProductKind:
         return RadiationProductKind.MAXIMUM_FLUX
 
     if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUX:
-        return RadiationProductKind.MODEL_FLUX
+        msg = (
+            "GCR differential flux cannot be converted to a radiation product "
+            "without specifying mean or maximum flux."
+        )
+        raise ValueError(msg)
 
     msg = f"Unsupported GCR spectrum quantity: {spectrum.quantity}"
     raise ValueError(msg)

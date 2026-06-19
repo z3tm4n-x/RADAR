@@ -17,7 +17,7 @@ def _gcr_proton_flux_spectrum(
     *,
     particle: Particle = Particle.PROTON,
     source: RadiationSource = RadiationSource.GCR,
-    quantity: SpectrumQuantity = SpectrumQuantity.DIFFERENTIAL_FLUX,
+    quantity: SpectrumQuantity = SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
     x_unit: Unit = Unit.MEV,
     y_unit: Unit = Unit.DIFFERENTIAL_FLUX,
     x: tuple[float, ...] = (10.0, 100.0, 1000.0),
@@ -42,7 +42,7 @@ def _gcr_hze_flux_spectrum() -> Spectrum1D:
         y=(4.0, 5.0, 6.0),
         x_unit=Unit.GEV_PER_NUCLEON,
         y_unit=Unit.DIFFERENTIAL_FLUX,
-        quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
         particle=Particle.HZE,
         source=RadiationSource.GCR,
         model="test_gcr_hze",
@@ -220,9 +220,9 @@ def test_gcr_model_result_exposes_products() -> None:
 
     assert result.spectra == (proton_spectrum, hze_spectrum)
     assert len(result.products) == 2
-    assert result.products[0].kind is RadiationProductKind.MODEL_FLUX
+    assert result.products[0].kind is RadiationProductKind.MEAN_FLUX
     assert result.products[0].spectrum == proton_spectrum
-    assert result.products[1].kind is RadiationProductKind.MODEL_FLUX
+    assert result.products[1].kind is RadiationProductKind.MEAN_FLUX
     assert result.products[1].spectrum == hze_spectrum
 
 
@@ -241,8 +241,22 @@ def test_gcr_model_result_rejects_mismatched_products() -> None:
             document="test",
             products=(
                 SpectrumProduct(
-                    kind=RadiationProductKind.MODEL_FLUX,
+                    kind=RadiationProductKind.MEAN_FLUX,
                     spectrum=other_spectrum,
                 ),
             ),
+        )
+
+def test_gcr_model_result_rejects_ambiguous_differential_flux_product() -> None:
+    spectrum = _gcr_proton_flux_spectrum(
+        quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+    )
+
+    with pytest.raises(ValueError, match="without specifying mean or maximum flux"):
+        GcrModelResult(
+            spectra=(spectrum,),
+            lifetime_years=5,
+            model="test",
+            document="test",
         )
