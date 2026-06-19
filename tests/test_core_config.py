@@ -8,7 +8,13 @@ from radar.core.project import (
     OrbitConfig,
     ShieldingConfig,
 )
-from radar.core.types import DoseQuantity, OrbitType, ShieldGeometry, SolarActivityLevel
+from radar.core.types import (
+    DoseQuantity,
+    OrbitType,
+    RadiationQuantityMode,
+    ShieldGeometry,
+    SolarActivityLevel,
+)
 from radar.core.units import Unit
 
 
@@ -23,6 +29,7 @@ def test_default_calculation_config() -> None:
     config = CalculationConfig(mission=mission, orbit=orbit)
 
     assert config.kp == 3
+    assert config.radiation_quantity_mode is RadiationQuantityMode.FLUENCE
     assert config.dose_quantity is DoseQuantity.ACCUMULATED_DOSE
     assert config.dose_unit is Unit.RAD
     assert config.shielding.geometry is ShieldGeometry.SPHERE
@@ -47,32 +54,62 @@ def test_kp_default_and_range() -> None:
         CalculationConfig(mission=mission, orbit=orbit, kp=10)
 
 
-def test_dose_quantity_and_unit_must_match() -> None:
+def test_fluence_mode_requires_accumulated_dose_rad() -> None:
     mission = MissionConfig(launch_year=2027, lifetime_years=15)
     orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
 
-    dose_rate_config = CalculationConfig(
+    config = CalculationConfig(
         mission=mission,
         orbit=orbit,
+        radiation_quantity_mode=RadiationQuantityMode.FLUENCE,
+        dose_quantity=DoseQuantity.ACCUMULATED_DOSE,
+        dose_unit=Unit.RAD,
+    )
+
+    assert config.radiation_quantity_mode is RadiationQuantityMode.FLUENCE
+    assert config.dose_quantity is DoseQuantity.ACCUMULATED_DOSE
+    assert config.dose_unit is Unit.RAD
+
+    with pytest.raises(ValueError, match="Fluence mode"):
+        CalculationConfig(
+            mission=mission,
+            orbit=orbit,
+            radiation_quantity_mode=RadiationQuantityMode.FLUENCE,
+            dose_quantity=DoseQuantity.DOSE_RATE,
+            dose_unit=Unit.RAD_PER_SECOND,
+        )
+
+
+def test_flux_mode_requires_dose_rate_rad_per_second() -> None:
+    mission = MissionConfig(launch_year=2027, lifetime_years=15)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        radiation_quantity_mode=RadiationQuantityMode.FLUX,
         dose_quantity=DoseQuantity.DOSE_RATE,
         dose_unit=Unit.RAD_PER_SECOND,
     )
 
-    assert dose_rate_config.dose_quantity is DoseQuantity.DOSE_RATE
-    assert dose_rate_config.dose_unit is Unit.RAD_PER_SECOND
+    assert config.radiation_quantity_mode is RadiationQuantityMode.FLUX
+    assert config.dose_quantity is DoseQuantity.DOSE_RATE
+    assert config.dose_unit is Unit.RAD_PER_SECOND
 
-    with pytest.raises(ValueError, match="Accumulated"):
+    with pytest.raises(ValueError, match="Flux mode"):
         CalculationConfig(
             mission=mission,
             orbit=orbit,
+            radiation_quantity_mode=RadiationQuantityMode.FLUX,
             dose_quantity=DoseQuantity.ACCUMULATED_DOSE,
-            dose_unit=Unit.RAD_PER_SECOND,
+            dose_unit=Unit.RAD,
         )
 
     with pytest.raises(ValueError, match="Dose rate"):
         CalculationConfig(
             mission=mission,
             orbit=orbit,
+            radiation_quantity_mode=RadiationQuantityMode.FLUX,
             dose_quantity=DoseQuantity.DOSE_RATE,
             dose_unit=Unit.RAD,
         )

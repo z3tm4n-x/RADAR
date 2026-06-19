@@ -1,10 +1,14 @@
 ﻿"""RADAR calculation core."""
 
 from radar.core.dose_units import (
+    default_dose_unit_for_radiation_quantity_mode,
+    dose_quantity_for_radiation_quantity_mode,
     dose_quantity_for_spectrum_quantity,
     is_accumulated_dose_unit,
     is_dose_rate_unit,
     radiation_quantity_mode_for_spectrum_quantity,
+    validate_dose_quantity_for_radiation_quantity_mode,
+    validate_dose_settings_for_radiation_quantity_mode,
     validate_dose_unit_for_quantity,
 )
 from radar.core.log import CalculationLog, CalculationLogEntry, LogLevel
@@ -30,10 +34,14 @@ __all__ = [
     "Spectrum1D",
     "add_spectra",
     "check_spectra_compatible",
+    "default_dose_unit_for_radiation_quantity_mode",
+    "dose_quantity_for_radiation_quantity_mode",
     "dose_quantity_for_spectrum_quantity",
     "is_accumulated_dose_unit",
     "is_dose_rate_unit",
     "radiation_quantity_mode_for_spectrum_quantity",
     "scale_spectrum",
+    "validate_dose_quantity_for_radiation_quantity_mode",
+    "validate_dose_settings_for_radiation_quantity_mode",
     "validate_dose_unit_for_quantity",
 ]
