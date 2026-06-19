@@ -1,0 +1,143 @@
+﻿"""Solar energetic particle model interface."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Protocol
+
+from radar.core.project import MissionConfig
+from radar.core.spectra import Spectrum1D
+from radar.core.spectrum_ops import scale_spectrum
+from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.units import Unit
+
+
+def validate_sep_proton_fluence_spectrum(spectrum: Spectrum1D) -> None:
+    """Validate that a spectrum is a SEP proton differential fluence spectrum."""
+
+    if spectrum.particle is not Particle.PROTON:
+        msg = "SEP model spectrum must describe protons."
+        raise ValueError(msg)
+
+    if spectrum.source is not RadiationSource.SEP:
+        msg = "SEP model spectrum source must be SEP."
+        raise ValueError(msg)
+
+    if spectrum.quantity is not SpectrumQuantity.DIFFERENTIAL_FLUENCE:
+        msg = "SEP model spectrum quantity must be differential fluence."
+        raise ValueError(msg)
+
+    if spectrum.x_unit is not Unit.MEV:
+        msg = "SEP model energy grid must be in MeV."
+        raise ValueError(msg)
+
+    if spectrum.y_unit is not Unit.DIFFERENTIAL_FLUENCE:
+        msg = "SEP model spectrum values must use differential fluence units."
+        raise ValueError(msg)
+
+    if any(energy <= 0.0 for energy in spectrum.x):
+        msg = "SEP model energy grid values must be positive."
+        raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class SepModelInput:
+    """Input parameters passed to a SEP model."""
+
+    mission: MissionConfig
+
+    @property
+    def lifetime_years(self) -> int:
+        """Return mission lifetime in integer years."""
+
+        return self.mission.lifetime_years
+
+    @property
+    def exceedance_probability(self) -> float:
+        """Return SEP exceedance probability."""
+
+        return self.mission.sep_exceedance_probability
+
+
+@dataclass(frozen=True)
+class SepModelResult:
+    """Result returned by a SEP model."""
+
+    spectrum: Spectrum1D
+    lifetime_years: int
+    exceedance_probability: float
+    model: str
+    document: str
+
+    def __post_init__(self) -> None:
+        validate_sep_proton_fluence_spectrum(self.spectrum)
+
+        if not isinstance(self.lifetime_years, int):
+            msg = "SEP result lifetime must be an integer number of years."
+            raise ValueError(msg)
+
+        if self.lifetime_years < 1:
+            msg = "SEP result lifetime must be at least one year."
+            raise ValueError(msg)
+
+        if not 0.0 < self.exceedance_probability < 1.0:
+            msg = "SEP exceedance probability must be between 0 and 1."
+            raise ValueError(msg)
+
+        if not self.model:
+            msg = "SEP model name must not be empty."
+            raise ValueError(msg)
+
+        if not self.document:
+            msg = "SEP source document must not be empty."
+            raise ValueError(msg)
+
+
+class SepModelProtocol(Protocol):
+    """Protocol implemented by concrete SEP models."""
+
+    def calculate(self, model_input: SepModelInput) -> SepModelResult:
+        """Calculate mission SEP fluence spectrum."""
+
+
+@dataclass(frozen=True)
+class StaticSepModel:
+    """Simple deterministic SEP model used for tests and integration plumbing.
+
+    The input spectrum is interpreted as annual differential fluence.
+    The model scales it by integer mission lifetime.
+
+    Normative OST/GOST SEP models must be implemented separately.
+    """
+
+    annual_fluence_spectrum: Spectrum1D
+    model: str = "static_sep_model"
+    document: str = "test"
+
+    def __post_init__(self) -> None:
+        validate_sep_proton_fluence_spectrum(self.annual_fluence_spectrum)
+
+        if not self.model:
+            msg = "SEP model name must not be empty."
+            raise ValueError(msg)
+
+        if not self.document:
+            msg = "SEP source document must not be empty."
+            raise ValueError(msg)
+
+    def calculate(self, model_input: SepModelInput) -> SepModelResult:
+        """Return annual test fluence scaled by integer mission lifetime."""
+
+        mission_spectrum = scale_spectrum(
+            spectrum=self.annual_fluence_spectrum,
+            factor=float(model_input.lifetime_years),
+            model=f"{self.annual_fluence_spectrum.model}*{model_input.lifetime_years}years",
+        )
+
+        return SepModelResult(
+            spectrum=mission_spectrum,
+            lifetime_years=model_input.lifetime_years,
+            exceedance_probability=model_input.exceedance_probability,
+            model=self.model,
+            document=self.document,
+        )
