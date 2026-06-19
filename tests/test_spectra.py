@@ -46,3 +46,12 @@ def test_spectrum_values_must_be_non_negative() -> None:
             source=RadiationSource.SEP,
             model="test",
         )
+
+def test_daily_display_spectrum_units_exist() -> None:
+    from radar.core.units import Unit
+
+    assert Unit.DIFFERENTIAL_FLUENCE_PER_DAY.value == "cm^-2 day^-1 MeV^-1"
+    assert (
+        Unit.DIFFERENTIAL_LET_FLUENCE_PER_DAY.value
+        == "cm^-2 day^-1 (MeV*cm^2/mg)^-1"
+    )

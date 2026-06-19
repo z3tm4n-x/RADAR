@@ -7,7 +7,7 @@ from radar.core.units import Unit
 
 ACCUMULATED_DOSE_UNITS = (Unit.RAD,)
 
-DOSE_RATE_UNITS = (Unit.RAD_PER_SECOND,)
+DOSE_RATE_UNITS = (Unit.RAD_PER_SECOND, Unit.RAD_PER_DAY)
 
 FLUENCE_SPECTRUM_QUANTITIES = (
     SpectrumQuantity.DIFFERENTIAL_FLUENCE,
@@ -118,7 +118,7 @@ def validate_dose_unit_for_quantity(
 
     if dose_quantity is DoseQuantity.DOSE_RATE:
         if dose_unit not in DOSE_RATE_UNITS:
-            msg = "Dose rate unit must be rad/s."
+            msg = "Dose rate unit must be rad/s or rad/day."
             raise ValueError(msg)
 
         return

@@ -118,6 +118,11 @@ def test_validate_dose_rate_unit() -> None:
         dose_unit=Unit.RAD_PER_SECOND,
     )
 
+    validate_dose_unit_for_quantity(
+        dose_quantity=DoseQuantity.DOSE_RATE,
+        dose_unit=Unit.RAD_PER_DAY,
+    )
+
     with pytest.raises(ValueError, match="Dose rate"):
         validate_dose_unit_for_quantity(
             dose_quantity=DoseQuantity.DOSE_RATE,
@@ -149,6 +154,8 @@ def test_validate_dose_settings_for_radiation_quantity_mode() -> None:
 def test_dose_unit_predicates() -> None:
     assert is_accumulated_dose_unit(Unit.RAD) is True
     assert is_accumulated_dose_unit(Unit.RAD_PER_SECOND) is False
+    assert is_accumulated_dose_unit(Unit.RAD_PER_DAY) is False
 
     assert is_dose_rate_unit(Unit.RAD) is False
     assert is_dose_rate_unit(Unit.RAD_PER_SECOND) is True
+    assert is_dose_rate_unit(Unit.RAD_PER_DAY) is True
