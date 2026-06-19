@@ -161,3 +161,44 @@ def test_gcr_pipeline_result_rejects_empty_spectra() -> None:
             gcr_model_result=valid_result.gcr_model_result,
             spectra=(),
         )
+
+def test_gcr_pipeline_returns_model_products() -> None:
+    from radar.core.types import RadiationProductKind
+
+    pipeline_result = calculate_gcr_pipeline(
+        config=_config(lifetime_years=7),
+        gcr_model=_gcr_model(),
+    )
+
+    assert len(pipeline_result.products) == 2
+    assert pipeline_result.products[0].kind is RadiationProductKind.MODEL_FLUX
+    assert pipeline_result.products[1].kind is RadiationProductKind.MODEL_FLUX
+    assert pipeline_result.products[0].spectrum == pipeline_result.spectra[0]
+    assert pipeline_result.products[1].spectrum == pipeline_result.spectra[1]
+
+
+def test_gcr_pipeline_result_rejects_mismatched_products() -> None:
+    from radar.core.products import SpectrumProduct
+    from radar.core.types import RadiationProductKind
+
+    valid_result = calculate_gcr_pipeline(
+        config=_config(),
+        gcr_model=_gcr_model(),
+    )
+
+    with pytest.raises(ValueError, match="product spectra"):
+        GcrPipelineResult(
+            calculation_result=valid_result.calculation_result,
+            gcr_model_result=valid_result.gcr_model_result,
+            spectra=valid_result.spectra,
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.MODEL_FLUX,
+                    spectrum=valid_result.spectra[1],
+                ),
+                SpectrumProduct(
+                    kind=RadiationProductKind.MODEL_FLUX,
+                    spectrum=valid_result.spectra[0],
+                ),
+            ),
+        )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from radar.core.log import LogLevel
+from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
@@ -27,6 +28,7 @@ class ErbPipelineResult:
     calculation_result: CalculationResult
     erb_model_result: ErbModelResult
     spectra: tuple[Spectrum1D, ...]
+    products: tuple[SpectrumProduct, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.spectra:
@@ -35,6 +37,18 @@ class ErbPipelineResult:
 
         for spectrum in self.spectra:
             validate_erb_energy_spectrum(spectrum)
+
+        products = self.products or self.erb_model_result.products
+
+        if not products:
+            msg = "ERB pipeline result must contain at least one radiation product."
+            raise ValueError(msg)
+
+        if tuple(product.spectrum for product in products) != self.spectra:
+            msg = "ERB pipeline product spectra must match pipeline spectra."
+            raise ValueError(msg)
+
+        object.__setattr__(self, "products", products)
 
 
 def calculate_erb_pipeline(
@@ -106,4 +120,5 @@ def calculate_erb_pipeline(
         calculation_result=calculation_result,
         erb_model_result=erb_model_result,
         spectra=erb_model_result.spectra,
+        products=erb_model_result.products,
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from radar.core.log import LogLevel
+from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
@@ -27,6 +28,7 @@ class GcrPipelineResult:
     calculation_result: CalculationResult
     gcr_model_result: GcrModelResult
     spectra: tuple[Spectrum1D, ...]
+    products: tuple[SpectrumProduct, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.spectra:
@@ -35,6 +37,18 @@ class GcrPipelineResult:
 
         for spectrum in self.spectra:
             validate_gcr_energy_spectrum(spectrum)
+
+        products = self.products or self.gcr_model_result.products
+
+        if not products:
+            msg = "GCR pipeline result must contain at least one radiation product."
+            raise ValueError(msg)
+
+        if tuple(product.spectrum for product in products) != self.spectra:
+            msg = "GCR pipeline product spectra must match pipeline spectra."
+            raise ValueError(msg)
+
+        object.__setattr__(self, "products", products)
 
 
 def calculate_gcr_pipeline(
@@ -57,7 +71,6 @@ def calculate_gcr_pipeline(
         details={
             "launch_year": str(config.mission.launch_year),
             "lifetime_years": str(config.mission.lifetime_years),
-            "solar_activity_level": config.mission.solar_activity_level.value,
         },
     )
 
@@ -105,4 +118,5 @@ def calculate_gcr_pipeline(
         calculation_result=calculation_result,
         gcr_model_result=gcr_model_result,
         spectra=gcr_model_result.spectra,
+        products=gcr_model_result.products,
     )

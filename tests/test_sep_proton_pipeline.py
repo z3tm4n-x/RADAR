@@ -147,3 +147,46 @@ def test_sep_proton_pipeline_result_validates_spectra() -> None:
             raw_spectrum=bad_spectrum,
             penetrated_spectrum=valid_result.penetrated_spectrum,
         )
+
+def test_sep_proton_pipeline_exposes_raw_and_penetrated_products() -> None:
+    from radar.core.types import RadiationProductKind
+
+    pipeline_result = calculate_sep_proton_pipeline(
+        config=_config(lifetime_years=5),
+        sep_model=_sep_model(),
+        penetration=_penetration(),
+    )
+
+    assert pipeline_result.raw_product is not None
+    assert pipeline_result.penetrated_product is not None
+    assert pipeline_result.raw_product.kind is RadiationProductKind.MISSION_FLUENCE
+    assert pipeline_result.penetrated_product.kind is RadiationProductKind.MISSION_FLUENCE
+    assert pipeline_result.raw_product.spectrum == pipeline_result.raw_spectrum
+    assert (
+        pipeline_result.penetrated_product.spectrum
+        == pipeline_result.penetrated_spectrum
+    )
+
+
+def test_sep_proton_pipeline_result_rejects_mismatched_product() -> None:
+    from radar.core.products import SpectrumProduct
+    from radar.core.types import RadiationProductKind
+
+    valid_result = calculate_sep_proton_pipeline(
+        config=_config(),
+        sep_model=_sep_model(),
+        penetration=_penetration(),
+    )
+
+    with pytest.raises(ValueError, match="penetrated product spectrum"):
+        SepProtonPipelineResult(
+            calculation_result=valid_result.calculation_result,
+            sep_model_result=valid_result.sep_model_result,
+            raw_spectrum=valid_result.raw_spectrum,
+            penetrated_spectrum=valid_result.penetrated_spectrum,
+            raw_product=valid_result.raw_product,
+            penetrated_product=SpectrumProduct(
+                kind=RadiationProductKind.MISSION_FLUENCE,
+                spectrum=valid_result.raw_spectrum,
+            ),
+        )

@@ -162,3 +162,44 @@ def test_erb_pipeline_result_rejects_empty_spectra() -> None:
             erb_model_result=valid_result.erb_model_result,
             spectra=(),
         )
+
+def test_erb_pipeline_returns_model_products() -> None:
+    from radar.core.types import RadiationProductKind
+
+    pipeline_result = calculate_erb_pipeline(
+        config=_config(lifetime_years=7, kp=4),
+        erb_model=_erb_model(),
+    )
+
+    assert len(pipeline_result.products) == 2
+    assert pipeline_result.products[0].kind is RadiationProductKind.ORBIT_AVERAGED_FLUX
+    assert pipeline_result.products[1].kind is RadiationProductKind.MEAN_FLUX
+    assert pipeline_result.products[0].spectrum == pipeline_result.spectra[0]
+    assert pipeline_result.products[1].spectrum == pipeline_result.spectra[1]
+
+
+def test_erb_pipeline_result_rejects_mismatched_products() -> None:
+    from radar.core.products import SpectrumProduct
+    from radar.core.types import RadiationProductKind
+
+    valid_result = calculate_erb_pipeline(
+        config=_config(),
+        erb_model=_erb_model(),
+    )
+
+    with pytest.raises(ValueError, match="product spectra"):
+        ErbPipelineResult(
+            calculation_result=valid_result.calculation_result,
+            erb_model_result=valid_result.erb_model_result,
+            spectra=valid_result.spectra,
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.MEAN_FLUX,
+                    spectrum=valid_result.spectra[1],
+                ),
+                SpectrumProduct(
+                    kind=RadiationProductKind.ORBIT_AVERAGED_FLUX,
+                    spectrum=valid_result.spectra[0],
+                ),
+            ),
+        )
