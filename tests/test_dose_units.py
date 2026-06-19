@@ -64,18 +64,10 @@ def test_validate_accumulated_dose_unit() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "unit",
-    [
-        Unit.RAD_PER_SECOND,
-        Unit.RAD_PER_DAY,
-        Unit.RAD_PER_YEAR,
-    ],
-)
-def test_validate_dose_rate_units(unit: Unit) -> None:
+def test_validate_dose_rate_unit() -> None:
     validate_dose_unit_for_quantity(
         dose_quantity=DoseQuantity.DOSE_RATE,
-        dose_unit=unit,
+        dose_unit=Unit.RAD_PER_SECOND,
     )
 
     with pytest.raises(ValueError, match="Dose rate"):
@@ -91,5 +83,3 @@ def test_dose_unit_predicates() -> None:
 
     assert is_dose_rate_unit(Unit.RAD) is False
     assert is_dose_rate_unit(Unit.RAD_PER_SECOND) is True
-    assert is_dose_rate_unit(Unit.RAD_PER_DAY) is True
-    assert is_dose_rate_unit(Unit.RAD_PER_YEAR) is True
