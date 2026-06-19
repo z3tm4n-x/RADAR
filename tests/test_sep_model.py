@@ -176,3 +176,40 @@ def test_sep_model_result_requires_document() -> None:
             model="test",
             document="",
         )
+
+def test_sep_model_result_exposes_mission_fluence_product() -> None:
+    from radar.core.types import RadiationProductKind
+
+    result = StaticSepModel(
+        annual_fluence_spectrum=_sep_proton_fluence_spectrum(),
+        model="static_test",
+        document="test_document",
+    ).calculate(SepModelInput(mission=_mission(lifetime_years=5)))
+
+    assert len(result.products) == 1
+    assert result.product is result.products[0]
+    assert result.product.kind is RadiationProductKind.MISSION_FLUENCE
+    assert result.product.spectrum == result.spectrum
+
+
+def test_sep_model_result_rejects_mismatched_product() -> None:
+    from radar.core.products import SpectrumProduct
+    from radar.core.types import RadiationProductKind
+
+    spectrum = _sep_proton_fluence_spectrum()
+    other_spectrum = _sep_proton_fluence_spectrum(model="other")
+
+    with pytest.raises(ValueError, match="product spectrum"):
+        SepModelResult(
+            spectrum=spectrum,
+            lifetime_years=5,
+            exceedance_probability=0.1,
+            model="test",
+            document="test",
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.MISSION_FLUENCE,
+                    spectrum=other_spectrum,
+                ),
+            ),
+        )

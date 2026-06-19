@@ -205,3 +205,44 @@ def test_gcr_model_result_requires_document() -> None:
             model="test",
             document="",
         )
+
+def test_gcr_model_result_exposes_products() -> None:
+    from radar.core.types import RadiationProductKind
+
+    proton_spectrum = _gcr_proton_flux_spectrum()
+    hze_spectrum = _gcr_hze_flux_spectrum()
+
+    result = StaticGcrModel(
+        spectra=(proton_spectrum, hze_spectrum),
+        model="static_test",
+        document="test_document",
+    ).calculate(GcrModelInput(mission=_mission(lifetime_years=5)))
+
+    assert result.spectra == (proton_spectrum, hze_spectrum)
+    assert len(result.products) == 2
+    assert result.products[0].kind is RadiationProductKind.MODEL_FLUX
+    assert result.products[0].spectrum == proton_spectrum
+    assert result.products[1].kind is RadiationProductKind.MODEL_FLUX
+    assert result.products[1].spectrum == hze_spectrum
+
+
+def test_gcr_model_result_rejects_mismatched_products() -> None:
+    from radar.core.products import SpectrumProduct
+    from radar.core.types import RadiationProductKind
+
+    spectrum = _gcr_proton_flux_spectrum()
+    other_spectrum = _gcr_hze_flux_spectrum()
+
+    with pytest.raises(ValueError, match="product spectra"):
+        GcrModelResult(
+            spectra=(spectrum,),
+            lifetime_years=5,
+            model="test",
+            document="test",
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.MODEL_FLUX,
+                    spectrum=other_spectrum,
+                ),
+            ),
+        )

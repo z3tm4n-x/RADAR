@@ -5,9 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from radar.core.products import SpectrumProduct
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 
 GCR_ALLOWED_PARTICLES = (
@@ -23,6 +29,7 @@ GCR_ALLOWED_X_UNITS = (
 GCR_ALLOWED_QUANTITIES = (
     SpectrumQuantity.DIFFERENTIAL_FLUX,
     SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
     SpectrumQuantity.DIFFERENTIAL_FLUENCE,
 )
 
@@ -50,14 +57,13 @@ def validate_gcr_energy_spectrum(spectrum: Spectrum1D) -> None:
         msg = "GCR model energy grid must be in MeV or GeV/nucleon."
         raise ValueError(msg)
 
-    if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUX:
+    if spectrum.quantity in (
+        SpectrumQuantity.DIFFERENTIAL_FLUX,
+        SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+        SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
+    ):
         if spectrum.y_unit is not Unit.DIFFERENTIAL_FLUX:
             msg = "GCR differential flux spectrum values must use differential flux units."
-            raise ValueError(msg)
-
-    if spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX:
-        if spectrum.y_unit is not Unit.DIFFERENTIAL_FLUX:
-            msg = "GCR mean differential flux spectrum values must use differential flux units."
             raise ValueError(msg)
 
     if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE:
@@ -68,6 +74,34 @@ def validate_gcr_energy_spectrum(spectrum: Spectrum1D) -> None:
     if any(energy <= 0.0 for energy in spectrum.x):
         msg = "GCR model energy grid values must be positive."
         raise ValueError(msg)
+
+
+def _default_gcr_product_kind(spectrum: Spectrum1D) -> RadiationProductKind:
+    if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE:
+        return RadiationProductKind.MISSION_FLUENCE
+
+    if spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX:
+        return RadiationProductKind.MEAN_FLUX
+
+    if spectrum.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX:
+        return RadiationProductKind.MAXIMUM_FLUX
+
+    if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUX:
+        return RadiationProductKind.MODEL_FLUX
+
+    msg = f"Unsupported GCR spectrum quantity: {spectrum.quantity}"
+    raise ValueError(msg)
+
+
+def _default_gcr_products(spectra: tuple[Spectrum1D, ...]) -> tuple[SpectrumProduct, ...]:
+    return tuple(
+        SpectrumProduct(
+            kind=_default_gcr_product_kind(spectrum),
+            spectrum=spectrum,
+            label=f"GCR {spectrum.particle.value} {spectrum.quantity.value}",
+        )
+        for spectrum in spectra
+    )
 
 
 @dataclass(frozen=True)
@@ -97,6 +131,7 @@ class GcrModelResult:
     lifetime_years: int
     model: str
     document: str
+    products: tuple[SpectrumProduct, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.spectra:
@@ -105,6 +140,18 @@ class GcrModelResult:
 
         for spectrum in self.spectra:
             validate_gcr_energy_spectrum(spectrum)
+
+        products = self.products or _default_gcr_products(self.spectra)
+
+        if not products:
+            msg = "GCR model result must contain at least one radiation product."
+            raise ValueError(msg)
+
+        if tuple(product.spectrum for product in products) != self.spectra:
+            msg = "GCR model product spectra must match result spectra."
+            raise ValueError(msg)
+
+        object.__setattr__(self, "products", products)
 
         if not isinstance(self.lifetime_years, int):
             msg = "GCR result lifetime must be an integer number of years."

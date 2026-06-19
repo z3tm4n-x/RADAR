@@ -23,6 +23,7 @@ FLUENCE_PRODUCT_KINDS = (
 )
 
 FLUX_PRODUCT_KINDS = (
+    RadiationProductKind.MODEL_FLUX,
     RadiationProductKind.ORBIT_AVERAGED_FLUX,
     RadiationProductKind.MEAN_FLUX,
     RadiationProductKind.MAXIMUM_FLUX,
@@ -38,6 +39,9 @@ PRODUCT_KIND_SPECTRUM_QUANTITIES: dict[
 ] = {
     RadiationProductKind.MISSION_FLUENCE: (
         SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+    ),
+    RadiationProductKind.MODEL_FLUX: (
+        SpectrumQuantity.DIFFERENTIAL_FLUX,
     ),
     RadiationProductKind.ORBIT_AVERAGED_FLUX: (
         SpectrumQuantity.DIFFERENTIAL_FLUX,

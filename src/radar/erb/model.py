@@ -5,9 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 
 ERB_ALLOWED_PARTICLES = (
@@ -51,6 +57,34 @@ def validate_erb_energy_spectrum(spectrum: Spectrum1D) -> None:
         raise ValueError(msg)
 
 
+def _default_erb_product_kind(spectrum: Spectrum1D) -> RadiationProductKind:
+    if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUX:
+        return RadiationProductKind.ORBIT_AVERAGED_FLUX
+
+    if spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX:
+        return RadiationProductKind.MEAN_FLUX
+
+    if spectrum.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX:
+        return RadiationProductKind.MAXIMUM_FLUX
+
+    if spectrum.quantity is SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX:
+        return RadiationProductKind.PEAK_FLUX
+
+    msg = f"Unsupported ERB spectrum quantity: {spectrum.quantity}"
+    raise ValueError(msg)
+
+
+def _default_erb_products(spectra: tuple[Spectrum1D, ...]) -> tuple[SpectrumProduct, ...]:
+    return tuple(
+        SpectrumProduct(
+            kind=_default_erb_product_kind(spectrum),
+            spectrum=spectrum,
+            label=f"ERB {spectrum.particle.value} {spectrum.quantity.value}",
+        )
+        for spectrum in spectra
+    )
+
+
 @dataclass(frozen=True)
 class ErbModelInput:
     """Input parameters passed to an ERB model."""
@@ -79,6 +113,7 @@ class ErbModelResult:
     kp: int
     model: str
     document: str
+    products: tuple[SpectrumProduct, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.spectra:
@@ -87,6 +122,18 @@ class ErbModelResult:
 
         for spectrum in self.spectra:
             validate_erb_energy_spectrum(spectrum)
+
+        products = self.products or _default_erb_products(self.spectra)
+
+        if not products:
+            msg = "ERB model result must contain at least one radiation product."
+            raise ValueError(msg)
+
+        if tuple(product.spectrum for product in products) != self.spectra:
+            msg = "ERB model product spectra must match result spectra."
+            raise ValueError(msg)
+
+        object.__setattr__(self, "products", products)
 
         if not isinstance(self.lifetime_years, int):
             msg = "ERB result lifetime must be an integer number of years."

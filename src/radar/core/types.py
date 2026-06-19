@@ -30,6 +30,7 @@ class RadiationProductKind(StrEnum):
     """Named radiation products required by OST/GOST calculation chains."""
 
     MISSION_FLUENCE = "mission_fluence"
+    MODEL_FLUX = "model_flux"
     ORBIT_AVERAGED_FLUX = "orbit_averaged_flux"
     MEAN_FLUX = "mean_flux"
     MAXIMUM_FLUX = "maximum_flux"

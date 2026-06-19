@@ -216,3 +216,69 @@ def test_erb_model_result_requires_document() -> None:
             model="test",
             document="",
         )
+
+def test_erb_model_result_exposes_products() -> None:
+    from radar.core.types import RadiationProductKind
+
+    proton_spectrum = _erb_proton_flux_spectrum()
+    electron_spectrum = _erb_electron_flux_spectrum()
+
+    result = StaticErbModel(
+        spectra=(proton_spectrum, electron_spectrum),
+        model="static_test",
+        document="test_document",
+    ).calculate(ErbModelInput(config=_config(lifetime_years=5, kp=3)))
+
+    assert result.spectra == (proton_spectrum, electron_spectrum)
+    assert len(result.products) == 2
+    assert result.products[0].kind is RadiationProductKind.ORBIT_AVERAGED_FLUX
+    assert result.products[0].spectrum == proton_spectrum
+    assert result.products[1].kind is RadiationProductKind.ORBIT_AVERAGED_FLUX
+    assert result.products[1].spectrum == electron_spectrum
+
+
+def test_erb_model_result_maps_peak_maximum_and_mean_products() -> None:
+    from radar.core.types import RadiationProductKind
+
+    peak_spectrum = _erb_flux_spectrum(quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX)
+    maximum_spectrum = _erb_flux_spectrum(
+        quantity=SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
+    )
+    mean_spectrum = _erb_flux_spectrum(quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX)
+
+    result = ErbModelResult(
+        spectra=(peak_spectrum, maximum_spectrum, mean_spectrum),
+        lifetime_years=5,
+        kp=3,
+        model="test",
+        document="test",
+    )
+
+    assert tuple(product.kind for product in result.products) == (
+        RadiationProductKind.PEAK_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MEAN_FLUX,
+    )
+
+
+def test_erb_model_result_rejects_mismatched_products() -> None:
+    from radar.core.products import SpectrumProduct
+    from radar.core.types import RadiationProductKind
+
+    spectrum = _erb_proton_flux_spectrum()
+    other_spectrum = _erb_electron_flux_spectrum()
+
+    with pytest.raises(ValueError, match="product spectra"):
+        ErbModelResult(
+            spectra=(spectrum,),
+            lifetime_years=5,
+            kp=3,
+            model="test",
+            document="test",
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.ORBIT_AVERAGED_FLUX,
+                    spectrum=other_spectrum,
+                ),
+            ),
+        )

@@ -5,10 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from radar.core.products import SpectrumProduct
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
 from radar.core.spectrum_ops import scale_spectrum
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 
 
@@ -40,6 +46,14 @@ def validate_sep_proton_fluence_spectrum(spectrum: Spectrum1D) -> None:
         raise ValueError(msg)
 
 
+def _mission_fluence_product(spectrum: Spectrum1D) -> SpectrumProduct:
+    return SpectrumProduct(
+        kind=RadiationProductKind.MISSION_FLUENCE,
+        spectrum=spectrum,
+        label="SEP proton mission fluence",
+    )
+
+
 @dataclass(frozen=True)
 class SepModelInput:
     """Input parameters passed to a SEP model."""
@@ -68,9 +82,28 @@ class SepModelResult:
     exceedance_probability: float
     model: str
     document: str
+    products: tuple[SpectrumProduct, ...] = ()
 
     def __post_init__(self) -> None:
         validate_sep_proton_fluence_spectrum(self.spectrum)
+
+        products = self.products or (_mission_fluence_product(self.spectrum),)
+
+        if len(products) != 1:
+            msg = "SEP model result must contain exactly one radiation product."
+            raise ValueError(msg)
+
+        product = products[0]
+
+        if product.kind is not RadiationProductKind.MISSION_FLUENCE:
+            msg = "SEP model product must be mission fluence."
+            raise ValueError(msg)
+
+        if product.spectrum != self.spectrum:
+            msg = "SEP model product spectrum must match result spectrum."
+            raise ValueError(msg)
+
+        object.__setattr__(self, "products", products)
 
         if not isinstance(self.lifetime_years, int):
             msg = "SEP result lifetime must be an integer number of years."
@@ -91,6 +124,12 @@ class SepModelResult:
         if not self.document:
             msg = "SEP source document must not be empty."
             raise ValueError(msg)
+
+    @property
+    def product(self) -> SpectrumProduct:
+        """Return the SEP mission fluence product."""
+
+        return self.products[0]
 
 
 class SepModelProtocol(Protocol):
