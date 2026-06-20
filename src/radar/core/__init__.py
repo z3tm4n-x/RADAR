@@ -12,12 +12,18 @@ from radar.core.dose_units import (
     validate_dose_unit_for_quantity,
 )
 from radar.core.log import CalculationLog, CalculationLogEntry, LogLevel
+from radar.core.product_display import (
+    average_daily_spectrum_for_mission_years,
+    average_daily_spectrum_for_product,
+    daily_display_unit_for_product_kind,
+)
 from radar.core.products import (
     SpectrumProduct,
     allowed_spectrum_quantities_for_product_kind,
     default_dose_unit_for_product_kind,
     dose_quantity_for_product_kind,
     radiation_quantity_mode_for_product_kind,
+    expected_spectrum_unit_for_product_kind,
     validate_spectrum_matches_product_kind,
 )
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
@@ -42,10 +48,14 @@ __all__ = [
     "ShieldingConfig",
     "Spectrum1D",
     "SpectrumProduct",
+    "average_daily_spectrum_for_mission_years",
+    "average_daily_spectrum_for_product",
     "add_spectra",
     "allowed_spectrum_quantities_for_product_kind",
     "check_spectra_compatible",
+    "daily_display_unit_for_product_kind",
     "default_dose_unit_for_product_kind",
+    "expected_spectrum_unit_for_product_kind",
     "default_dose_unit_for_radiation_quantity_mode",
     "dose_quantity_for_product_kind",
     "dose_quantity_for_radiation_quantity_mode",
