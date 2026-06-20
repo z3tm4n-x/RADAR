@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from radar.core.products import SpectrumProduct
+from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
 from radar.core.spectrum_ops import scale_spectrum
@@ -98,6 +99,11 @@ class SepModelResult:
         if product.kind is not RadiationProductKind.MISSION_FLUENCE:
             msg = "SEP model product must be mission fluence."
             raise ValueError(msg)
+
+        validate_product_allowed_for_source(
+            product=product,
+            source=RadiationSource.SEP,
+        )
 
         if product.spectrum != self.spectrum:
             msg = "SEP model product spectrum must match result spectrum."

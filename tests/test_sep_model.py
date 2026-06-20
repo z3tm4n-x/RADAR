@@ -1,8 +1,15 @@
 ﻿import pytest
 
+from radar.core.products import SpectrumProduct
+
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.sep.model import (
     SepModelInput,
@@ -220,4 +227,32 @@ def test_validate_sep_proton_fluence_spectrum_rejects_daily_display_unit() -> No
             _sep_proton_fluence_spectrum(
                 y_unit=Unit.DIFFERENTIAL_FLUENCE_PER_DAY,
             )
+        )
+
+def test_sep_model_result_rejects_product_with_wrong_source() -> None:
+    spectrum = _sep_proton_fluence_spectrum()
+    wrong_source_spectrum = Spectrum1D(
+        x=spectrum.x,
+        y=spectrum.y,
+        x_unit=spectrum.x_unit,
+        y_unit=spectrum.y_unit,
+        quantity=spectrum.quantity,
+        particle=spectrum.particle,
+        source=RadiationSource.GCR,
+        model=spectrum.model,
+    )
+
+    with pytest.raises(ValueError, match="spectrum source"):
+        SepModelResult(
+            spectrum=spectrum,
+            lifetime_years=5,
+            exceedance_probability=0.9,
+            model="test",
+            document="test",
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.MISSION_FLUENCE,
+                    spectrum=wrong_source_spectrum,
+                ),
+            ),
         )

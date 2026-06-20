@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from radar.core.products import SpectrumProduct
+from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
 from radar.core.types import (
@@ -150,6 +151,12 @@ class GcrModelResult:
         if not products:
             msg = "GCR model result must contain at least one radiation product."
             raise ValueError(msg)
+
+        for product in products:
+            validate_product_allowed_for_source(
+                product=product,
+                source=RadiationSource.GCR,
+            )
 
         if tuple(product.spectrum for product in products) != self.spectra:
             msg = "GCR model product spectra must match result spectra."

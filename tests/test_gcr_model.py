@@ -1,8 +1,15 @@
 ﻿import pytest
 
+from radar.core.products import SpectrumProduct
+
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.gcr.model import (
     GcrModelInput,
@@ -268,4 +275,34 @@ def test_validate_gcr_energy_spectrum_rejects_daily_display_fluence_unit() -> No
                 quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
                 y_unit=Unit.DIFFERENTIAL_FLUENCE_PER_DAY,
             )
+        )
+
+def test_gcr_model_result_rejects_product_with_wrong_source() -> None:
+    spectrum = _gcr_proton_flux_spectrum(
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+    )
+    wrong_source_spectrum = Spectrum1D(
+        x=spectrum.x,
+        y=spectrum.y,
+        x_unit=spectrum.x_unit,
+        y_unit=spectrum.y_unit,
+        quantity=spectrum.quantity,
+        particle=spectrum.particle,
+        source=RadiationSource.SEP,
+        model=spectrum.model,
+    )
+
+    with pytest.raises(ValueError, match="spectrum source"):
+        GcrModelResult(
+            spectra=(spectrum,),
+            lifetime_years=5,
+            model="test",
+            document="test",
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.MEAN_FLUX,
+                    spectrum=wrong_source_spectrum,
+                ),
+            ),
         )

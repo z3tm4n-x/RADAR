@@ -1,8 +1,15 @@
 ﻿import pytest
 
+from radar.core.products import SpectrumProduct
+
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.erb.model import (
     ErbModelInput,
@@ -279,6 +286,37 @@ def test_erb_model_result_rejects_mismatched_products() -> None:
                 SpectrumProduct(
                     kind=RadiationProductKind.ORBIT_AVERAGED_FLUX,
                     spectrum=other_spectrum,
+                ),
+            ),
+        )
+
+def test_erb_model_result_rejects_product_with_wrong_source() -> None:
+    spectrum = _erb_flux_spectrum(
+        quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+    )
+    wrong_source_spectrum = Spectrum1D(
+        x=spectrum.x,
+        y=spectrum.y,
+        x_unit=spectrum.x_unit,
+        y_unit=spectrum.y_unit,
+        quantity=spectrum.quantity,
+        particle=spectrum.particle,
+        source=RadiationSource.SEP,
+        model=spectrum.model,
+    )
+
+    with pytest.raises(ValueError, match="spectrum source"):
+        ErbModelResult(
+            spectra=(spectrum,),
+            lifetime_years=5,
+            kp=2,
+            model="test",
+            document="test",
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.ORBIT_AVERAGED_FLUX,
+                    spectrum=wrong_source_spectrum,
                 ),
             ),
         )

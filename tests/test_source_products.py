@@ -1,0 +1,122 @@
+﻿import pytest
+
+from radar.core.source_products import (
+    allowed_product_kinds_for_source,
+    is_product_kind_allowed_for_source,
+    validate_product_allowed_for_source,
+    validate_product_kind_allowed_for_source,
+)
+from radar.core.products import SpectrumProduct
+from radar.core.spectra import Spectrum1D
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
+from radar.core.units import Unit
+
+
+def _sep_mission_fluence_product() -> SpectrumProduct:
+    return SpectrumProduct(
+        kind=RadiationProductKind.MISSION_FLUENCE,
+        spectrum=Spectrum1D(
+            x=(1.0, 2.0, 3.0),
+            y=(4.0, 5.0, 6.0),
+            x_unit=Unit.MEV,
+            y_unit=Unit.DIFFERENTIAL_FLUENCE,
+            quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+            particle=Particle.PROTON,
+            source=RadiationSource.SEP,
+            model="sep",
+        ),
+    )
+
+
+def _gcr_mission_fluence_product() -> SpectrumProduct:
+    return SpectrumProduct(
+        kind=RadiationProductKind.MISSION_FLUENCE,
+        spectrum=Spectrum1D(
+            x=(1.0, 2.0, 3.0),
+            y=(4.0, 5.0, 6.0),
+            x_unit=Unit.MEV,
+            y_unit=Unit.DIFFERENTIAL_FLUENCE,
+            quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+            particle=Particle.PROTON,
+            source=RadiationSource.GCR,
+            model="gcr",
+        ),
+    )
+
+
+def test_sep_allowed_products() -> None:
+    assert allowed_product_kinds_for_source(RadiationSource.SEP) == (
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.PEAK_FLUX,
+    )
+
+
+def test_gcr_allowed_products() -> None:
+    assert allowed_product_kinds_for_source(RadiationSource.GCR) == (
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_LET_FLUENCE,
+        RadiationProductKind.MEAN_LET_FLUX,
+        RadiationProductKind.MAXIMUM_LET_FLUX,
+    )
+
+
+def test_erb_allowed_products() -> None:
+    assert allowed_product_kinds_for_source(RadiationSource.ERB) == (
+        RadiationProductKind.ORBIT_AVERAGED_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.PEAK_FLUX,
+    )
+
+
+def test_product_kind_allowed_for_source_predicate() -> None:
+    assert (
+        is_product_kind_allowed_for_source(
+            product_kind=RadiationProductKind.PEAK_FLUX,
+            source=RadiationSource.SEP,
+        )
+        is True
+    )
+    assert (
+        is_product_kind_allowed_for_source(
+            product_kind=RadiationProductKind.PEAK_LET_FLUX,
+            source=RadiationSource.SEP,
+        )
+        is False
+    )
+
+
+def test_validate_product_kind_allowed_for_source() -> None:
+    validate_product_kind_allowed_for_source(
+        product_kind=RadiationProductKind.MISSION_FLUENCE,
+        source=RadiationSource.SEP,
+    )
+
+    with pytest.raises(ValueError, match="not allowed"):
+        validate_product_kind_allowed_for_source(
+            product_kind=RadiationProductKind.PEAK_LET_FLUX,
+            source=RadiationSource.SEP,
+        )
+
+
+def test_validate_product_allowed_for_source() -> None:
+    validate_product_allowed_for_source(
+        product=_sep_mission_fluence_product(),
+        source=RadiationSource.SEP,
+    )
+
+
+def test_validate_product_allowed_for_source_rejects_wrong_spectrum_source() -> None:
+    with pytest.raises(ValueError, match="spectrum source"):
+        validate_product_allowed_for_source(
+            product=_gcr_mission_fluence_product(),
+            source=RadiationSource.SEP,
+        )
