@@ -65,6 +65,18 @@ PRODUCT_KIND_SPECTRUM_QUANTITIES: dict[
     ),
 }
 
+PRODUCT_KIND_SPECTRUM_UNITS: dict[RadiationProductKind, Unit] = {
+    RadiationProductKind.MISSION_FLUENCE: Unit.DIFFERENTIAL_FLUENCE,
+    RadiationProductKind.ORBIT_AVERAGED_FLUX: Unit.DIFFERENTIAL_FLUX,
+    RadiationProductKind.MEAN_FLUX: Unit.DIFFERENTIAL_FLUX,
+    RadiationProductKind.MAXIMUM_FLUX: Unit.DIFFERENTIAL_FLUX,
+    RadiationProductKind.PEAK_FLUX: Unit.DIFFERENTIAL_FLUX,
+    RadiationProductKind.MISSION_LET_FLUENCE: Unit.DIFFERENTIAL_LET_FLUENCE,
+    RadiationProductKind.MEAN_LET_FLUX: Unit.DIFFERENTIAL_LET_FLUX,
+    RadiationProductKind.MAXIMUM_LET_FLUX: Unit.DIFFERENTIAL_LET_FLUX,
+    RadiationProductKind.PEAK_LET_FLUX: Unit.DIFFERENTIAL_LET_FLUX,
+}
+
 
 def radiation_quantity_mode_for_product_kind(
     product_kind: RadiationProductKind,
@@ -109,24 +121,44 @@ def allowed_spectrum_quantities_for_product_kind(
         raise ValueError(msg) from exc
 
 
+def expected_spectrum_unit_for_product_kind(
+    product_kind: RadiationProductKind,
+) -> Unit:
+    """Return required model spectrum y-unit for a radiation product kind."""
+
+    try:
+        return PRODUCT_KIND_SPECTRUM_UNITS[product_kind]
+    except KeyError as exc:
+        msg = f"Unsupported radiation product kind: {product_kind}"
+        raise ValueError(msg) from exc
+
+
 def validate_spectrum_matches_product_kind(
     spectrum: Spectrum1D,
     product_kind: RadiationProductKind,
 ) -> None:
-    """Validate that spectrum quantity matches a named radiation product."""
+    """Validate that spectrum quantity and unit match a named radiation product."""
 
     allowed_quantities = allowed_spectrum_quantities_for_product_kind(product_kind)
 
-    if spectrum.quantity in allowed_quantities:
-        return
+    if spectrum.quantity not in allowed_quantities:
+        allowed_values = ", ".join(quantity.value for quantity in allowed_quantities)
+        msg = (
+            f"Spectrum quantity {spectrum.quantity.value} does not match "
+            f"radiation product {product_kind.value}. "
+            f"Allowed quantities: {allowed_values}."
+        )
+        raise ValueError(msg)
 
-    allowed_values = ", ".join(quantity.value for quantity in allowed_quantities)
-    msg = (
-        f"Spectrum quantity {spectrum.quantity.value} does not match "
-        f"radiation product {product_kind.value}. "
-        f"Allowed quantities: {allowed_values}."
-    )
-    raise ValueError(msg)
+    expected_unit = expected_spectrum_unit_for_product_kind(product_kind)
+
+    if spectrum.y_unit is not expected_unit:
+        msg = (
+            f"Spectrum unit {spectrum.y_unit.value} does not match "
+            f"radiation product {product_kind.value}. "
+            f"Expected unit: {expected_unit.value}."
+        )
+        raise ValueError(msg)
 
 
 @dataclass(frozen=True)

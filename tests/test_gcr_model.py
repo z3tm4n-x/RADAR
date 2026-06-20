@@ -260,3 +260,12 @@ def test_gcr_model_result_rejects_ambiguous_differential_flux_product() -> None:
             model="test",
             document="test",
         )
+
+def test_validate_gcr_energy_spectrum_rejects_daily_display_fluence_unit() -> None:
+    with pytest.raises(ValueError, match="differential fluence units"):
+        validate_gcr_energy_spectrum(
+            _gcr_proton_flux_spectrum(
+                quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+                y_unit=Unit.DIFFERENTIAL_FLUENCE_PER_DAY,
+            )
+        )

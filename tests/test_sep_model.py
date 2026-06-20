@@ -213,3 +213,11 @@ def test_sep_model_result_rejects_mismatched_product() -> None:
                 ),
             ),
         )
+
+def test_validate_sep_proton_fluence_spectrum_rejects_daily_display_unit() -> None:
+    with pytest.raises(ValueError, match="differential fluence units"):
+        validate_sep_proton_fluence_spectrum(
+            _sep_proton_fluence_spectrum(
+                y_unit=Unit.DIFFERENTIAL_FLUENCE_PER_DAY,
+            )
+        )
