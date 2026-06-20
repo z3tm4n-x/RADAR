@@ -1,5 +1,6 @@
 """RADAR — Radiation Analysis and Design Assessment Resource."""
 
+from radar.version import __version__
 from radar.core.project import (
     CalculationConfig,
     MethodologyConfig,
@@ -26,6 +27,13 @@ from radar.core.project_snapshot import (
 )
 from radar.core.result import CalculationResult
 from radar.core.spectra import Spectrum1D
+from radar.project_file import (
+    PROJECT_PROGRAM_NAME,
+    PROJECT_SCHEMA_VERSION,
+    ProjectFile,
+    project_file_from_dict,
+    project_file_from_json,
+)
 from radar.model_registry import (
     REGISTERED_SOURCE_MODELS,
     SourceModelBundle,
@@ -41,7 +49,6 @@ from radar.model_registry import (
     source_model_registration_for_profile,
 )
 
-__version__ = "0.1.0"
 
 __all__ = [
     "CalculationConfig",
@@ -49,6 +56,11 @@ __all__ = [
     "MethodologyConfig",
     "MissionConfig",
     "OrbitConfig",
+    "project_file_from_json",
+    "project_file_from_dict",
+    "ProjectFile",
+    "PROJECT_SCHEMA_VERSION",
+    "PROJECT_PROGRAM_NAME",
     "REGISTERED_SOURCE_MODELS",
     "ShieldingConfig",
     "SourceModelBundle",
