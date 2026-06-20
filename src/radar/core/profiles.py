@@ -271,3 +271,106 @@ def validate_source_model_family_for_profile(
         f"Expected model family: {expected_family.value}."
     )
     raise ValueError(msg)
+
+SOURCE_MODEL_FAMILIES_BY_SOURCE: dict[
+    RadiationSource,
+    tuple[SourceModelFamily, ...],
+] = {
+    RadiationSource.SEP: (
+        SourceModelFamily.OST_134_1044_2007,
+        SourceModelFamily.GOST_SEP,
+        SourceModelFamily.CUSTOM,
+    ),
+    RadiationSource.GCR: (
+        SourceModelFamily.OST_134_1044_2007,
+        SourceModelFamily.GOST_GCR,
+        SourceModelFamily.CUSTOM,
+    ),
+    RadiationSource.ERB: (
+        SourceModelFamily.OST_134_1044_2007,
+        SourceModelFamily.CUSTOM,
+    ),
+}
+
+
+@dataclass(frozen=True)
+class SourceModelMetadata:
+    """Declared metadata for a concrete source model."""
+
+    source: RadiationSource
+    model_family: SourceModelFamily
+    name: str
+    document: str
+    version: str = "unversioned"
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            msg = "Source model name must not be empty."
+            raise ValueError(msg)
+
+        if not self.document:
+            msg = "Source model document must not be empty."
+            raise ValueError(msg)
+
+        if not self.version:
+            msg = "Source model version must not be empty."
+            raise ValueError(msg)
+
+        validate_source_model_family_allowed_for_source(
+            source=self.source,
+            model_family=self.model_family,
+        )
+
+
+def allowed_source_model_families_for_source(
+    source: RadiationSource,
+) -> tuple[SourceModelFamily, ...]:
+    """Return source model families allowed for a radiation source."""
+
+    try:
+        return SOURCE_MODEL_FAMILIES_BY_SOURCE[source]
+    except KeyError as exc:
+        msg = f"Unsupported radiation source: {source}"
+        raise ValueError(msg) from exc
+
+
+def validate_source_model_family_allowed_for_source(
+    source: RadiationSource,
+    model_family: SourceModelFamily,
+) -> None:
+    """Validate that a source model family is meaningful for a source."""
+
+    if model_family in allowed_source_model_families_for_source(source):
+        return
+
+    allowed_values = ", ".join(
+        family.value for family in allowed_source_model_families_for_source(source)
+    )
+    msg = (
+        f"{source.value} model family {model_family.value} is not allowed. "
+        f"Allowed families: {allowed_values}."
+    )
+    raise ValueError(msg)
+
+
+def validate_source_model_metadata(metadata: SourceModelMetadata) -> None:
+    """Validate declared source model metadata."""
+
+    validate_source_model_family_allowed_for_source(
+        source=metadata.source,
+        model_family=metadata.model_family,
+    )
+
+
+def validate_source_model_metadata_for_profile(
+    metadata: SourceModelMetadata,
+    profile: MethodologyProfile,
+) -> None:
+    """Validate source model metadata against a methodology profile."""
+
+    validate_source_model_metadata(metadata)
+    validate_source_model_family_for_profile(
+        profile=profile,
+        source=metadata.source,
+        model_family=metadata.model_family,
+    )

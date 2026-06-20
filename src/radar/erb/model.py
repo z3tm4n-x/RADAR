@@ -1,4 +1,4 @@
-﻿"""Earth radiation belt model interface."""
+"""Earth radiation belt model interface."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from radar.core.products import SpectrumProduct
+from radar.core.profiles import SourceModelFamily, SourceModelMetadata
 from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.project import CalculationConfig
 from radar.core.spectra import Spectrum1D
@@ -170,6 +171,11 @@ class ErbModelResult:
 class ErbModelProtocol(Protocol):
     """Protocol implemented by concrete ERB models."""
 
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+        ...
+
     def calculate(self, model_input: ErbModelInput) -> ErbModelResult:
         """Calculate mission ERB spectra."""
 
@@ -185,6 +191,18 @@ class StaticErbModel:
     spectra: tuple[Spectrum1D, ...]
     model: str = "static_erb_model"
     document: str = "test"
+    model_family: SourceModelFamily = SourceModelFamily.CUSTOM
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+
+        return SourceModelMetadata(
+            source=RadiationSource.ERB,
+            model_family=self.model_family,
+            name=self.model,
+            document=self.document,
+        )
 
     def __post_init__(self) -> None:
         if not self.spectra:
@@ -201,6 +219,8 @@ class StaticErbModel:
         if not self.document:
             msg = "ERB source document must not be empty."
             raise ValueError(msg)
+
+        _ = self.metadata
 
     def calculate(self, model_input: ErbModelInput) -> ErbModelResult:
         """Return configured test ERB spectra."""

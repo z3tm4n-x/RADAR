@@ -1,4 +1,4 @@
-﻿"""Solar energetic particle model interface."""
+"""Solar energetic particle model interface."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from radar.core.products import SpectrumProduct
+from radar.core.profiles import SourceModelFamily, SourceModelMetadata
 from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
@@ -141,6 +142,11 @@ class SepModelResult:
 class SepModelProtocol(Protocol):
     """Protocol implemented by concrete SEP models."""
 
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+        ...
+
     def calculate(self, model_input: SepModelInput) -> SepModelResult:
         """Calculate mission SEP fluence spectrum."""
 
@@ -158,6 +164,18 @@ class StaticSepModel:
     annual_fluence_spectrum: Spectrum1D
     model: str = "static_sep_model"
     document: str = "test"
+    model_family: SourceModelFamily = SourceModelFamily.CUSTOM
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+
+        return SourceModelMetadata(
+            source=RadiationSource.SEP,
+            model_family=self.model_family,
+            name=self.model,
+            document=self.document,
+        )
 
     def __post_init__(self) -> None:
         validate_sep_proton_fluence_spectrum(self.annual_fluence_spectrum)
@@ -169,6 +187,8 @@ class StaticSepModel:
         if not self.document:
             msg = "SEP source document must not be empty."
             raise ValueError(msg)
+
+        _ = self.metadata
 
     def calculate(self, model_input: SepModelInput) -> SepModelResult:
         """Return annual test fluence scaled by integer mission lifetime."""

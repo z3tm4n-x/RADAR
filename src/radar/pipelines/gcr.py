@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from radar.core.log import LogLevel
 from radar.core.products import SpectrumProduct
+from radar.core.profiles import validate_source_model_metadata_for_profile
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
@@ -86,6 +87,11 @@ def calculate_gcr_pipeline(
             "launch_year": str(config.mission.launch_year),
             "lifetime_years": str(config.mission.lifetime_years),
         },
+    )
+
+    validate_source_model_metadata_for_profile(
+        metadata=gcr_model.metadata,
+        profile=config.methodology.profile,
     )
 
     gcr_model_input = GcrModelInput(mission=config.mission)

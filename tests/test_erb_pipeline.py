@@ -1,6 +1,12 @@
-﻿import pytest
+import pytest
 
-from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
+from radar.core.profiles import MethodologyProfile
+from radar.core.project import (
+    CalculationConfig,
+    MethodologyConfig,
+    MissionConfig,
+    OrbitConfig,
+)
 from radar.core.result import ComponentStatus
 from radar.core.spectra import Spectrum1D
 from radar.core.types import Particle, RadiationSource, SpectrumQuantity
@@ -21,7 +27,12 @@ def _config(lifetime_years: int = 7, kp: int = 3) -> CalculationConfig:
     )
     orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
 
-    return CalculationConfig(mission=mission, orbit=orbit, kp=kp)
+    return CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        methodology=MethodologyConfig(profile=MethodologyProfile.CUSTOM),
+        kp=kp,
+    )
 
 
 def _erb_proton_spectrum() -> Spectrum1D:
@@ -263,4 +274,15 @@ def test_erb_pipeline_result_rejects_product_with_wrong_source() -> None:
                 ),
                 valid_result.products[1],
             ),
+        )
+
+def test_erb_pipeline_rejects_model_family_mismatched_profile() -> None:
+    mission = MissionConfig(launch_year=2027, lifetime_years=7)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    config = CalculationConfig(mission=mission, orbit=orbit)
+
+    with pytest.raises(ValueError, match="model family"):
+        calculate_erb_pipeline(
+            config=config,
+            erb_model=_erb_model(),
         )

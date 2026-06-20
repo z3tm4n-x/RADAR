@@ -10,6 +10,7 @@ from radar.core.profiles import (
     MethodologyProfileSpec,
     MethodologySourceModelContract,
     SourceModelFamily,
+    SourceModelMetadata,
     documents_for_methodology_profile,
     expected_source_model_family_for_profile,
     methodology_profile_spec,
@@ -18,6 +19,8 @@ from radar.core.profiles import (
     profile_uses_ost_134_1044_2007,
     source_model_contract_for_profile,
     validate_source_model_family_for_profile,
+    validate_source_model_metadata,
+    validate_source_model_metadata_for_profile,
 )
 
 
@@ -245,4 +248,53 @@ def test_normative_contract_requires_ost_erb_family() -> None:
             sep_model_family=SourceModelFamily.GOST_SEP,
             gcr_model_family=SourceModelFamily.GOST_GCR,
             erb_model_family=SourceModelFamily.CUSTOM,
+        )
+
+def test_source_model_metadata_accepts_valid_source_family_pair() -> None:
+    metadata = SourceModelMetadata(
+        source=RadiationSource.SEP,
+        model_family=SourceModelFamily.GOST_SEP,
+        name="gost_sep_model",
+        document=GOST_SEP_DOCUMENT,
+    )
+
+    validate_source_model_metadata(metadata)
+
+
+def test_source_model_metadata_rejects_invalid_source_family_pair() -> None:
+    with pytest.raises(ValueError, match="not allowed"):
+        SourceModelMetadata(
+            source=RadiationSource.SEP,
+            model_family=SourceModelFamily.GOST_GCR,
+            name="wrong",
+            document=GOST_GCR_DOCUMENT,
+        )
+
+
+def test_validate_source_model_metadata_for_profile_accepts_custom_metadata() -> None:
+    metadata = SourceModelMetadata(
+        source=RadiationSource.SEP,
+        model_family=SourceModelFamily.CUSTOM,
+        name="static_sep_model",
+        document="test",
+    )
+
+    validate_source_model_metadata_for_profile(
+        metadata=metadata,
+        profile=MethodologyProfile.CUSTOM,
+    )
+
+
+def test_validate_source_model_metadata_for_profile_rejects_mismatch() -> None:
+    metadata = SourceModelMetadata(
+        source=RadiationSource.GCR,
+        model_family=SourceModelFamily.CUSTOM,
+        name="static_gcr_model",
+        document="test",
+    )
+
+    with pytest.raises(ValueError, match="does not match methodology profile"):
+        validate_source_model_metadata_for_profile(
+            metadata=metadata,
+            profile=MethodologyProfile.OST_134_1044_2007,
         )

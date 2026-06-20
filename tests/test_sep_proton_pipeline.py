@@ -1,6 +1,12 @@
-﻿import pytest
+import pytest
 
-from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
+from radar.core.profiles import MethodologyProfile
+from radar.core.project import (
+    CalculationConfig,
+    MethodologyConfig,
+    MissionConfig,
+    OrbitConfig,
+)
 from radar.core.result import ComponentStatus
 from radar.core.spectra import Spectrum1D
 from radar.core.types import Particle, RadiationSource, SpectrumQuantity
@@ -26,7 +32,11 @@ def _config(lifetime_years: int = 5) -> CalculationConfig:
     )
     orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
 
-    return CalculationConfig(mission=mission, orbit=orbit)
+    return CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        methodology=MethodologyConfig(profile=MethodologyProfile.CUSTOM),
+    )
 
 
 def _annual_sep_spectrum() -> Spectrum1D:
@@ -252,4 +262,16 @@ def test_sep_proton_pipeline_result_rejects_product_with_wrong_source() -> None:
                 kind=RadiationProductKind.MISSION_FLUENCE,
                 spectrum=wrong_source_spectrum,
             ),
+        )
+
+def test_sep_proton_pipeline_rejects_model_family_mismatched_profile() -> None:
+    mission = MissionConfig(launch_year=2027, lifetime_years=5)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    config = CalculationConfig(mission=mission, orbit=orbit)
+
+    with pytest.raises(ValueError, match="model family"):
+        calculate_sep_proton_pipeline(
+            config=config,
+            sep_model=_sep_model(),
+            penetration=_penetration(),
         )
