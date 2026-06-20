@@ -1,10 +1,11 @@
-﻿"""Registered source model classes."""
+"""Registered source model classes."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
+from radar.core.project import SourceModelSelectionConfig
 from radar.core.profiles import (
     MethodologyProfile,
     SourceModelFamily,
@@ -184,6 +185,40 @@ def source_model_classes_for_profile(
     """Return SEP, GCR and ERB model classes for a methodology profile."""
 
     bundle = source_model_bundle_for_profile(profile)
+    return (
+        bundle.sep.model_class,
+        bundle.gcr.model_class,
+        bundle.erb.model_class,
+    )
+
+def source_model_bundle_for_selection(
+    selection: SourceModelSelectionConfig,
+) -> SourceModelBundle:
+    """Return registered source model bundle for explicit model family selection."""
+
+    return SourceModelBundle(
+        profile=selection.profile,
+        sep=source_model_registration(
+            source=RadiationSource.SEP,
+            model_family=selection.sep_model_family,
+        ),
+        gcr=source_model_registration(
+            source=RadiationSource.GCR,
+            model_family=selection.gcr_model_family,
+        ),
+        erb=source_model_registration(
+            source=RadiationSource.ERB,
+            model_family=selection.erb_model_family,
+        ),
+    )
+
+
+def source_model_classes_for_selection(
+    selection: SourceModelSelectionConfig,
+) -> tuple[type[Any], type[Any], type[Any]]:
+    """Return SEP, GCR and ERB model classes for explicit model family selection."""
+
+    bundle = source_model_bundle_for_selection(selection)
     return (
         bundle.sep.model_class,
         bundle.gcr.model_class,

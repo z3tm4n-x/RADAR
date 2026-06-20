@@ -2,6 +2,7 @@ import pytest
 
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.types import RadiationSource
+from radar.core.project import SourceModelSelectionConfig
 from radar.erb.model import OstErbModel
 from radar.gcr.model import GostGcrModel, OstGcrModel
 from radar.model_registry import (
@@ -11,8 +12,10 @@ from radar.model_registry import (
     registered_source_model_families,
     source_model_class,
     source_model_bundle_for_profile,
+    source_model_bundle_for_selection,
     source_model_class_for_profile,
     source_model_classes_for_profile,
+    source_model_classes_for_selection,
     source_model_registration,
     source_model_registration_for_profile,
 )
@@ -226,3 +229,34 @@ def test_source_model_classes_for_profile() -> None:
 def test_source_model_bundle_for_custom_profile_has_no_default_models() -> None:
     with pytest.raises(ValueError, match="No registered source model"):
         source_model_bundle_for_profile(MethodologyProfile.CUSTOM)
+
+def test_source_model_bundle_for_explicit_selection() -> None:
+    selection = SourceModelSelectionConfig.from_profile(
+        MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+    )
+
+    bundle = source_model_bundle_for_selection(selection)
+
+    assert bundle.profile is MethodologyProfile.OST_WITH_GOST_SEP_GCR
+    assert bundle.sep.model_class is GostSepModel
+    assert bundle.gcr.model_class is GostGcrModel
+    assert bundle.erb.model_class is OstErbModel
+
+
+def test_source_model_classes_for_explicit_selection() -> None:
+    selection = SourceModelSelectionConfig.from_profile(
+        MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+    )
+
+    assert source_model_classes_for_selection(selection) == (
+        GostSepModel,
+        GostGcrModel,
+        OstErbModel,
+    )
+
+
+def test_source_model_bundle_for_custom_selection_has_no_default_models() -> None:
+    selection = SourceModelSelectionConfig.from_profile(MethodologyProfile.CUSTOM)
+
+    with pytest.raises(ValueError, match="No registered source model"):
+        source_model_bundle_for_selection(selection)

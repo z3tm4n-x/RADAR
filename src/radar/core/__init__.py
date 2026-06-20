@@ -46,7 +46,14 @@ from radar.core.profiles import (
     source_model_contract_for_profile,
     validate_source_model_family_for_profile,
 )
-from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
+from radar.core.project import (
+    CalculationConfig,
+    MethodologyConfig,
+    MissionConfig,
+    OrbitConfig,
+    ShieldingConfig,
+    SourceModelSelectionConfig,
+)
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
 from radar.core.source_products import (
@@ -71,6 +78,8 @@ __all__ = [
     "DoseQuantity",
     "LogLevel",
     "MissionConfig",
+    "SourceModelSelectionConfig",
+    "MethodologyConfig",
     "profile_uses_ost_134_1044_2007",
     "profile_uses_gost_sep",
     "profile_uses_gost_gcr",

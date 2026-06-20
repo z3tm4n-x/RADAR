@@ -21,10 +21,18 @@ from radar.core.profiles import (
     MethodologyProfile,
     MethodologyProfileSpec,
     MethodologySourceModelContract,
+    SourceModelFamily,
     methodology_profile_spec,
     source_model_contract_for_profile,
+    validate_source_model_family_for_profile,
 )
-from radar.core.types import DoseQuantity, OrbitType, ShieldGeometry, SolarActivityLevel
+from radar.core.types import (
+    DoseQuantity,
+    OrbitType,
+    RadiationSource,
+    ShieldGeometry,
+    SolarActivityLevel,
+)
 from radar.core.units import Unit
 
 
@@ -128,6 +136,75 @@ class ShieldingConfig:
 
 
 @dataclass(frozen=True)
+class SourceModelSelectionConfig:
+    """Selected source model families for a calculation."""
+
+    profile: MethodologyProfile = DEFAULT_METHODOLOGY_PROFILE
+    sep_model_family: SourceModelFamily = SourceModelFamily.OST_134_1044_2007
+    gcr_model_family: SourceModelFamily = SourceModelFamily.OST_134_1044_2007
+    erb_model_family: SourceModelFamily = SourceModelFamily.OST_134_1044_2007
+
+    @classmethod
+    def from_profile(cls, profile: MethodologyProfile) -> SourceModelSelectionConfig:
+        """Create model family selection from a methodology profile."""
+
+        contract = source_model_contract_for_profile(profile)
+        return cls(
+            profile=profile,
+            sep_model_family=contract.sep_model_family,
+            gcr_model_family=contract.gcr_model_family,
+            erb_model_family=contract.erb_model_family,
+        )
+
+    @classmethod
+    def from_methodology(
+        cls,
+        methodology: MethodologyConfig,
+    ) -> SourceModelSelectionConfig:
+        """Create model family selection from methodology settings."""
+
+        return cls.from_profile(methodology.profile)
+
+    @property
+    def families_by_source(self) -> dict[RadiationSource, SourceModelFamily]:
+        """Return selected model families keyed by radiation source."""
+
+        return {
+            RadiationSource.SEP: self.sep_model_family,
+            RadiationSource.GCR: self.gcr_model_family,
+            RadiationSource.ERB: self.erb_model_family,
+        }
+
+    def model_family_for_source(
+        self,
+        source: RadiationSource,
+    ) -> SourceModelFamily:
+        """Return selected model family for a radiation source."""
+
+        try:
+            return self.families_by_source[source]
+        except KeyError as exc:
+            msg = f"Unsupported radiation source: {source}"
+            raise ValueError(msg) from exc
+
+    def __post_init__(self) -> None:
+        validate_source_model_family_for_profile(
+            profile=self.profile,
+            source=RadiationSource.SEP,
+            model_family=self.sep_model_family,
+        )
+        validate_source_model_family_for_profile(
+            profile=self.profile,
+            source=RadiationSource.GCR,
+            model_family=self.gcr_model_family,
+        )
+        validate_source_model_family_for_profile(
+            profile=self.profile,
+            source=RadiationSource.ERB,
+            model_family=self.erb_model_family,
+        )
+
+@dataclass(frozen=True)
 class MethodologyConfig:
     """Methodology switches fixed for the first RADAR version."""
 
@@ -147,6 +224,12 @@ class MethodologyConfig:
         """Return source model family contract for this methodology."""
 
         return source_model_contract_for_profile(self.profile)
+
+    @property
+    def source_model_selection(self) -> SourceModelSelectionConfig:
+        """Return source model family selection for this methodology."""
+
+        return SourceModelSelectionConfig.from_methodology(self)
 
     def __post_init__(self) -> None:
         if self.calculate_gcr_electrons:
@@ -173,6 +256,12 @@ class CalculationConfig:
     kp: int = DEFAULT_KP
     dose_quantity: DoseQuantity = DEFAULT_DOSE_QUANTITY
     dose_unit: Unit = DEFAULT_DOSE_UNIT
+
+    @property
+    def source_model_selection(self) -> SourceModelSelectionConfig:
+        """Return source model family selection for this calculation."""
+
+        return self.methodology.source_model_selection
 
     def __post_init__(self) -> None:
         if not isinstance(self.kp, int):
