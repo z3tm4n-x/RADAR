@@ -1,9 +1,11 @@
-﻿"""Methodology profiles supported by RADAR."""
+"""Methodology profiles supported by RADAR."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+
+from radar.core.types import RadiationSource
 
 
 class MethodologyProfile(StrEnum):
@@ -13,6 +15,15 @@ class MethodologyProfile(StrEnum):
     OST_WITH_GOST_SEP = "ost_with_gost_sep"
     OST_WITH_GOST_GCR = "ost_with_gost_gcr"
     OST_WITH_GOST_SEP_GCR = "ost_with_gost_sep_gcr"
+    CUSTOM = "custom"
+
+
+class SourceModelFamily(StrEnum):
+    """Source model family selected by a methodology profile."""
+
+    OST_134_1044_2007 = "ost_134_1044_2007"
+    GOST_SEP = "gost_sep"
+    GOST_GCR = "gost_gcr"
     CUSTOM = "custom"
 
 
@@ -142,3 +153,121 @@ def profile_uses_ost_134_1044_2007(profile: MethodologyProfile) -> bool:
     """Return True if the profile uses OST 134-1044-2007 methodology."""
 
     return methodology_profile_spec(profile).uses_ost_134_1044_2007
+
+@dataclass(frozen=True)
+class MethodologySourceModelContract:
+    """Source-model family contract for a methodology profile."""
+
+    profile: MethodologyProfile
+    sep_model_family: SourceModelFamily
+    gcr_model_family: SourceModelFamily
+    erb_model_family: SourceModelFamily
+
+    def __post_init__(self) -> None:
+        if self.profile is MethodologyProfile.CUSTOM:
+            expected = SourceModelFamily.CUSTOM
+            if (
+                self.sep_model_family is not expected
+                or self.gcr_model_family is not expected
+                or self.erb_model_family is not expected
+            ):
+                msg = "Custom methodology profile must use custom source model families."
+                raise ValueError(msg)
+            return
+
+        if self.erb_model_family is not SourceModelFamily.OST_134_1044_2007:
+            msg = "ERB model family must remain OST 134-1044-2007 for normative profiles."
+            raise ValueError(msg)
+
+
+METHODOLOGY_SOURCE_MODEL_CONTRACTS: dict[
+    MethodologyProfile,
+    MethodologySourceModelContract,
+] = {
+    MethodologyProfile.OST_134_1044_2007: MethodologySourceModelContract(
+        profile=MethodologyProfile.OST_134_1044_2007,
+        sep_model_family=SourceModelFamily.OST_134_1044_2007,
+        gcr_model_family=SourceModelFamily.OST_134_1044_2007,
+        erb_model_family=SourceModelFamily.OST_134_1044_2007,
+    ),
+    MethodologyProfile.OST_WITH_GOST_SEP: MethodologySourceModelContract(
+        profile=MethodologyProfile.OST_WITH_GOST_SEP,
+        sep_model_family=SourceModelFamily.GOST_SEP,
+        gcr_model_family=SourceModelFamily.OST_134_1044_2007,
+        erb_model_family=SourceModelFamily.OST_134_1044_2007,
+    ),
+    MethodologyProfile.OST_WITH_GOST_GCR: MethodologySourceModelContract(
+        profile=MethodologyProfile.OST_WITH_GOST_GCR,
+        sep_model_family=SourceModelFamily.OST_134_1044_2007,
+        gcr_model_family=SourceModelFamily.GOST_GCR,
+        erb_model_family=SourceModelFamily.OST_134_1044_2007,
+    ),
+    MethodologyProfile.OST_WITH_GOST_SEP_GCR: MethodologySourceModelContract(
+        profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+        sep_model_family=SourceModelFamily.GOST_SEP,
+        gcr_model_family=SourceModelFamily.GOST_GCR,
+        erb_model_family=SourceModelFamily.OST_134_1044_2007,
+    ),
+    MethodologyProfile.CUSTOM: MethodologySourceModelContract(
+        profile=MethodologyProfile.CUSTOM,
+        sep_model_family=SourceModelFamily.CUSTOM,
+        gcr_model_family=SourceModelFamily.CUSTOM,
+        erb_model_family=SourceModelFamily.CUSTOM,
+    ),
+}
+
+
+def source_model_contract_for_profile(
+    profile: MethodologyProfile,
+) -> MethodologySourceModelContract:
+    """Return source-model family contract for a methodology profile."""
+
+    try:
+        return METHODOLOGY_SOURCE_MODEL_CONTRACTS[profile]
+    except KeyError as exc:
+        msg = f"Unsupported methodology profile: {profile}"
+        raise ValueError(msg) from exc
+
+
+def expected_source_model_family_for_profile(
+    profile: MethodologyProfile,
+    source: RadiationSource,
+) -> SourceModelFamily:
+    """Return expected source model family for a profile and radiation source."""
+
+    contract = source_model_contract_for_profile(profile)
+
+    if source is RadiationSource.SEP:
+        return contract.sep_model_family
+
+    if source is RadiationSource.GCR:
+        return contract.gcr_model_family
+
+    if source is RadiationSource.ERB:
+        return contract.erb_model_family
+
+    msg = f"Unsupported radiation source: {source}"
+    raise ValueError(msg)
+
+
+def validate_source_model_family_for_profile(
+    profile: MethodologyProfile,
+    source: RadiationSource,
+    model_family: SourceModelFamily,
+) -> None:
+    """Validate source model family against a methodology profile."""
+
+    expected_family = expected_source_model_family_for_profile(
+        profile=profile,
+        source=source,
+    )
+
+    if model_family is expected_family:
+        return
+
+    msg = (
+        f"{source.value} model family {model_family.value} does not match "
+        f"methodology profile {profile.value}. "
+        f"Expected model family: {expected_family.value}."
+    )
+    raise ValueError(msg)

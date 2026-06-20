@@ -1,7 +1,7 @@
 import pytest
 
 from radar.core.constants import DEFAULT_SHIELD_THICKNESSES_G_CM2
-from radar.core.profiles import MethodologyProfile
+from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import (
     CalculationConfig,
     MethodologyConfig,
@@ -126,3 +126,14 @@ def test_methodology_config_accepts_profile() -> None:
     methodology = MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR)
 
     assert methodology.profile is MethodologyProfile.OST_WITH_GOST_SEP_GCR
+
+def test_methodology_config_exposes_profile_spec_and_source_model_contract() -> None:
+    methodology = MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR)
+
+    assert methodology.profile_spec.profile is MethodologyProfile.OST_WITH_GOST_SEP_GCR
+    assert methodology.source_model_contract.sep_model_family is SourceModelFamily.GOST_SEP
+    assert methodology.source_model_contract.gcr_model_family is SourceModelFamily.GOST_GCR
+    assert (
+        methodology.source_model_contract.erb_model_family
+        is SourceModelFamily.OST_134_1044_2007
+    )

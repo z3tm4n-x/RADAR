@@ -1,5 +1,6 @@
-﻿import pytest
+import pytest
 
+from radar.core.types import RadiationSource
 from radar.core.profiles import (
     DEFAULT_METHODOLOGY_PROFILE,
     GOST_GCR_DOCUMENT,
@@ -7,11 +8,16 @@ from radar.core.profiles import (
     OST_134_1044_2007_DOCUMENT,
     MethodologyProfile,
     MethodologyProfileSpec,
+    MethodologySourceModelContract,
+    SourceModelFamily,
     documents_for_methodology_profile,
+    expected_source_model_family_for_profile,
     methodology_profile_spec,
     profile_uses_gost_gcr,
     profile_uses_gost_sep,
     profile_uses_ost_134_1044_2007,
+    source_model_contract_for_profile,
+    validate_source_model_family_for_profile,
 )
 
 
@@ -137,4 +143,106 @@ def test_custom_profile_must_be_marked_custom() -> None:
             uses_gost_sep=False,
             uses_gost_gcr=False,
             is_custom=False,
+        )
+
+def test_plain_ost_source_model_contract() -> None:
+    contract = source_model_contract_for_profile(MethodologyProfile.OST_134_1044_2007)
+
+    assert contract.sep_model_family is SourceModelFamily.OST_134_1044_2007
+    assert contract.gcr_model_family is SourceModelFamily.OST_134_1044_2007
+    assert contract.erb_model_family is SourceModelFamily.OST_134_1044_2007
+
+
+def test_ost_with_gost_sep_source_model_contract() -> None:
+    contract = source_model_contract_for_profile(MethodologyProfile.OST_WITH_GOST_SEP)
+
+    assert contract.sep_model_family is SourceModelFamily.GOST_SEP
+    assert contract.gcr_model_family is SourceModelFamily.OST_134_1044_2007
+    assert contract.erb_model_family is SourceModelFamily.OST_134_1044_2007
+
+
+def test_ost_with_gost_gcr_source_model_contract() -> None:
+    contract = source_model_contract_for_profile(MethodologyProfile.OST_WITH_GOST_GCR)
+
+    assert contract.sep_model_family is SourceModelFamily.OST_134_1044_2007
+    assert contract.gcr_model_family is SourceModelFamily.GOST_GCR
+    assert contract.erb_model_family is SourceModelFamily.OST_134_1044_2007
+
+
+def test_ost_with_gost_sep_gcr_source_model_contract() -> None:
+    contract = source_model_contract_for_profile(
+        MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+    )
+
+    assert contract.sep_model_family is SourceModelFamily.GOST_SEP
+    assert contract.gcr_model_family is SourceModelFamily.GOST_GCR
+    assert contract.erb_model_family is SourceModelFamily.OST_134_1044_2007
+
+
+def test_custom_source_model_contract() -> None:
+    contract = source_model_contract_for_profile(MethodologyProfile.CUSTOM)
+
+    assert contract.sep_model_family is SourceModelFamily.CUSTOM
+    assert contract.gcr_model_family is SourceModelFamily.CUSTOM
+    assert contract.erb_model_family is SourceModelFamily.CUSTOM
+
+
+def test_expected_source_model_family_for_profile() -> None:
+    assert (
+        expected_source_model_family_for_profile(
+            profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+            source=RadiationSource.SEP,
+        )
+        is SourceModelFamily.GOST_SEP
+    )
+    assert (
+        expected_source_model_family_for_profile(
+            profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+            source=RadiationSource.GCR,
+        )
+        is SourceModelFamily.GOST_GCR
+    )
+    assert (
+        expected_source_model_family_for_profile(
+            profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+            source=RadiationSource.ERB,
+        )
+        is SourceModelFamily.OST_134_1044_2007
+    )
+
+
+def test_validate_source_model_family_for_profile_accepts_expected_family() -> None:
+    validate_source_model_family_for_profile(
+        profile=MethodologyProfile.OST_WITH_GOST_SEP,
+        source=RadiationSource.SEP,
+        model_family=SourceModelFamily.GOST_SEP,
+    )
+
+
+def test_validate_source_model_family_for_profile_rejects_mismatch() -> None:
+    with pytest.raises(ValueError, match="does not match methodology profile"):
+        validate_source_model_family_for_profile(
+            profile=MethodologyProfile.OST_WITH_GOST_SEP,
+            source=RadiationSource.GCR,
+            model_family=SourceModelFamily.GOST_GCR,
+        )
+
+
+def test_custom_contract_requires_custom_families() -> None:
+    with pytest.raises(ValueError, match="custom source model families"):
+        MethodologySourceModelContract(
+            profile=MethodologyProfile.CUSTOM,
+            sep_model_family=SourceModelFamily.CUSTOM,
+            gcr_model_family=SourceModelFamily.GOST_GCR,
+            erb_model_family=SourceModelFamily.CUSTOM,
+        )
+
+
+def test_normative_contract_requires_ost_erb_family() -> None:
+    with pytest.raises(ValueError, match="ERB model family"):
+        MethodologySourceModelContract(
+            profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+            sep_model_family=SourceModelFamily.GOST_SEP,
+            gcr_model_family=SourceModelFamily.GOST_GCR,
+            erb_model_family=SourceModelFamily.CUSTOM,
         )

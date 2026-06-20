@@ -1,4 +1,4 @@
-﻿"""Typed project configuration objects."""
+"""Typed project configuration objects."""
 
 from __future__ import annotations
 
@@ -16,7 +16,14 @@ from radar.core.constants import (
     MIN_LIFETIME_YEARS,
 )
 from radar.core.dose_units import validate_dose_unit_for_quantity
-from radar.core.profiles import DEFAULT_METHODOLOGY_PROFILE, MethodologyProfile
+from radar.core.profiles import (
+    DEFAULT_METHODOLOGY_PROFILE,
+    MethodologyProfile,
+    MethodologyProfileSpec,
+    MethodologySourceModelContract,
+    methodology_profile_spec,
+    source_model_contract_for_profile,
+)
 from radar.core.types import DoseQuantity, OrbitType, ShieldGeometry, SolarActivityLevel
 from radar.core.units import Unit
 
@@ -128,6 +135,18 @@ class MethodologyConfig:
     calculate_gcr_electrons: bool = False
     include_bremsstrahlung: bool = True
     include_protons_in_let: bool = True
+
+    @property
+    def profile_spec(self) -> MethodologyProfileSpec:
+        """Return explicit methodology profile specification."""
+
+        return methodology_profile_spec(self.profile)
+
+    @property
+    def source_model_contract(self) -> MethodologySourceModelContract:
+        """Return source model family contract for this methodology."""
+
+        return source_model_contract_for_profile(self.profile)
 
     def __post_init__(self) -> None:
         if self.calculate_gcr_electrons:
