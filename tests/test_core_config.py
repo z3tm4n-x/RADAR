@@ -1,6 +1,7 @@
-﻿import pytest
+import pytest
 
 from radar.core.constants import DEFAULT_SHIELD_THICKNESSES_G_CM2
+from radar.core.profiles import MethodologyProfile
 from radar.core.project import (
     CalculationConfig,
     MethodologyConfig,
@@ -120,3 +121,8 @@ def test_circular_orbit_requires_equal_altitudes() -> None:
             apogee_altitude_km=600.0,
             inclination_deg=82.0,
         )
+
+def test_methodology_config_accepts_profile() -> None:
+    methodology = MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR)
+
+    assert methodology.profile is MethodologyProfile.OST_WITH_GOST_SEP_GCR

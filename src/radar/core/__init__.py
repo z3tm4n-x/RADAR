@@ -26,6 +26,20 @@ from radar.core.products import (
     expected_spectrum_unit_for_product_kind,
     validate_spectrum_matches_product_kind,
 )
+from radar.core.profiles import (
+    DEFAULT_METHODOLOGY_PROFILE,
+    GOST_GCR_DOCUMENT,
+    GOST_SEP_DOCUMENT,
+    METHODOLOGY_PROFILE_SPECS,
+    OST_134_1044_2007_DOCUMENT,
+    MethodologyProfile,
+    MethodologyProfileSpec,
+    documents_for_methodology_profile,
+    methodology_profile_spec,
+    profile_uses_gost_gcr,
+    profile_uses_gost_sep,
+    profile_uses_ost_134_1044_2007,
+)
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
@@ -51,6 +65,18 @@ __all__ = [
     "DoseQuantity",
     "LogLevel",
     "MissionConfig",
+    "profile_uses_ost_134_1044_2007",
+    "profile_uses_gost_sep",
+    "profile_uses_gost_gcr",
+    "methodology_profile_spec",
+    "documents_for_methodology_profile",
+    "OST_134_1044_2007_DOCUMENT",
+    "MethodologyProfileSpec",
+    "MethodologyProfile",
+    "METHODOLOGY_PROFILE_SPECS",
+    "GOST_SEP_DOCUMENT",
+    "GOST_GCR_DOCUMENT",
+    "DEFAULT_METHODOLOGY_PROFILE",
     "ModelInfo",
     "OrbitConfig",
     "RadiationProductKind",
