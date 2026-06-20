@@ -1,4 +1,4 @@
-﻿"""SEP proton calculation pipeline."""
+"""SEP proton calculation pipeline."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
-from radar.core.types import RadiationProductKind
+from radar.core.source_products import validate_product_allowed_for_source
+from radar.core.types import RadiationProductKind, RadiationSource
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.spectrum import apply_proton_penetration
 from radar.sep.model import (
@@ -51,10 +52,23 @@ class SepProtonPipelineResult:
         validate_sep_proton_fluence_spectrum(self.raw_spectrum)
         validate_sep_proton_fluence_spectrum(self.penetrated_spectrum)
 
+        if self.raw_spectrum != self.sep_model_result.spectrum:
+            msg = "SEP raw pipeline spectrum must match SEP model spectrum."
+            raise ValueError(msg)
+
         raw_product = self.raw_product or self.sep_model_result.product
         penetrated_product = self.penetrated_product or _sep_mission_fluence_product(
             spectrum=self.penetrated_spectrum,
             label="SEP proton penetrated mission fluence",
+        )
+
+        validate_product_allowed_for_source(
+            product=raw_product,
+            source=RadiationSource.SEP,
+        )
+        validate_product_allowed_for_source(
+            product=penetrated_product,
+            source=RadiationSource.SEP,
         )
 
         if raw_product.kind is not RadiationProductKind.MISSION_FLUENCE:

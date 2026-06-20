@@ -202,3 +202,64 @@ def test_gcr_pipeline_result_rejects_mismatched_products() -> None:
                 ),
             ),
         )
+
+def test_gcr_pipeline_result_rejects_spectra_not_from_model_result() -> None:
+    valid_result = calculate_gcr_pipeline(
+        config=_config(),
+        gcr_model=_gcr_model(),
+    )
+
+    spectrum = valid_result.spectra[0]
+    other_spectrum = Spectrum1D(
+        x=spectrum.x,
+        y=(2.0, 4.0, 6.0),
+        x_unit=spectrum.x_unit,
+        y_unit=spectrum.y_unit,
+        quantity=spectrum.quantity,
+        particle=spectrum.particle,
+        source=spectrum.source,
+        model=spectrum.model,
+    )
+
+    with pytest.raises(ValueError, match="model result spectra"):
+        GcrPipelineResult(
+            calculation_result=valid_result.calculation_result,
+            gcr_model_result=valid_result.gcr_model_result,
+            spectra=(other_spectrum,),
+        )
+
+
+def test_gcr_pipeline_result_rejects_product_with_wrong_source() -> None:
+    from radar.core.products import SpectrumProduct
+    from radar.core.types import RadiationProductKind
+
+    valid_result = calculate_gcr_pipeline(
+        config=_config(),
+        gcr_model=_gcr_model(),
+    )
+
+    spectrum = valid_result.spectra[0]
+    wrong_source_spectrum = Spectrum1D(
+        x=spectrum.x,
+        y=spectrum.y,
+        x_unit=spectrum.x_unit,
+        y_unit=spectrum.y_unit,
+        quantity=spectrum.quantity,
+        particle=spectrum.particle,
+        source=RadiationSource.SEP,
+        model=spectrum.model,
+    )
+
+    with pytest.raises(ValueError, match="spectrum source"):
+        GcrPipelineResult(
+            calculation_result=valid_result.calculation_result,
+            gcr_model_result=valid_result.gcr_model_result,
+            spectra=valid_result.spectra,
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.MEAN_FLUX,
+                    spectrum=wrong_source_spectrum,
+                ),
+                valid_result.products[1],
+            ),
+        )

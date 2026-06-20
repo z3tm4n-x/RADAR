@@ -190,3 +190,66 @@ def test_sep_proton_pipeline_result_rejects_mismatched_product() -> None:
                 spectrum=valid_result.raw_spectrum,
             ),
         )
+
+def test_sep_proton_pipeline_result_rejects_raw_spectrum_not_from_model_result() -> None:
+    valid_result = calculate_sep_proton_pipeline(
+        config=_config(),
+        sep_model=_sep_model(),
+        penetration=_penetration(),
+    )
+
+    raw_spectrum = valid_result.raw_spectrum
+    other_raw_spectrum = Spectrum1D(
+        x=raw_spectrum.x,
+        y=(2.0, 4.0, 6.0),
+        x_unit=raw_spectrum.x_unit,
+        y_unit=raw_spectrum.y_unit,
+        quantity=raw_spectrum.quantity,
+        particle=raw_spectrum.particle,
+        source=raw_spectrum.source,
+        model=raw_spectrum.model,
+    )
+
+    with pytest.raises(ValueError, match="raw pipeline spectrum"):
+        SepProtonPipelineResult(
+            calculation_result=valid_result.calculation_result,
+            sep_model_result=valid_result.sep_model_result,
+            raw_spectrum=other_raw_spectrum,
+            penetrated_spectrum=valid_result.penetrated_spectrum,
+        )
+
+
+def test_sep_proton_pipeline_result_rejects_product_with_wrong_source() -> None:
+    from radar.core.products import SpectrumProduct
+    from radar.core.types import RadiationProductKind
+
+    valid_result = calculate_sep_proton_pipeline(
+        config=_config(),
+        sep_model=_sep_model(),
+        penetration=_penetration(),
+    )
+
+    penetrated_spectrum = valid_result.penetrated_spectrum
+    wrong_source_spectrum = Spectrum1D(
+        x=penetrated_spectrum.x,
+        y=penetrated_spectrum.y,
+        x_unit=penetrated_spectrum.x_unit,
+        y_unit=penetrated_spectrum.y_unit,
+        quantity=penetrated_spectrum.quantity,
+        particle=penetrated_spectrum.particle,
+        source=RadiationSource.GCR,
+        model=penetrated_spectrum.model,
+    )
+
+    with pytest.raises(ValueError, match="spectrum source"):
+        SepProtonPipelineResult(
+            calculation_result=valid_result.calculation_result,
+            sep_model_result=valid_result.sep_model_result,
+            raw_spectrum=valid_result.raw_spectrum,
+            penetrated_spectrum=valid_result.penetrated_spectrum,
+            raw_product=valid_result.raw_product,
+            penetrated_product=SpectrumProduct(
+                kind=RadiationProductKind.MISSION_FLUENCE,
+                spectrum=wrong_source_spectrum,
+            ),
+        )

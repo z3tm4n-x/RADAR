@@ -1,4 +1,4 @@
-﻿"""ERB calculation pipeline."""
+"""ERB calculation pipeline."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
+from radar.core.source_products import validate_product_allowed_for_source
+from radar.core.types import RadiationSource
 from radar.erb.model import (
     ErbModelInput,
     ErbModelProtocol,
@@ -38,11 +40,21 @@ class ErbPipelineResult:
         for spectrum in self.spectra:
             validate_erb_energy_spectrum(spectrum)
 
+        if self.spectra != self.erb_model_result.spectra:
+            msg = "ERB pipeline spectra must match ERB model result spectra."
+            raise ValueError(msg)
+
         products = self.products or self.erb_model_result.products
 
         if not products:
             msg = "ERB pipeline result must contain at least one radiation product."
             raise ValueError(msg)
+
+        for product in products:
+            validate_product_allowed_for_source(
+                product=product,
+                source=RadiationSource.ERB,
+            )
 
         if tuple(product.spectrum for product in products) != self.spectra:
             msg = "ERB pipeline product spectra must match pipeline spectra."
