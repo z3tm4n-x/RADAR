@@ -1,4 +1,4 @@
-﻿"""RADAR calculation core."""
+"""RADAR calculation core."""
 
 from radar.core.dose_units import (
     default_dose_unit_for_radiation_quantity_mode,
@@ -33,7 +33,11 @@ from radar.core.source_products import (
     allowed_product_kinds_for_source,
     is_product_kind_allowed_for_source,
     validate_product_allowed_for_source,
+    validate_product_spectra_match_spectra,
+    validate_products_allowed_for_source,
+    validate_products_match_spectra_and_source,
     validate_product_kind_allowed_for_source,
+    validate_spectra_match_expected,
 )
 from radar.core.spectrum_ops import add_spectra, check_spectra_compatible, scale_spectrum
 from radar.core.types import DoseQuantity, RadiationProductKind, RadiationQuantityMode
@@ -77,6 +81,10 @@ __all__ = [
     "validate_dose_settings_for_radiation_quantity_mode",
     "validate_dose_unit_for_quantity",
     "validate_product_allowed_for_source",
+    "validate_product_spectra_match_spectra",
+    "validate_products_allowed_for_source",
+    "validate_products_match_spectra_and_source",
     "validate_product_kind_allowed_for_source",
+    "validate_spectra_match_expected",
     "validate_spectrum_matches_product_kind",
 ]

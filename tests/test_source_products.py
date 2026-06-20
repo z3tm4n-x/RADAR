@@ -1,10 +1,14 @@
-﻿import pytest
+import pytest
 
 from radar.core.source_products import (
     allowed_product_kinds_for_source,
     is_product_kind_allowed_for_source,
     validate_product_allowed_for_source,
     validate_product_kind_allowed_for_source,
+    validate_product_spectra_match_spectra,
+    validate_products_allowed_for_source,
+    validate_products_match_spectra_and_source,
+    validate_spectra_match_expected,
 )
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
@@ -119,4 +123,85 @@ def test_validate_product_allowed_for_source_rejects_wrong_spectrum_source() -> 
         validate_product_allowed_for_source(
             product=_gcr_mission_fluence_product(),
             source=RadiationSource.SEP,
+        )
+
+def test_validate_products_allowed_for_source() -> None:
+    validate_products_allowed_for_source(
+        products=(_sep_mission_fluence_product(),),
+        source=RadiationSource.SEP,
+    )
+
+
+def test_validate_products_allowed_for_source_rejects_wrong_source() -> None:
+    with pytest.raises(ValueError, match="spectrum source"):
+        validate_products_allowed_for_source(
+            products=(_gcr_mission_fluence_product(),),
+            source=RadiationSource.SEP,
+        )
+
+
+def test_validate_spectra_match_expected() -> None:
+    product = _sep_mission_fluence_product()
+
+    validate_spectra_match_expected(
+        spectra=(product.spectrum,),
+        expected_spectra=(product.spectrum,),
+        mismatch_message="spectra mismatch",
+    )
+
+
+def test_validate_spectra_match_expected_rejects_mismatch() -> None:
+    sep_product = _sep_mission_fluence_product()
+    gcr_product = _gcr_mission_fluence_product()
+
+    with pytest.raises(ValueError, match="spectra mismatch"):
+        validate_spectra_match_expected(
+            spectra=(sep_product.spectrum,),
+            expected_spectra=(gcr_product.spectrum,),
+            mismatch_message="spectra mismatch",
+        )
+
+
+def test_validate_product_spectra_match_spectra() -> None:
+    product = _sep_mission_fluence_product()
+
+    validate_product_spectra_match_spectra(
+        products=(product,),
+        spectra=(product.spectrum,),
+        mismatch_message="product spectra mismatch",
+    )
+
+
+def test_validate_product_spectra_match_spectra_rejects_mismatch() -> None:
+    sep_product = _sep_mission_fluence_product()
+    gcr_product = _gcr_mission_fluence_product()
+
+    with pytest.raises(ValueError, match="product spectra mismatch"):
+        validate_product_spectra_match_spectra(
+            products=(sep_product,),
+            spectra=(gcr_product.spectrum,),
+            mismatch_message="product spectra mismatch",
+        )
+
+
+def test_validate_products_match_spectra_and_source() -> None:
+    product = _sep_mission_fluence_product()
+
+    validate_products_match_spectra_and_source(
+        products=(product,),
+        spectra=(product.spectrum,),
+        source=RadiationSource.SEP,
+        mismatch_message="combined mismatch",
+    )
+
+
+def test_validate_products_match_spectra_and_source_rejects_wrong_source() -> None:
+    product = _gcr_mission_fluence_product()
+
+    with pytest.raises(ValueError, match="spectrum source"):
+        validate_products_match_spectra_and_source(
+            products=(product,),
+            spectra=(product.spectrum,),
+            source=RadiationSource.SEP,
+            mismatch_message="combined mismatch",
         )

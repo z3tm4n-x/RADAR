@@ -9,7 +9,10 @@ from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
-from radar.core.source_products import validate_product_allowed_for_source
+from radar.core.source_products import (
+    validate_products_match_spectra_and_source,
+    validate_spectra_match_expected,
+)
 from radar.core.types import RadiationSource
 from radar.gcr.model import (
     GcrModelInput,
@@ -40,9 +43,11 @@ class GcrPipelineResult:
         for spectrum in self.spectra:
             validate_gcr_energy_spectrum(spectrum)
 
-        if self.spectra != self.gcr_model_result.spectra:
-            msg = "GCR pipeline spectra must match GCR model result spectra."
-            raise ValueError(msg)
+        validate_spectra_match_expected(
+            spectra=self.spectra,
+            expected_spectra=self.gcr_model_result.spectra,
+            mismatch_message="GCR pipeline spectra must match GCR model result spectra.",
+        )
 
         products = self.products or self.gcr_model_result.products
 
@@ -50,15 +55,12 @@ class GcrPipelineResult:
             msg = "GCR pipeline result must contain at least one radiation product."
             raise ValueError(msg)
 
-        for product in products:
-            validate_product_allowed_for_source(
-                product=product,
-                source=RadiationSource.GCR,
-            )
-
-        if tuple(product.spectrum for product in products) != self.spectra:
-            msg = "GCR pipeline product spectra must match pipeline spectra."
-            raise ValueError(msg)
+        validate_products_match_spectra_and_source(
+            products=products,
+            spectra=self.spectra,
+            source=RadiationSource.GCR,
+            mismatch_message="GCR pipeline product spectra must match pipeline spectra.",
+        )
 
         object.__setattr__(self, "products", products)
 

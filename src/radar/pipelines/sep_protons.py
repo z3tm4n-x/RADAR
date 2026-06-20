@@ -9,7 +9,10 @@ from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
-from radar.core.source_products import validate_product_allowed_for_source
+from radar.core.source_products import (
+    validate_products_match_spectra_and_source,
+    validate_spectra_match_expected,
+)
 from radar.core.types import RadiationProductKind, RadiationSource
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.spectrum import apply_proton_penetration
@@ -52,23 +55,16 @@ class SepProtonPipelineResult:
         validate_sep_proton_fluence_spectrum(self.raw_spectrum)
         validate_sep_proton_fluence_spectrum(self.penetrated_spectrum)
 
-        if self.raw_spectrum != self.sep_model_result.spectrum:
-            msg = "SEP raw pipeline spectrum must match SEP model spectrum."
-            raise ValueError(msg)
+        validate_spectra_match_expected(
+            spectra=(self.raw_spectrum,),
+            expected_spectra=(self.sep_model_result.spectrum,),
+            mismatch_message="SEP raw pipeline spectrum must match SEP model spectrum.",
+        )
 
         raw_product = self.raw_product or self.sep_model_result.product
         penetrated_product = self.penetrated_product or _sep_mission_fluence_product(
             spectrum=self.penetrated_spectrum,
             label="SEP proton penetrated mission fluence",
-        )
-
-        validate_product_allowed_for_source(
-            product=raw_product,
-            source=RadiationSource.SEP,
-        )
-        validate_product_allowed_for_source(
-            product=penetrated_product,
-            source=RadiationSource.SEP,
         )
 
         if raw_product.kind is not RadiationProductKind.MISSION_FLUENCE:
@@ -79,13 +75,18 @@ class SepProtonPipelineResult:
             msg = "SEP penetrated pipeline product must be mission fluence."
             raise ValueError(msg)
 
-        if raw_product.spectrum != self.raw_spectrum:
-            msg = "SEP raw product spectrum must match raw spectrum."
-            raise ValueError(msg)
-
-        if penetrated_product.spectrum != self.penetrated_spectrum:
-            msg = "SEP penetrated product spectrum must match penetrated spectrum."
-            raise ValueError(msg)
+        validate_products_match_spectra_and_source(
+            products=(raw_product,),
+            spectra=(self.raw_spectrum,),
+            source=RadiationSource.SEP,
+            mismatch_message="SEP raw product spectrum must match raw spectrum.",
+        )
+        validate_products_match_spectra_and_source(
+            products=(penetrated_product,),
+            spectra=(self.penetrated_spectrum,),
+            source=RadiationSource.SEP,
+            mismatch_message="SEP penetrated product spectrum must match penetrated spectrum.",
+        )
 
         object.__setattr__(self, "raw_product", raw_product)
         object.__setattr__(self, "penetrated_product", penetrated_product)
