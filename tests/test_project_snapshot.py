@@ -1,4 +1,6 @@
-﻿import json
+import json
+
+import pytest
 
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import (
@@ -10,6 +12,13 @@ from radar.core.project import (
     SourceModelSelectionConfig,
 )
 from radar.core.project_snapshot import (
+    source_model_selection_from_snapshot,
+    shielding_config_from_snapshot,
+    orbit_config_from_snapshot,
+    mission_config_from_snapshot,
+    methodology_config_from_snapshot,
+    calculation_config_from_snapshot_json,
+    calculation_config_from_snapshot,
     calculation_config_snapshot,
     calculation_config_snapshot_json,
     methodology_config_snapshot,
@@ -133,3 +142,109 @@ def test_calculation_config_snapshot_json_is_json_compatible() -> None:
     decoded = json.loads(encoded)
 
     assert decoded == calculation_config_snapshot(config)
+
+def test_mission_config_from_snapshot_round_trip() -> None:
+    mission = MissionConfig(
+        launch_year=2028,
+        lifetime_years=7,
+        solar_activity_level=SolarActivityLevel.MAXIMUM,
+        sep_exceedance_probability=0.95,
+    )
+
+    assert mission_config_from_snapshot(mission_config_snapshot(mission)) == mission
+
+
+def test_orbit_config_from_snapshot_round_trip() -> None:
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+
+    assert orbit_config_from_snapshot(orbit_config_snapshot(orbit)) == orbit
+
+
+def test_shielding_config_from_snapshot_round_trip() -> None:
+    shielding = ShieldingConfig(
+        thicknesses_g_cm2=(10.0, 1.0),
+        geometry=ShieldGeometry.SPHERE,
+    )
+
+    assert shielding_config_from_snapshot(shielding_config_snapshot(shielding)) == shielding
+
+
+def test_source_model_selection_from_snapshot_round_trip() -> None:
+    selection = SourceModelSelectionConfig.from_profile(
+        MethodologyProfile.OST_WITH_GOST_SEP_GCR,
+    )
+
+    assert (
+        source_model_selection_from_snapshot(source_model_selection_snapshot(selection))
+        == selection
+    )
+
+
+def test_methodology_config_from_snapshot_round_trip() -> None:
+    methodology = MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_GCR)
+
+    assert (
+        methodology_config_from_snapshot(methodology_config_snapshot(methodology))
+        == methodology
+    )
+
+
+def test_calculation_config_from_snapshot_round_trip() -> None:
+    mission = MissionConfig(launch_year=2028, lifetime_years=7)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP),
+        kp=4,
+    )
+
+    assert calculation_config_from_snapshot(calculation_config_snapshot(config)) == config
+
+
+def test_calculation_config_from_snapshot_json_round_trip() -> None:
+    mission = MissionConfig(launch_year=2028, lifetime_years=7)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR),
+        kp=5,
+    )
+
+    encoded = calculation_config_snapshot_json(config)
+
+    assert calculation_config_from_snapshot_json(encoded) == config
+
+
+def test_calculation_config_from_snapshot_rejects_missing_required_field() -> None:
+    mission = MissionConfig(launch_year=2028, lifetime_years=7)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    config = CalculationConfig(mission=mission, orbit=orbit)
+    snapshot = calculation_config_snapshot(config)
+    del snapshot["mission"]
+
+    with pytest.raises(ValueError, match="Required project field is missing"):
+        calculation_config_from_snapshot(snapshot)
+
+
+def test_calculation_config_from_snapshot_rejects_model_selection_mismatch() -> None:
+    mission = MissionConfig(launch_year=2028, lifetime_years=7)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP),
+    )
+    snapshot = calculation_config_snapshot(config)
+    source_selection = snapshot["source_model_selection"]
+    assert isinstance(source_selection, dict)
+    source_selection["sep_model_family"] = SourceModelFamily.OST_134_1044_2007.value
+
+    with pytest.raises(ValueError, match="does not match methodology profile"):
+        calculation_config_from_snapshot(snapshot)
+
+
+def test_calculation_config_from_snapshot_json_rejects_non_object_root() -> None:
+    with pytest.raises(ValueError, match="Project JSON root must be an object"):
+        calculation_config_from_snapshot_json("[]")
