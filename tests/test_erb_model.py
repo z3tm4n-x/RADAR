@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.core.products import SpectrumProduct
 
@@ -320,3 +320,26 @@ def test_erb_model_result_rejects_product_with_wrong_source() -> None:
                 ),
             ),
         )
+
+def test_normative_erb_model_stub_metadata() -> None:
+    from radar.core.profiles import OST_134_1044_2007_DOCUMENT, SourceModelFamily
+    from radar.core.types import RadiationSource
+    from radar.erb.model import OstErbModel
+
+    model = OstErbModel()
+
+    assert model.metadata.source is RadiationSource.ERB
+    assert model.metadata.model_family is SourceModelFamily.OST_134_1044_2007
+    assert model.metadata.document == OST_134_1044_2007_DOCUMENT
+
+
+def test_normative_erb_model_stub_raises_not_implemented() -> None:
+    from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
+    from radar.erb.model import ErbModelInput, OstErbModel
+
+    mission = MissionConfig(launch_year=2027, lifetime_years=5)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    model_input = ErbModelInput(config=CalculationConfig(mission=mission, orbit=orbit))
+
+    with pytest.raises(NotImplementedError, match="not implemented"):
+        OstErbModel().calculate(model_input)

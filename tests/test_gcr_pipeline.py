@@ -284,3 +284,22 @@ def test_gcr_pipeline_rejects_model_family_mismatched_profile() -> None:
             config=config,
             gcr_model=_gcr_model(),
         )
+
+def test_gcr_pipeline_accepts_gost_gcr_stub_metadata_before_calculation() -> None:
+    from radar.core.profiles import MethodologyProfile
+    from radar.core.project import MethodologyConfig
+    from radar.gcr.model import GostGcrModel
+
+    mission = MissionConfig(launch_year=2027, lifetime_years=7)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_GCR),
+    )
+
+    with pytest.raises(NotImplementedError, match="GOST GCR"):
+        calculate_gcr_pipeline(
+            config=config,
+            gcr_model=GostGcrModel(),
+        )

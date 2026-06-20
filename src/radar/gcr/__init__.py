@@ -1,6 +1,8 @@
-﻿"""Galactic cosmic ray models."""
+"""Galactic cosmic ray models."""
 
 from radar.gcr.model import (
+    GostGcrModel,
+    OstGcrModel,
     GcrModelInput,
     GcrModelProtocol,
     GcrModelResult,
@@ -9,6 +11,8 @@ from radar.gcr.model import (
 )
 
 __all__ = [
+    "GostGcrModel",
+    "OstGcrModel",
     "GcrModelInput",
     "GcrModelProtocol",
     "GcrModelResult",

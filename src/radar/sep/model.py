@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from radar.core.products import SpectrumProduct
-from radar.core.profiles import SourceModelFamily, SourceModelMetadata
+from radar.core.profiles import (
+    GOST_SEP_DOCUMENT,
+    OST_134_1044_2007_DOCUMENT,
+    SourceModelFamily,
+    SourceModelMetadata,
+)
 from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
@@ -206,3 +211,68 @@ class StaticSepModel:
             model=self.model,
             document=self.document,
         )
+
+@dataclass(frozen=True)
+class OstSepModel:
+    """Placeholder for normative OST SEP model.
+
+    The class declares metadata and profile compatibility only.
+    Numerical OST SEP equations are not implemented yet.
+    """
+
+    model: str = "ost_sep_model"
+    document: str = OST_134_1044_2007_DOCUMENT
+    version: str = "not_implemented"
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+
+        return SourceModelMetadata(
+            source=RadiationSource.SEP,
+            model_family=SourceModelFamily.OST_134_1044_2007,
+            name=self.model,
+            document=self.document,
+            version=self.version,
+        )
+
+    def __post_init__(self) -> None:
+        _ = self.metadata
+
+    def calculate(self, model_input: SepModelInput) -> SepModelResult:
+        """Raise until the normative OST SEP model is implemented."""
+
+        raise NotImplementedError("OST SEP model is not implemented yet.")
+
+
+@dataclass(frozen=True)
+class GostSepModel:
+    """Placeholder for normative GOST SEP model.
+
+    The class declares metadata and profile compatibility only.
+    Numerical GOST SEP equations are not implemented yet.
+    """
+
+    model: str = "gost_sep_model"
+    document: str = GOST_SEP_DOCUMENT
+    version: str = "not_implemented"
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+
+        return SourceModelMetadata(
+            source=RadiationSource.SEP,
+            model_family=SourceModelFamily.GOST_SEP,
+            name=self.model,
+            document=self.document,
+            version=self.version,
+        )
+
+    def __post_init__(self) -> None:
+        _ = self.metadata
+
+    def calculate(self, model_input: SepModelInput) -> SepModelResult:
+        """Raise until the normative GOST SEP model is implemented."""
+
+        raise NotImplementedError("GOST SEP model is not implemented yet.")

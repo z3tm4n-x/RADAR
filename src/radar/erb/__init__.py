@@ -1,6 +1,7 @@
-﻿"""Earth radiation belt models."""
+"""Earth radiation belt models."""
 
 from radar.erb.model import (
+    OstErbModel,
     ErbModelInput,
     ErbModelProtocol,
     ErbModelResult,
@@ -9,6 +10,7 @@ from radar.erb.model import (
 )
 
 __all__ = [
+    "OstErbModel",
     "ErbModelInput",
     "ErbModelProtocol",
     "ErbModelResult",

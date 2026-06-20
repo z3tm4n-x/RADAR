@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from radar.core.products import SpectrumProduct
-from radar.core.profiles import SourceModelFamily, SourceModelMetadata
+from radar.core.profiles import (
+    GOST_GCR_DOCUMENT,
+    OST_134_1044_2007_DOCUMENT,
+    SourceModelFamily,
+    SourceModelMetadata,
+)
 from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
@@ -244,3 +249,68 @@ class StaticGcrModel:
             model=self.model,
             document=self.document,
         )
+
+@dataclass(frozen=True)
+class OstGcrModel:
+    """Placeholder for normative OST GCR model.
+
+    The class declares metadata and profile compatibility only.
+    Numerical OST GCR equations are not implemented yet.
+    """
+
+    model: str = "ost_gcr_model"
+    document: str = OST_134_1044_2007_DOCUMENT
+    version: str = "not_implemented"
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+
+        return SourceModelMetadata(
+            source=RadiationSource.GCR,
+            model_family=SourceModelFamily.OST_134_1044_2007,
+            name=self.model,
+            document=self.document,
+            version=self.version,
+        )
+
+    def __post_init__(self) -> None:
+        _ = self.metadata
+
+    def calculate(self, model_input: GcrModelInput) -> GcrModelResult:
+        """Raise until the normative OST GCR model is implemented."""
+
+        raise NotImplementedError("OST GCR model is not implemented yet.")
+
+
+@dataclass(frozen=True)
+class GostGcrModel:
+    """Placeholder for normative GOST GCR model.
+
+    The class declares metadata and profile compatibility only.
+    Numerical GOST GCR equations are not implemented yet.
+    """
+
+    model: str = "gost_gcr_model"
+    document: str = GOST_GCR_DOCUMENT
+    version: str = "not_implemented"
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+
+        return SourceModelMetadata(
+            source=RadiationSource.GCR,
+            model_family=SourceModelFamily.GOST_GCR,
+            name=self.model,
+            document=self.document,
+            version=self.version,
+        )
+
+    def __post_init__(self) -> None:
+        _ = self.metadata
+
+    def calculate(self, model_input: GcrModelInput) -> GcrModelResult:
+        """Raise until the normative GOST GCR model is implemented."""
+
+        raise NotImplementedError("GOST GCR model is not implemented yet.")

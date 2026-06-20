@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.core.products import SpectrumProduct
 
@@ -256,3 +256,36 @@ def test_sep_model_result_rejects_product_with_wrong_source() -> None:
                 ),
             ),
         )
+
+def test_normative_sep_model_stub_metadata() -> None:
+    from radar.core.profiles import (
+        GOST_SEP_DOCUMENT,
+        OST_134_1044_2007_DOCUMENT,
+        SourceModelFamily,
+    )
+    from radar.core.types import RadiationSource
+    from radar.sep.model import GostSepModel, OstSepModel
+
+    ost_model = OstSepModel()
+    gost_model = GostSepModel()
+
+    assert ost_model.metadata.source is RadiationSource.SEP
+    assert ost_model.metadata.model_family is SourceModelFamily.OST_134_1044_2007
+    assert ost_model.metadata.document == OST_134_1044_2007_DOCUMENT
+
+    assert gost_model.metadata.source is RadiationSource.SEP
+    assert gost_model.metadata.model_family is SourceModelFamily.GOST_SEP
+    assert gost_model.metadata.document == GOST_SEP_DOCUMENT
+
+
+def test_normative_sep_model_stubs_raise_not_implemented() -> None:
+    from radar.core.project import MissionConfig
+    from radar.sep.model import GostSepModel, OstSepModel, SepModelInput
+
+    model_input = SepModelInput(
+        mission=MissionConfig(launch_year=2027, lifetime_years=5),
+    )
+
+    for model in (OstSepModel(), GostSepModel()):
+        with pytest.raises(NotImplementedError, match="not implemented"):
+            model.calculate(model_input)

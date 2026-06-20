@@ -1,6 +1,8 @@
-﻿"""Solar energetic particle models."""
+"""Solar energetic particle models."""
 
 from radar.sep.model import (
+    GostSepModel,
+    OstSepModel,
     SepModelInput,
     SepModelProtocol,
     SepModelResult,
@@ -9,6 +11,8 @@ from radar.sep.model import (
 )
 
 __all__ = [
+    "GostSepModel",
+    "OstSepModel",
     "SepModelInput",
     "SepModelProtocol",
     "SepModelResult",

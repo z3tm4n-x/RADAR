@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.core.products import SpectrumProduct
 
@@ -306,3 +306,36 @@ def test_gcr_model_result_rejects_product_with_wrong_source() -> None:
                 ),
             ),
         )
+
+def test_normative_gcr_model_stub_metadata() -> None:
+    from radar.core.profiles import (
+        GOST_GCR_DOCUMENT,
+        OST_134_1044_2007_DOCUMENT,
+        SourceModelFamily,
+    )
+    from radar.core.types import RadiationSource
+    from radar.gcr.model import GostGcrModel, OstGcrModel
+
+    ost_model = OstGcrModel()
+    gost_model = GostGcrModel()
+
+    assert ost_model.metadata.source is RadiationSource.GCR
+    assert ost_model.metadata.model_family is SourceModelFamily.OST_134_1044_2007
+    assert ost_model.metadata.document == OST_134_1044_2007_DOCUMENT
+
+    assert gost_model.metadata.source is RadiationSource.GCR
+    assert gost_model.metadata.model_family is SourceModelFamily.GOST_GCR
+    assert gost_model.metadata.document == GOST_GCR_DOCUMENT
+
+
+def test_normative_gcr_model_stubs_raise_not_implemented() -> None:
+    from radar.core.project import MissionConfig
+    from radar.gcr.model import GcrModelInput, GostGcrModel, OstGcrModel
+
+    model_input = GcrModelInput(
+        mission=MissionConfig(launch_year=2027, lifetime_years=5),
+    )
+
+    for model in (OstGcrModel(), GostGcrModel()):
+        with pytest.raises(NotImplementedError, match="not implemented"):
+            model.calculate(model_input)

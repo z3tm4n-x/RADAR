@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from radar.core.products import SpectrumProduct
-from radar.core.profiles import SourceModelFamily, SourceModelMetadata
+from radar.core.profiles import (
+    OST_134_1044_2007_DOCUMENT,
+    SourceModelFamily,
+    SourceModelMetadata,
+)
 from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.project import CalculationConfig
 from radar.core.spectra import Spectrum1D
@@ -232,3 +236,35 @@ class StaticErbModel:
             model=self.model,
             document=self.document,
         )
+
+@dataclass(frozen=True)
+class OstErbModel:
+    """Placeholder for normative OST ERB model.
+
+    The class declares metadata and profile compatibility only.
+    Numerical OST ERB equations are not implemented yet.
+    """
+
+    model: str = "ost_erb_model"
+    document: str = OST_134_1044_2007_DOCUMENT
+    version: str = "not_implemented"
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+
+        return SourceModelMetadata(
+            source=RadiationSource.ERB,
+            model_family=SourceModelFamily.OST_134_1044_2007,
+            name=self.model,
+            document=self.document,
+            version=self.version,
+        )
+
+    def __post_init__(self) -> None:
+        _ = self.metadata
+
+    def calculate(self, model_input: ErbModelInput) -> ErbModelResult:
+        """Raise until the normative OST ERB model is implemented."""
+
+        raise NotImplementedError("OST ERB model is not implemented yet.")

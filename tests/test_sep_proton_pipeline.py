@@ -275,3 +275,23 @@ def test_sep_proton_pipeline_rejects_model_family_mismatched_profile() -> None:
             sep_model=_sep_model(),
             penetration=_penetration(),
         )
+
+def test_sep_proton_pipeline_accepts_gost_sep_stub_metadata_before_calculation() -> None:
+    from radar.core.profiles import MethodologyProfile
+    from radar.core.project import MethodologyConfig
+    from radar.sep.model import GostSepModel
+
+    mission = MissionConfig(launch_year=2027, lifetime_years=5)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP),
+    )
+
+    with pytest.raises(NotImplementedError, match="GOST SEP"):
+        calculate_sep_proton_pipeline(
+            config=config,
+            sep_model=GostSepModel(),
+            penetration=_penetration(),
+        )
