@@ -1,4 +1,4 @@
-"""Registered source model classes."""
+﻿"""Registered source model classes."""
 
 from __future__ import annotations
 
@@ -29,6 +29,28 @@ class SourceModelRegistration:
         """Return registry key."""
 
         return (self.source, self.model_family)
+
+
+@dataclass(frozen=True)
+class SourceModelBundle:
+    """Registered source model classes selected for a methodology profile."""
+
+    profile: MethodologyProfile
+    sep: SourceModelRegistration
+    gcr: SourceModelRegistration
+    erb: SourceModelRegistration
+
+    @property
+    def registrations(self) -> tuple[SourceModelRegistration, ...]:
+        """Return registrations in calculation-source order."""
+
+        return (self.sep, self.gcr, self.erb)
+
+    @property
+    def model_classes(self) -> tuple[type[Any], ...]:
+        """Return model classes in calculation-source order."""
+
+        return tuple(registration.model_class for registration in self.registrations)
 
 
 REGISTERED_SOURCE_MODELS: tuple[SourceModelRegistration, ...] = (
@@ -134,3 +156,36 @@ def source_model_class_for_profile(
         profile=profile,
         source=source,
     ).model_class
+
+
+def source_model_bundle_for_profile(profile: MethodologyProfile) -> SourceModelBundle:
+    """Return registered source model bundle for a methodology profile."""
+
+    return SourceModelBundle(
+        profile=profile,
+        sep=source_model_registration_for_profile(
+            profile=profile,
+            source=RadiationSource.SEP,
+        ),
+        gcr=source_model_registration_for_profile(
+            profile=profile,
+            source=RadiationSource.GCR,
+        ),
+        erb=source_model_registration_for_profile(
+            profile=profile,
+            source=RadiationSource.ERB,
+        ),
+    )
+
+
+def source_model_classes_for_profile(
+    profile: MethodologyProfile,
+) -> tuple[type[Any], type[Any], type[Any]]:
+    """Return SEP, GCR and ERB model classes for a methodology profile."""
+
+    bundle = source_model_bundle_for_profile(profile)
+    return (
+        bundle.sep.model_class,
+        bundle.gcr.model_class,
+        bundle.erb.model_class,
+    )

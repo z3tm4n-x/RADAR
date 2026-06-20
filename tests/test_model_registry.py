@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.types import RadiationSource
@@ -7,9 +7,12 @@ from radar.gcr.model import GostGcrModel, OstGcrModel
 from radar.model_registry import (
     REGISTERED_SOURCE_MODELS,
     SourceModelRegistration,
+    SourceModelBundle,
     registered_source_model_families,
     source_model_class,
+    source_model_bundle_for_profile,
     source_model_class_for_profile,
+    source_model_classes_for_profile,
     source_model_registration,
     source_model_registration_for_profile,
 )
@@ -157,3 +160,69 @@ def test_source_model_registration_for_custom_profile_has_no_default() -> None:
             profile=MethodologyProfile.CUSTOM,
             source=RadiationSource.SEP,
         )
+
+def test_source_model_bundle_for_plain_ost_profile() -> None:
+    bundle = source_model_bundle_for_profile(MethodologyProfile.OST_134_1044_2007)
+
+    assert isinstance(bundle, SourceModelBundle)
+    assert bundle.profile is MethodologyProfile.OST_134_1044_2007
+    assert bundle.sep.model_class is OstSepModel
+    assert bundle.gcr.model_class is OstGcrModel
+    assert bundle.erb.model_class is OstErbModel
+
+
+def test_source_model_bundle_for_gost_sep_profile() -> None:
+    bundle = source_model_bundle_for_profile(MethodologyProfile.OST_WITH_GOST_SEP)
+
+    assert bundle.sep.model_class is GostSepModel
+    assert bundle.gcr.model_class is OstGcrModel
+    assert bundle.erb.model_class is OstErbModel
+
+
+def test_source_model_bundle_for_gost_gcr_profile() -> None:
+    bundle = source_model_bundle_for_profile(MethodologyProfile.OST_WITH_GOST_GCR)
+
+    assert bundle.sep.model_class is OstSepModel
+    assert bundle.gcr.model_class is GostGcrModel
+    assert bundle.erb.model_class is OstErbModel
+
+
+def test_source_model_bundle_for_gost_sep_gcr_profile() -> None:
+    bundle = source_model_bundle_for_profile(MethodologyProfile.OST_WITH_GOST_SEP_GCR)
+
+    assert bundle.sep.model_class is GostSepModel
+    assert bundle.gcr.model_class is GostGcrModel
+    assert bundle.erb.model_class is OstErbModel
+
+
+def test_source_model_bundle_registration_order() -> None:
+    bundle = source_model_bundle_for_profile(MethodologyProfile.OST_134_1044_2007)
+
+    assert tuple(registration.source for registration in bundle.registrations) == (
+        RadiationSource.SEP,
+        RadiationSource.GCR,
+        RadiationSource.ERB,
+    )
+
+
+def test_source_model_bundle_model_classes_order() -> None:
+    bundle = source_model_bundle_for_profile(MethodologyProfile.OST_134_1044_2007)
+
+    assert bundle.model_classes == (
+        OstSepModel,
+        OstGcrModel,
+        OstErbModel,
+    )
+
+
+def test_source_model_classes_for_profile() -> None:
+    assert source_model_classes_for_profile(MethodologyProfile.OST_WITH_GOST_SEP_GCR) == (
+        GostSepModel,
+        GostGcrModel,
+        OstErbModel,
+    )
+
+
+def test_source_model_bundle_for_custom_profile_has_no_default_models() -> None:
+    with pytest.raises(ValueError, match="No registered source model"):
+        source_model_bundle_for_profile(MethodologyProfile.CUSTOM)

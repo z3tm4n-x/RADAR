@@ -19,9 +19,12 @@ __all__ = [
 from radar.model_registry import (
     REGISTERED_SOURCE_MODELS,
     SourceModelRegistration,
+    SourceModelBundle,
     registered_source_model_families,
     source_model_class,
+    source_model_bundle_for_profile,
     source_model_class_for_profile,
+    source_model_classes_for_profile,
     source_model_registration,
     source_model_registration_for_profile,
 )
@@ -29,6 +32,9 @@ from radar.model_registry import (
 __all__ = [
     "REGISTERED_SOURCE_MODELS",
     "SourceModelRegistration",
+    "source_model_classes_for_profile",
+    "source_model_bundle_for_profile",
+    "SourceModelBundle",
     "registered_source_model_families",
     "source_model_class",
     "source_model_class_for_profile",
