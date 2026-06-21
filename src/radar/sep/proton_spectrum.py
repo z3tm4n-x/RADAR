@@ -516,6 +516,37 @@ def evaluate_sep_proton_spectrum_value(
     return float(c_value * momentum_ratio ** (-2.0 * coefficients.gamma2))
 
 
+
+def directional_flux_to_omnidirectional_flux_value(
+    directional_flux_value: float,
+) -> float:
+    """Convert isotropic directional flux density from per-steradian to no-sr flux."""
+
+    if not math.isfinite(directional_flux_value):
+        msg = "Directional flux value must be finite."
+        raise ValueError(msg)
+
+    if directional_flux_value < 0.0:
+        msg = "Directional flux value must be non-negative."
+        raise ValueError(msg)
+
+    return float(4.0 * math.pi * directional_flux_value)
+
+
+def directional_flux_to_omnidirectional_flux(
+    directional_flux_values: tuple[float, ...],
+) -> tuple[float, ...]:
+    """Convert isotropic directional flux spectrum values from per-steradian units."""
+
+    if not directional_flux_values:
+        msg = "Directional flux values must not be empty."
+        raise ValueError(msg)
+
+    return tuple(
+        directional_flux_to_omnidirectional_flux_value(value)
+        for value in directional_flux_values
+    )
+
 def evaluate_sep_proton_spectrum(
     energy_grid_mev: tuple[float, ...],
     coefficients: SepProtonSpectrumCoefficients,

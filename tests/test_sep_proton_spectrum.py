@@ -1,3 +1,4 @@
+import math
 import csv
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from radar.sep.proton_spectrum import (
     SepProtonCoefficientName,
     SepProtonSpectrumCoefficients,
     SepProtonSpectrumProduct,
+    directional_flux_to_omnidirectional_flux,
+    directional_flux_to_omnidirectional_flux_value,
     evaluate_sep_proton_spectrum,
     evaluate_sep_proton_spectrum_value,
     load_sep_proton_coefficient_records,
@@ -487,3 +490,36 @@ def test_interpolated_lookup_works_for_ost_table() -> None:
     expected = (1.097 + 1.744 + 0.238 + 1.111) / 4.0
 
     assert coefficients.log10_c == pytest.approx(expected)
+
+
+
+def test_directional_flux_value_is_converted_to_omnidirectional_flux() -> None:
+    assert directional_flux_to_omnidirectional_flux_value(2.0) == pytest.approx(
+        8.0 * math.pi
+    )
+
+
+def test_directional_flux_spectrum_is_converted_to_omnidirectional_flux() -> None:
+    values = directional_flux_to_omnidirectional_flux((1.0, 2.0, 3.0))
+
+    assert values == pytest.approx((4.0 * math.pi, 8.0 * math.pi, 12.0 * math.pi))
+
+
+def test_directional_flux_conversion_accepts_zero() -> None:
+    assert directional_flux_to_omnidirectional_flux_value(0.0) == pytest.approx(0.0)
+
+
+def test_directional_flux_conversion_rejects_negative_value() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        directional_flux_to_omnidirectional_flux_value(-1.0)
+
+
+@pytest.mark.parametrize("bad_value", (math.nan, math.inf, -math.inf))
+def test_directional_flux_conversion_rejects_non_finite_value(bad_value: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        directional_flux_to_omnidirectional_flux_value(bad_value)
+
+
+def test_directional_flux_spectrum_conversion_rejects_empty_values() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        directional_flux_to_omnidirectional_flux(())
