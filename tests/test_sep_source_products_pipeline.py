@@ -1,0 +1,241 @@
+import math
+
+import pytest
+
+from radar.core.products import SpectrumProduct
+from radar.core.profiles import MethodologyProfile
+from radar.core.project import (
+    CalculationConfig,
+    MethodologyConfig,
+    MissionConfig,
+    OrbitConfig,
+)
+from radar.core.result import ComponentStatus
+from radar.core.spectra import Spectrum1D
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
+from radar.core.units import Unit
+from radar.sep.model import OstSepModel, SepModelInput, StaticSepModel
+from radar.sep.proton_spectrum import (
+    SepProtonCoefficientName,
+    SepProtonCoefficientRecord,
+    SepProtonSpectrumProduct,
+)
+from radar.pipelines.sep_source_products import (
+    SEP_SOURCE_MODEL_COMPONENT,
+    SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT,
+    SepSourceProductsPipelineResult,
+    calculate_sep_source_products_pipeline,
+)
+
+
+def _config(
+    profile: MethodologyProfile = MethodologyProfile.CUSTOM,
+    *,
+    lifetime_years: int = 5,
+    probability: float = 0.5,
+) -> CalculationConfig:
+    return CalculationConfig(
+        mission=MissionConfig(
+            launch_year=2027,
+            lifetime_years=lifetime_years,
+            sep_exceedance_probability=probability,
+        ),
+        orbit=OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0),
+        methodology=MethodologyConfig(profile=profile),
+    )
+
+
+def _sep_proton_fluence_spectrum(
+    *,
+    model: str = "annual_sep_test",
+    y: tuple[float, ...] = (1.0, 2.0, 3.0),
+) -> Spectrum1D:
+    return Spectrum1D(
+        x=(10.0, 20.0, 30.0),
+        y=y,
+        x_unit=Unit.MEV,
+        y_unit=Unit.DIFFERENTIAL_FLUENCE,
+        quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+        particle=Particle.PROTON,
+        source=RadiationSource.SEP,
+        model=model,
+    )
+
+
+def _static_sep_model() -> StaticSepModel:
+    return StaticSepModel(
+        annual_fluence_spectrum=_sep_proton_fluence_spectrum(),
+        model="static_sep_test",
+        document="test_document",
+    )
+
+
+def _simple_ost_sep_proton_coefficient_records() -> tuple[SepProtonCoefficientRecord, ...]:
+    records: list[SepProtonCoefficientRecord] = []
+
+    values = {
+        SepProtonSpectrumProduct.FLUENCE: {
+            SepProtonCoefficientName.LOG10_C: 1.0,
+            SepProtonCoefficientName.BREAK_ENERGY_MEV: 10.0,
+            SepProtonCoefficientName.GAMMA1: 1.0,
+            SepProtonCoefficientName.GAMMA2: 1.0,
+        },
+        SepProtonSpectrumProduct.PEAK_FLUX: {
+            SepProtonCoefficientName.LOG10_C: 0.0,
+            SepProtonCoefficientName.BREAK_ENERGY_MEV: 10.0,
+            SepProtonCoefficientName.GAMMA1: 1.0,
+            SepProtonCoefficientName.GAMMA2: 1.0,
+        },
+    }
+
+    for product, parameters in values.items():
+        for parameter, value in parameters.items():
+            records.append(
+                SepProtonCoefficientRecord(
+                    model="ost_134_1044_2007",
+                    product=product,
+                    parameter=parameter,
+                    event_count=2,
+                    probability=0.5,
+                    value=value,
+                    source_table="test",
+                )
+            )
+
+    return tuple(records)
+
+
+def _ost_sep_model() -> OstSepModel:
+    return OstSepModel(
+        energy_grid_mev=(10.0,),
+        monthly_smoothed_wolf_numbers=(2.0 / 0.0135,),
+        coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+        version="proton_only",
+    )
+
+
+def test_sep_source_products_pipeline_calculates_static_model_products() -> None:
+    pipeline_result = calculate_sep_source_products_pipeline(
+        config=_config(lifetime_years=5),
+        sep_model=_static_sep_model(),
+    )
+
+    assert pipeline_result.sep_model_result.spectrum.y == pytest.approx(
+        (5.0, 10.0, 15.0)
+    )
+    assert pipeline_result.products == pipeline_result.sep_model_result.products
+    assert len(pipeline_result.products) == 1
+    assert pipeline_result.products[0].kind is RadiationProductKind.MISSION_FLUENCE
+
+
+def test_sep_source_products_pipeline_records_component_statuses() -> None:
+    pipeline_result = calculate_sep_source_products_pipeline(
+        config=_config(),
+        sep_model=_static_sep_model(),
+    )
+
+    result = pipeline_result.calculation_result
+
+    assert result.component_status(SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT) is (
+        ComponentStatus.COMPLETED
+    )
+    assert result.component_status(SEP_SOURCE_MODEL_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.has_errors() is False
+
+
+def test_sep_source_products_pipeline_records_log_entries() -> None:
+    pipeline_result = calculate_sep_source_products_pipeline(
+        config=_config(),
+        sep_model=_static_sep_model(),
+    )
+
+    log_entries = pipeline_result.calculation_result.log.entries
+
+    assert len(log_entries) == 3
+    assert log_entries[0].stage == SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT
+    assert log_entries[1].stage == SEP_SOURCE_MODEL_COMPONENT
+    assert log_entries[2].stage == SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT
+
+
+def test_sep_source_products_pipeline_records_model_info() -> None:
+    pipeline_result = calculate_sep_source_products_pipeline(
+        config=_config(),
+        sep_model=_static_sep_model(),
+    )
+
+    model_info = pipeline_result.calculation_result.model_info
+
+    assert len(model_info) == 1
+    assert model_info[0].name == "static_sep_test"
+    assert model_info[0].version == "unversioned"
+    assert model_info[0].source == "test_document"
+
+
+def test_sep_source_products_pipeline_preserves_ost_proton_products() -> None:
+    pipeline_result = calculate_sep_source_products_pipeline(
+        config=_config(
+            profile=MethodologyProfile.OST_134_1044_2007,
+            lifetime_years=5,
+            probability=0.5,
+        ),
+        sep_model=_ost_sep_model(),
+    )
+
+    products_by_kind = {
+        product.kind: product
+        for product in pipeline_result.products
+    }
+
+    assert set(products_by_kind) == {
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.PEAK_FLUX,
+        RadiationProductKind.MEAN_FLUX,
+    }
+
+    assert products_by_kind[RadiationProductKind.MISSION_FLUENCE].spectrum.y == (
+        pytest.approx((10.0,))
+    )
+    assert products_by_kind[RadiationProductKind.PEAK_FLUX].spectrum.y == pytest.approx(
+        (4.0 * math.pi,)
+    )
+    assert (
+        products_by_kind[RadiationProductKind.MEAN_FLUX].spectrum.quantity
+        is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
+    )
+
+    model_info = pipeline_result.calculation_result.model_info
+    assert model_info[0].name == "ost_sep_model"
+    assert model_info[0].version == "proton_only"
+
+
+def test_sep_source_products_pipeline_rejects_profile_model_mismatch() -> None:
+    with pytest.raises(ValueError, match="does not match"):
+        calculate_sep_source_products_pipeline(
+            config=_config(profile=MethodologyProfile.OST_134_1044_2007),
+            sep_model=_static_sep_model(),
+        )
+
+
+def test_sep_source_products_pipeline_result_rejects_products_not_from_model_result() -> None:
+    sep_model_result = _static_sep_model().calculate(
+        SepModelInput(mission=_config().mission)
+    )
+    other_product = SpectrumProduct(
+        kind=RadiationProductKind.MISSION_FLUENCE,
+        spectrum=_sep_proton_fluence_spectrum(model="other"),
+    )
+
+    with pytest.raises(ValueError, match="must match SEP model result products"):
+        SepSourceProductsPipelineResult(
+            calculation_result=calculate_sep_source_products_pipeline(
+                config=_config(),
+                sep_model=_static_sep_model(),
+            ).calculation_result,
+            sep_model_result=sep_model_result,
+            products=(other_product,),
+        )
