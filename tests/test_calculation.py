@@ -1,6 +1,7 @@
-﻿from radar.calculation import execute_calculation
+from radar.calculation import execute_calculation
 from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
+from radar.core.types import SolarActivityLevel
 from radar.core.result import ComponentStatus
 from radar.core.types import DoseQuantity
 from radar.core.units import Unit
@@ -38,14 +39,28 @@ def test_execute_calculation_sets_source_component_statuses() -> None:
 def test_execute_calculation_records_model_information() -> None:
     result = execute_calculation(_config())
 
-    assert len(result.model_info) == 3
+    assert len(result.model_info) == 4
     assert {model.name for model in result.model_info} == {
+        "solar_activity",
         "ost_sep_model",
         "ost_gcr_model",
         "ost_erb_model",
     }
-    assert {model.version for model in result.model_info} == {"not_implemented"}
-    assert all(model.status == "численная часть не реализована" for model in result.model_info)
+    assert {
+        model.version for model in result.model_info if model.name != "solar_activity"
+    } == {"not_implemented"}
+
+    solar_model = next(
+        model for model in result.model_info if model.name == "solar_activity"
+    )
+    assert solar_model.version == "ost_134_1044_2007_table_g_1_wolf_numbers"
+    assert solar_model.status == "использовано"
+    assert solar_model.source == "ОСТ 134-1044-2007"
+    assert all(
+        model.status == "численная часть не реализована"
+        for model in result.model_info
+        if model.name != "solar_activity"
+    )
 
 
 def test_execute_calculation_writes_log_entries() -> None:
@@ -87,3 +102,54 @@ def test_execute_calculation_result_can_be_saved_in_project_file() -> None:
     restored = project_file_from_json(project_file.to_json())
 
     assert restored.calculation_result == result
+
+def test_execute_calculation_records_ost_solar_activity_model() -> None:
+    base_config = _config()
+    config = CalculationConfig(
+        mission=MissionConfig(
+            launch_year=2028,
+            lifetime_years=3,
+            solar_activity_level=SolarActivityLevel.MAXIMUM,
+        ),
+        orbit=base_config.orbit,
+        shielding=base_config.shielding,
+        kp=base_config.kp,
+        dose_quantity=base_config.dose_quantity,
+        dose_unit=base_config.dose_unit,
+        methodology=base_config.methodology,
+    )
+
+    result = execute_calculation(config)
+
+    solar_model = next(
+        model for model in result.model_info if model.name == "solar_activity"
+    )
+    assert solar_model.name == "solar_activity"
+    assert solar_model.source == "ОСТ 134-1044-2007"
+    assert solar_model.version == "ost_134_1044_2007_table_g_1_wolf_numbers"
+
+
+def test_execute_calculation_logs_ost_wolf_numbers_for_mission() -> None:
+    base_config = _config()
+    config = CalculationConfig(
+        mission=MissionConfig(
+            launch_year=2028,
+            lifetime_years=3,
+            solar_activity_level=SolarActivityLevel.MAXIMUM,
+        ),
+        orbit=base_config.orbit,
+        shielding=base_config.shielding,
+        kp=base_config.kp,
+        dose_quantity=base_config.dose_quantity,
+        dose_unit=base_config.dose_unit,
+        methodology=base_config.methodology,
+    )
+
+    result = execute_calculation(config)
+
+    messages = tuple(entry.message for entry in result.log.entries)
+    assert any(
+        message == "Числа Вольфа по таблице Г.1 ОСТ: 11.5, 33.9, 100.8"
+        for message in messages
+    )
+

@@ -7,6 +7,8 @@ from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.types import RadiationSource
 from radar.model_registry import SourceModelRegistration, source_model_bundle_for_selection
+from radar.solar_activity.model import build_mission_solar_activity
+from radar.solar_activity.ost import ost_wolf_number_cycle_table
 from radar.output_tables import OutputTable
 from radar.standard_output_tables import (
     DoseByThicknessPoint,
@@ -63,6 +65,43 @@ def _set_placeholder_source_state(
             "model": model_info.name,
             "document": model_info.source,
             "version": model_info.version,
+        },
+    )
+
+
+def _set_solar_activity_state(
+    result: CalculationResult,
+    config: CalculationConfig,
+) -> CalculationResult:
+    """Add OST solar activity data used by this calculation."""
+
+    solar_cycle_table = ost_wolf_number_cycle_table(config.mission.solar_activity_level)
+    solar_activity = build_mission_solar_activity(
+        mission=config.mission,
+        cycle_table=solar_cycle_table,
+        reference_start_year=config.mission.launch_year,
+    )
+
+    result = result.set_model_info(
+        ModelInfo(
+            name="solar_activity",
+            version=solar_activity.table_id,
+            status="использовано",
+            source=solar_activity.source,
+        )
+    )
+
+    return result.add_log_entry(
+        LogLevel.INFO,
+        "СА",
+        (
+            "Числа Вольфа по таблице Г.1 ОСТ: "
+            f"{', '.join(f'{value:g}' for value in solar_activity.wolf_numbers)}"
+        ),
+        {
+            "cycle_years": ", ".join(str(year) for year in solar_activity.cycle_years),
+            "level": config.mission.solar_activity_level.value,
+            "table": solar_activity.table_id,
         },
     )
 
@@ -127,6 +166,8 @@ def execute_calculation(config: CalculationConfig) -> CalculationResult:
             "kp": str(config.kp),
         },
     )
+
+    result = _set_solar_activity_state(result, config)
 
     bundle = source_model_bundle_for_selection(config.source_model_selection)
 
