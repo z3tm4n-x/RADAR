@@ -13,6 +13,82 @@ def _calculation_config() -> CalculationConfig:
     )
 
 
+def test_main_init_creates_project_file(tmp_path, capsys) -> None:
+    output_path = tmp_path / "input.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "geo",
+        ],
+    )
+    restored = read_project_file(output_path)
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert restored.calculation_result is None
+    assert restored.calculation_config.mission.launch_year == 2028
+    assert restored.calculation_config.mission.lifetime_years == 7
+    assert restored.calculation_config.orbit.perigee_altitude_km == 35786.0
+    assert "Файл проекта RADAR создан" in captured.out
+
+
+def test_main_init_creates_circular_project_file(tmp_path) -> None:
+    output_path = tmp_path / "input.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "circular",
+            "--altitude-km",
+            "550",
+            "--inclination-deg",
+            "97.6",
+            "--kp",
+            "5",
+        ],
+    )
+    restored = read_project_file(output_path)
+
+    assert exit_code == 0
+    assert restored.calculation_config.orbit.perigee_altitude_km == 550.0
+    assert restored.calculation_config.orbit.inclination_deg == 97.6
+    assert restored.calculation_config.kp == 5
+
+
+def test_main_init_rejects_circular_orbit_without_altitude(tmp_path, capsys) -> None:
+    output_path = tmp_path / "input.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "circular",
+        ],
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Для круговой орбиты укажите --altitude-km" in captured.err
+
+
 def test_main_run_overwrites_input_project_file(tmp_path, capsys) -> None:
     input_path = tmp_path / "input.radar.json"
     created_at = datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC)
@@ -30,7 +106,7 @@ def test_main_run_overwrites_input_project_file(tmp_path, capsys) -> None:
     assert exit_code == 0
     assert restored.created_at == created_at.isoformat()
     assert restored.calculation_result is not None
-    assert "RADAR project calculation saved" in captured.out
+    assert "Расчёт проекта RADAR сохранён" in captured.out
 
 
 def test_main_run_writes_output_project_file(tmp_path, capsys) -> None:
@@ -52,6 +128,17 @@ def test_main_run_writes_output_project_file(tmp_path, capsys) -> None:
     assert original.calculation_result is None
     assert restored.calculation_result is not None
     assert str(output_path) in captured.out
+
+
+def test_main_run_reports_missing_input_file(tmp_path, capsys) -> None:
+    input_path = tmp_path / "missing.radar.json"
+
+    exit_code = main(["run", str(input_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Ошибка RADAR: файл не найден" in captured.err
+    assert str(input_path) in captured.err
 
 
 def test_main_rejects_missing_command() -> None:
