@@ -179,6 +179,32 @@ def source_model_bundle_for_profile(profile: MethodologyProfile) -> SourceModelB
     )
 
 
+def _model_instance(
+    registration: SourceModelRegistration,
+    kwargs: dict[str, Any] | None,
+) -> Any:
+    """Instantiate a registered source model with optional constructor kwargs."""
+
+    return registration.model_class(**(kwargs or {}))
+
+
+def source_model_instances_for_profile(
+    profile: MethodologyProfile,
+    *,
+    sep_kwargs: dict[str, Any] | None = None,
+    gcr_kwargs: dict[str, Any] | None = None,
+    erb_kwargs: dict[str, Any] | None = None,
+) -> tuple[Any, Any, Any]:
+    """Return SEP, GCR and ERB model instances for a methodology profile."""
+
+    bundle = source_model_bundle_for_profile(profile)
+    return (
+        _model_instance(bundle.sep, sep_kwargs),
+        _model_instance(bundle.gcr, gcr_kwargs),
+        _model_instance(bundle.erb, erb_kwargs),
+    )
+
+
 def source_model_classes_for_profile(
     profile: MethodologyProfile,
 ) -> tuple[type[Any], type[Any], type[Any]]:
@@ -210,6 +236,23 @@ def source_model_bundle_for_selection(
             source=RadiationSource.ERB,
             model_family=selection.erb_model_family,
         ),
+    )
+
+
+def source_model_instances_for_selection(
+    selection: SourceModelSelectionConfig,
+    *,
+    sep_kwargs: dict[str, Any] | None = None,
+    gcr_kwargs: dict[str, Any] | None = None,
+    erb_kwargs: dict[str, Any] | None = None,
+) -> tuple[Any, Any, Any]:
+    """Return SEP, GCR and ERB model instances for explicit model family selection."""
+
+    bundle = source_model_bundle_for_selection(selection)
+    return (
+        _model_instance(bundle.sep, sep_kwargs),
+        _model_instance(bundle.gcr, gcr_kwargs),
+        _model_instance(bundle.erb, erb_kwargs),
     )
 
 

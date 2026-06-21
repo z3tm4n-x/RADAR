@@ -16,6 +16,8 @@ from radar.model_registry import (
     source_model_class_for_profile,
     source_model_classes_for_profile,
     source_model_classes_for_selection,
+    source_model_instances_for_profile,
+    source_model_instances_for_selection,
     source_model_registration,
     source_model_registration_for_profile,
 )
@@ -260,3 +262,50 @@ def test_source_model_bundle_for_custom_selection_has_no_default_models() -> Non
 
     with pytest.raises(ValueError, match="No registered source model"):
         source_model_bundle_for_selection(selection)
+
+
+
+def test_source_model_instances_for_profile_returns_default_instances() -> None:
+    sep_model, gcr_model, erb_model = source_model_instances_for_profile(
+        MethodologyProfile.OST_134_1044_2007
+    )
+
+    assert isinstance(sep_model, OstSepModel)
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+    assert sep_model.version == "not_implemented"
+
+
+def test_source_model_instances_for_selection_configures_ost_sep_model() -> None:
+    selection = SourceModelSelectionConfig.from_profile(
+        MethodologyProfile.OST_134_1044_2007,
+    )
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_selection(
+        selection,
+        sep_kwargs={
+            "energy_grid_mev": (10.0, 20.0),
+            "monthly_smoothed_wolf_numbers": (100.0, 120.0),
+            "version": "proton_only",
+        },
+    )
+
+    assert isinstance(sep_model, OstSepModel)
+    assert sep_model.energy_grid_mev == (10.0, 20.0)
+    assert sep_model.monthly_smoothed_wolf_numbers == (100.0, 120.0)
+    assert sep_model.version == "proton_only"
+
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_selection_respects_gost_sep_profile() -> None:
+    selection = SourceModelSelectionConfig.from_profile(
+        MethodologyProfile.OST_WITH_GOST_SEP,
+    )
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_selection(selection)
+
+    assert isinstance(sep_model, GostSepModel)
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
