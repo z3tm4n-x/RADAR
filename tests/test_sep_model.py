@@ -1,3 +1,4 @@
+import math
 import pytest
 
 from radar.core.products import SpectrumProduct
@@ -14,6 +15,7 @@ from radar.core.units import Unit
 from radar.sep.model import (
     SepModelInput,
     SepModelProtocol,
+    OstSepModel,
     SepModelResult,
     StaticSepModel,
     validate_sep_energy_spectrum,
@@ -476,4 +478,142 @@ def test_sep_model_result_rejects_let_products_before_shielding() -> None:
                     spectrum=hze_let_flux,
                 ),
             ),
+        )
+
+
+
+def _simple_ost_sep_proton_coefficient_records():
+    from radar.sep.proton_spectrum import (
+        SepProtonCoefficientName,
+        SepProtonCoefficientRecord,
+        SepProtonSpectrumProduct,
+    )
+
+    records = []
+    values = {
+        SepProtonSpectrumProduct.FLUENCE: {
+            SepProtonCoefficientName.LOG10_C: 1.0,
+            SepProtonCoefficientName.BREAK_ENERGY_MEV: 10.0,
+            SepProtonCoefficientName.GAMMA1: 1.0,
+            SepProtonCoefficientName.GAMMA2: 1.0,
+        },
+        SepProtonSpectrumProduct.PEAK_FLUX: {
+            SepProtonCoefficientName.LOG10_C: 0.0,
+            SepProtonCoefficientName.BREAK_ENERGY_MEV: 10.0,
+            SepProtonCoefficientName.GAMMA1: 1.0,
+            SepProtonCoefficientName.GAMMA2: 1.0,
+        },
+    }
+
+    for product, parameters in values.items():
+        for parameter, value in parameters.items():
+            records.append(
+                SepProtonCoefficientRecord(
+                    model="ost_134_1044_2007",
+                    product=product,
+                    parameter=parameter,
+                    event_count=2,
+                    probability=0.5,
+                    value=value,
+                    source_table="test",
+                )
+            )
+
+    return tuple(records)
+
+
+def _mission_with_probability(
+    *,
+    lifetime_years: int = 5,
+    probability: float = 0.5,
+) -> MissionConfig:
+    return MissionConfig(
+        launch_year=2027,
+        lifetime_years=lifetime_years,
+        sep_exceedance_probability=probability,
+    )
+
+
+def test_ost_sep_model_calculates_proton_source_products() -> None:
+    model = OstSepModel(
+        energy_grid_mev=(10.0,),
+        version="proton_only",
+        monthly_smoothed_wolf_numbers=(2.0 / 0.0135,),
+        coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+    )
+
+    result = model.calculate(
+        SepModelInput(
+            mission=_mission_with_probability(lifetime_years=5, probability=0.5),
+        )
+    )
+
+    products_by_kind = {product.kind: product for product in result.products}
+
+    assert set(products_by_kind) == {
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.PEAK_FLUX,
+        RadiationProductKind.MEAN_FLUX,
+    }
+
+    mission_product = products_by_kind[RadiationProductKind.MISSION_FLUENCE]
+    peak_product = products_by_kind[RadiationProductKind.PEAK_FLUX]
+    mean_product = products_by_kind[RadiationProductKind.MEAN_FLUX]
+
+    assert result.spectrum == mission_product.spectrum
+    assert result.product == mission_product
+
+    assert mission_product.spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
+    assert mission_product.spectrum.y_unit is Unit.DIFFERENTIAL_FLUENCE
+    assert mission_product.spectrum.y == pytest.approx((10.0,))
+
+    assert peak_product.spectrum.quantity is SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX
+    assert peak_product.spectrum.y_unit is Unit.DIFFERENTIAL_FLUX
+    assert peak_product.spectrum.y == pytest.approx((4.0 * math.pi,))
+
+    duration_seconds = 5.0 * 365.25 * 24.0 * 60.0 * 60.0
+
+    assert mean_product.spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
+    assert mean_product.spectrum.y_unit is Unit.DIFFERENTIAL_FLUX
+    assert mean_product.spectrum.y == pytest.approx((10.0 / duration_seconds,))
+
+    assert result.model == "ost_sep_model"
+    assert result.document == "OST 134-1044-2007"
+
+
+def test_ost_sep_model_uses_real_coefficient_tables() -> None:
+    model = OstSepModel(
+        energy_grid_mev=(10.0, 20.0),
+        monthly_smoothed_wolf_numbers=(2.0 / 0.0135,),
+    )
+
+    result = model.calculate(
+        SepModelInput(
+            mission=_mission_with_probability(lifetime_years=3, probability=0.5),
+        )
+    )
+
+    assert len(result.products) == 3
+    assert result.spectrum.x == (10.0, 20.0)
+    assert all(value > 0.0 for value in result.spectrum.y)
+
+
+def test_ost_sep_model_rejects_partial_configuration() -> None:
+    with pytest.raises(ValueError, match="both energy grid and Wolf number series"):
+        OstSepModel(energy_grid_mev=(10.0,))
+
+
+def test_ost_sep_model_rejects_bad_energy_grid() -> None:
+    with pytest.raises(ValueError, match="strictly increasing"):
+        OstSepModel(
+            energy_grid_mev=(10.0, 10.0),
+            monthly_smoothed_wolf_numbers=(100.0,),
+        )
+
+
+def test_ost_sep_model_rejects_negative_wolf_number() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        OstSepModel(
+            energy_grid_mev=(10.0,),
+            monthly_smoothed_wolf_numbers=(-1.0,),
         )

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import resources
+import math
 from typing import Protocol
 
 from radar.core.products import SpectrumProduct
@@ -23,6 +25,15 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
+from radar.sep.event_count import SepEventCountPolicy, calculate_sep_expected_events
+from radar.sep.proton_spectrum import (
+    SepProtonCoefficientRecord,
+    SepProtonSpectrumProduct,
+    directional_flux_to_omnidirectional_flux,
+    evaluate_sep_proton_spectrum,
+    load_sep_proton_coefficient_records,
+    lookup_sep_proton_coefficients_interpolated,
+)
 
 
 SEP_ALLOWED_PARTICLES = (
@@ -40,6 +51,10 @@ SEP_ALLOWED_ENERGY_QUANTITIES = (
     SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
     SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
 )
+
+SECONDS_PER_YEAR = 365.25 * 24.0 * 60.0 * 60.0
+OST_SEP_PROTON_COEFFICIENT_MODEL = "ost_134_1044_2007"
+OST_SEP_PROTON_COEFFICIENT_RESOURCE = "sep_protons/ost_134_1044_2007_coefficients.csv"
 
 
 def validate_sep_energy_spectrum(spectrum: Spectrum1D) -> None:
@@ -112,6 +127,56 @@ def _mission_fluence_product(spectrum: Spectrum1D) -> SpectrumProduct:
         kind=RadiationProductKind.MISSION_FLUENCE,
         spectrum=spectrum,
         label="SEP proton mission fluence",
+    )
+
+
+def _sep_source_product(
+    *,
+    kind: RadiationProductKind,
+    spectrum: Spectrum1D,
+    label: str,
+) -> SpectrumProduct:
+    return SpectrumProduct(
+        kind=kind,
+        spectrum=spectrum,
+        label=label,
+    )
+
+
+def _mission_duration_seconds(lifetime_years: int) -> float:
+    if lifetime_years < 1:
+        msg = "Mission lifetime must be at least one year."
+        raise ValueError(msg)
+
+    return float(lifetime_years * SECONDS_PER_YEAR)
+
+
+def _load_ost_sep_proton_coefficient_records() -> tuple[SepProtonCoefficientRecord, ...]:
+    resource = resources.files("radar.data.normative").joinpath(
+        OST_SEP_PROTON_COEFFICIENT_RESOURCE,
+    )
+
+    with resources.as_file(resource) as path:
+        return load_sep_proton_coefficient_records(path)
+
+
+def _make_sep_proton_spectrum(
+    *,
+    energy_grid_mev: tuple[float, ...],
+    values: tuple[float, ...],
+    quantity: SpectrumQuantity,
+    y_unit: Unit,
+    model: str,
+) -> Spectrum1D:
+    return Spectrum1D(
+        x=energy_grid_mev,
+        y=values,
+        x_unit=Unit.MEV,
+        y_unit=y_unit,
+        quantity=quantity,
+        particle=Particle.PROTON,
+        source=RadiationSource.SEP,
+        model=model,
     )
 
 
@@ -313,15 +378,22 @@ class StaticSepModel:
 
 @dataclass(frozen=True)
 class OstSepModel:
-    """Placeholder for normative OST SEP model.
+    """Normative OST SEP proton source model before geomagnetic penetration.
 
-    The class declares metadata and profile compatibility only.
-    Numerical OST SEP equations are not implemented yet.
+    The model calculates proton fluence, peak flux, and mean flux spectra in
+    interplanetary space using OST 134-1044-2007 Appendix B proton tables.
+
+    HZE SEP spectra, geomagnetic penetration, shielding, LET conversion, dose, and
+    single-event-effect calculations are intentionally outside this source model.
     """
 
+    energy_grid_mev: tuple[float, ...] = ()
+    monthly_smoothed_wolf_numbers: tuple[float, ...] = ()
+    coefficient_records: tuple[SepProtonCoefficientRecord, ...] = ()
     model: str = "ost_sep_model"
     document: str = OST_134_1044_2007_DOCUMENT
     version: str = "not_implemented"
+    coefficient_model: str = OST_SEP_PROTON_COEFFICIENT_MODEL
 
     @property
     def metadata(self) -> SourceModelMetadata:
@@ -336,12 +408,154 @@ class OstSepModel:
         )
 
     def __post_init__(self) -> None:
+        if not self.model:
+            msg = "SEP model name must not be empty."
+            raise ValueError(msg)
+
+        if not self.document:
+            msg = "SEP source document must not be empty."
+            raise ValueError(msg)
+
+        if not self.coefficient_model:
+            msg = "SEP coefficient model name must not be empty."
+            raise ValueError(msg)
+
+        if bool(self.energy_grid_mev) != bool(self.monthly_smoothed_wolf_numbers):
+            msg = "OST SEP model requires both energy grid and Wolf number series."
+            raise ValueError(msg)
+
+        if self.energy_grid_mev:
+            if any(not math.isfinite(energy) for energy in self.energy_grid_mev):
+                msg = "OST SEP proton energy grid values must be finite."
+                raise ValueError(msg)
+
+            if any(energy <= 0.0 for energy in self.energy_grid_mev):
+                msg = "OST SEP proton energy grid values must be positive."
+                raise ValueError(msg)
+
+            if any(
+                right <= left
+                for left, right in zip(self.energy_grid_mev, self.energy_grid_mev[1:])
+            ):
+                msg = "OST SEP proton energy grid must be strictly increasing."
+                raise ValueError(msg)
+
+        if self.monthly_smoothed_wolf_numbers:
+            if any(not math.isfinite(value) for value in self.monthly_smoothed_wolf_numbers):
+                msg = "OST SEP Wolf numbers must be finite."
+                raise ValueError(msg)
+
+            if any(value < 0.0 for value in self.monthly_smoothed_wolf_numbers):
+                msg = "OST SEP Wolf numbers must be non-negative."
+                raise ValueError(msg)
+
         _ = self.metadata
 
-    def calculate(self, model_input: SepModelInput) -> SepModelResult:
-        """Raise until the normative OST SEP model is implemented."""
+    def _coefficient_records(self) -> tuple[SepProtonCoefficientRecord, ...]:
+        if self.coefficient_records:
+            return self.coefficient_records
 
-        raise NotImplementedError("OST SEP model is not implemented yet.")
+        return _load_ost_sep_proton_coefficient_records()
+
+    def calculate(self, model_input: SepModelInput) -> SepModelResult:
+        """Calculate OST SEP proton source spectra before geomagnetic penetration."""
+
+        if not self.energy_grid_mev or not self.monthly_smoothed_wolf_numbers:
+            msg = (
+                "OST SEP model is not implemented without configured energy grid "
+                "and monthly Wolf number series."
+            )
+            raise NotImplementedError(msg)
+
+        event_count = calculate_sep_expected_events(
+            monthly_smoothed_wolf_numbers=self.monthly_smoothed_wolf_numbers,
+            policy=SepEventCountPolicy.OST_134_1044_2007,
+        )
+        records = self._coefficient_records()
+
+        fluence_coefficients = lookup_sep_proton_coefficients_interpolated(
+            records,
+            model=self.coefficient_model,
+            product=SepProtonSpectrumProduct.FLUENCE,
+            event_count=event_count.expected_events,
+            probability=model_input.exceedance_probability,
+        )
+        peak_flux_coefficients = lookup_sep_proton_coefficients_interpolated(
+            records,
+            model=self.coefficient_model,
+            product=SepProtonSpectrumProduct.PEAK_FLUX,
+            event_count=event_count.expected_events,
+            probability=model_input.exceedance_probability,
+        )
+
+        mission_fluence_values = evaluate_sep_proton_spectrum(
+            energy_grid_mev=self.energy_grid_mev,
+            coefficients=fluence_coefficients,
+        )
+        raw_peak_directional_flux_values = evaluate_sep_proton_spectrum(
+            energy_grid_mev=self.energy_grid_mev,
+            coefficients=peak_flux_coefficients,
+        )
+        peak_flux_values = directional_flux_to_omnidirectional_flux(
+            raw_peak_directional_flux_values,
+        )
+
+        mission_duration_seconds = _mission_duration_seconds(model_input.lifetime_years)
+        mean_flux_values = tuple(
+            value / mission_duration_seconds
+            for value in mission_fluence_values
+        )
+
+        mission_fluence_spectrum = _make_sep_proton_spectrum(
+            energy_grid_mev=self.energy_grid_mev,
+            values=mission_fluence_values,
+            quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+            y_unit=Unit.DIFFERENTIAL_FLUENCE,
+            model=f"{self.model}:mission_fluence",
+        )
+        peak_flux_spectrum = _make_sep_proton_spectrum(
+            energy_grid_mev=self.energy_grid_mev,
+            values=peak_flux_values,
+            quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+            y_unit=Unit.DIFFERENTIAL_FLUX,
+            model=f"{self.model}:peak_flux",
+        )
+        mean_flux_spectrum = _make_sep_proton_spectrum(
+            energy_grid_mev=self.energy_grid_mev,
+            values=mean_flux_values,
+            quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+            y_unit=Unit.DIFFERENTIAL_FLUX,
+            model=f"{self.model}:mean_flux",
+        )
+
+        mission_fluence_product = _sep_source_product(
+            kind=RadiationProductKind.MISSION_FLUENCE,
+            spectrum=mission_fluence_spectrum,
+            label="SEP proton mission fluence by OST 134-1044-2007 Appendix B",
+        )
+        peak_flux_product = _sep_source_product(
+            kind=RadiationProductKind.PEAK_FLUX,
+            spectrum=peak_flux_spectrum,
+            label="SEP proton peak flux by OST 134-1044-2007 Appendix B",
+        )
+        mean_flux_product = _sep_source_product(
+            kind=RadiationProductKind.MEAN_FLUX,
+            spectrum=mean_flux_spectrum,
+            label="SEP proton mean flux by OST 134-1044-2007 Appendix B",
+        )
+
+        return SepModelResult(
+            spectrum=mission_fluence_spectrum,
+            lifetime_years=model_input.lifetime_years,
+            exceedance_probability=model_input.exceedance_probability,
+            model=self.model,
+            document=self.document,
+            products=(
+                mission_fluence_product,
+                peak_flux_product,
+                mean_flux_product,
+            ),
+        )
 
 
 @dataclass(frozen=True)
