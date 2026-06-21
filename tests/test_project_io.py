@@ -1,7 +1,8 @@
-﻿from datetime import UTC, datetime
+from datetime import UTC, datetime
 
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import CalculationConfig, MethodologyConfig, MissionConfig, OrbitConfig
+from radar.core.result import CalculationResult, ComponentStatus
 from radar.project_file import PROJECT_PROGRAM_NAME, PROJECT_SCHEMA_VERSION
 from radar.project_io import load_project_config, read_project_file, save_project_file
 
@@ -12,6 +13,13 @@ def _calculation_config() -> CalculationConfig:
         orbit=OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0),
         methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP),
         kp=4,
+    )
+
+
+def _calculation_result() -> CalculationResult:
+    return CalculationResult(config=_calculation_config()).set_component_status(
+        "СКЛ",
+        ComponentStatus.COMPLETED,
     )
 
 
@@ -88,3 +96,17 @@ def test_save_project_file_overwrites_existing_file(tmp_path) -> None:
     )
 
     assert read_project_file(path).calculation_config == _calculation_config()
+
+
+def test_save_project_file_writes_calculation_result(tmp_path) -> None:
+    path = tmp_path / "project.radar.json"
+    result = _calculation_result()
+
+    save_project_file(
+        path,
+        _calculation_config(),
+        calculation_result=result,
+        created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+    )
+
+    assert read_project_file(path).calculation_result == result

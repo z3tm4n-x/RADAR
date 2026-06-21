@@ -6,6 +6,7 @@ import pytest
 from radar import __version__
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import CalculationConfig, MethodologyConfig, MissionConfig, OrbitConfig
+from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.project_file import (
     PROJECT_PROGRAM_NAME,
     PROJECT_SCHEMA_VERSION,
@@ -21,6 +22,19 @@ def _calculation_config() -> CalculationConfig:
         orbit=OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0),
         methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP),
         kp=4,
+    )
+
+
+def _calculation_result() -> CalculationResult:
+    result = CalculationResult(config=_calculation_config())
+    result = result.set_component_status("СКЛ", ComponentStatus.COMPLETED)
+    return result.set_model_info(
+        ModelInfo(
+            name="СКЛ",
+            version="1.0",
+            status="расчёт выполнен",
+            source="ГОСТ СКЛ",
+        ),
     )
 
 
@@ -167,6 +181,51 @@ def test_project_file_from_dict_rejects_unsupported_program_name() -> None:
 
     with pytest.raises(ValueError, match="Unsupported project program name"):
         project_file_from_dict(data)
+
+
+
+def test_project_file_to_dict_contains_empty_calculation_result_slot() -> None:
+    project_file = ProjectFile.create(
+        _calculation_config(),
+        created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+    )
+
+    assert project_file.to_dict()["calculation_result"] is None
+
+
+def test_project_file_round_trip_with_calculation_result() -> None:
+    result = _calculation_result()
+    project_file = ProjectFile.create(
+        _calculation_config(),
+        calculation_result=result,
+        created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+    )
+
+    restored = project_file_from_json(project_file.to_json())
+
+    assert restored == project_file
+    assert restored.calculation_result == result
+
+
+def test_project_file_create_rejects_result_config_mismatch() -> None:
+    wrong_result = CalculationResult(
+        config=CalculationConfig(
+            mission=MissionConfig(launch_year=2030, lifetime_years=7),
+            orbit=OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0),
+            methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP),
+            kp=4,
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="calculation result does not match calculation configuration",
+    ):
+        ProjectFile.create(
+            _calculation_config(),
+            calculation_result=wrong_result,
+            created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+        )
 
 
 def test_project_file_from_json_rejects_non_object_root() -> None:

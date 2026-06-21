@@ -7,6 +7,7 @@ from os import PathLike
 from pathlib import Path
 
 from radar.core.project import CalculationConfig
+from radar.core.result import CalculationResult
 from radar.project_file import ProjectFile, project_file_from_json
 
 ProjectPath = str | PathLike[str]
@@ -16,12 +17,14 @@ def save_project_file(
     path: ProjectPath,
     calculation_config: CalculationConfig,
     *,
+    calculation_result: CalculationResult | None = None,
     created_at: datetime | None = None,
 ) -> ProjectFile:
     """Save calculation configuration to a RADAR project file."""
 
     project_file = ProjectFile.create(
         calculation_config=calculation_config,
+        calculation_result=calculation_result,
         created_at=created_at,
     )
     Path(path).write_text(project_file.to_json() + "\n", encoding="utf-8")

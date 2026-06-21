@@ -9,11 +9,16 @@ from datetime import UTC, datetime
 from typing import cast
 
 from radar.calculation_protocol import calculation_protocol_snapshot
+from radar.calculation_result_snapshot import (
+    calculation_result_from_snapshot,
+    calculation_result_snapshot,
+)
 from radar.core.project import CalculationConfig
 from radar.core.project_snapshot import (
     calculation_config_from_snapshot,
     calculation_config_snapshot,
 )
+from radar.core.result import CalculationResult
 from radar.project_metadata import PROJECT_PROGRAM_NAME, PROJECT_SCHEMA_VERSION
 from radar.version import __version__
 
@@ -28,15 +33,21 @@ class ProjectFile:
     created_at: str
     calculation_config: CalculationConfig
     calculation_protocol: tuple[dict[str, str], ...]
+    calculation_result: CalculationResult | None = None
 
     @classmethod
     def create(
         cls,
         calculation_config: CalculationConfig,
         *,
+        calculation_result: CalculationResult | None = None,
         created_at: datetime | None = None,
     ) -> ProjectFile:
         """Create project file representation for a calculation configuration."""
+
+        if calculation_result is not None and calculation_result.config != calculation_config:
+            msg = "Project file calculation result does not match calculation configuration."
+            raise ValueError(msg)
 
         timestamp = created_at or datetime.now(UTC)
 
@@ -47,10 +58,15 @@ class ProjectFile:
             created_at=timestamp.isoformat(),
             calculation_config=calculation_config,
             calculation_protocol=calculation_protocol_snapshot(calculation_config),
+            calculation_result=calculation_result,
         )
 
     def to_dict(self) -> dict[str, object]:
         """Return JSON-compatible project file representation."""
+
+        result_snapshot: dict[str, object] | None = None
+        if self.calculation_result is not None:
+            result_snapshot = calculation_result_snapshot(self.calculation_result)
 
         return {
             "schema_version": self.schema_version,
@@ -63,6 +79,7 @@ class ProjectFile:
             "calculation_protocol": [
                 dict(entry) for entry in self.calculation_protocol
             ],
+            "calculation_result": result_snapshot,
         }
 
     def to_json(self) -> str:
@@ -103,6 +120,23 @@ def _required_mapping(data: Mapping[str, object], key: str) -> Mapping[str, obje
     if not isinstance(value, Mapping):
         msg = f"Project file field must be an object: {key}"
         raise ValueError(msg)
+    return cast("Mapping[str, object]", value)
+
+
+def _optional_mapping(
+    data: Mapping[str, object],
+    key: str,
+) -> Mapping[str, object] | None:
+    """Return optional object project field value."""
+
+    value = _required_value(data, key)
+    if value is None:
+        return None
+
+    if not isinstance(value, Mapping):
+        msg = f"Project file field must be an object or null: {key}"
+        raise ValueError(msg)
+
     return cast("Mapping[str, object]", value)
 
 
@@ -174,6 +208,17 @@ def project_file_from_dict(data: Mapping[str, object]) -> ProjectFile:
         )
         raise ValueError(msg)
 
+    result_data = _optional_mapping(data, "calculation_result")
+    calculation_result = (
+        calculation_result_from_snapshot(result_data)
+        if result_data is not None
+        else None
+    )
+
+    if calculation_result is not None and calculation_result.config != calculation_config:
+        msg = "Project file calculation result does not match calculation configuration."
+        raise ValueError(msg)
+
     return ProjectFile(
         schema_version=schema_version,
         program_name=program_name,
@@ -181,6 +226,7 @@ def project_file_from_dict(data: Mapping[str, object]) -> ProjectFile:
         created_at=_required_str(data, "created_at"),
         calculation_config=calculation_config,
         calculation_protocol=calculation_protocol,
+        calculation_result=calculation_result,
     )
 
 
