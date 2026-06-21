@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
+from radar.core.result import InputDataInfo
 from radar.core.types import SolarActivityLevel
 from radar.project_file import ProjectFile
 from radar.project_io import calculate_project_file, read_project_file, save_project_file
@@ -20,6 +21,12 @@ _SOLAR_CYCLE_LEVEL_TITLES: dict[SolarActivityLevel, str] = {
     SolarActivityLevel.MAXIMUM: "максимальный уровень цикла",
 }
 
+_INPUT_DATA_VALUE_TITLES: dict[str, str] = {
+    "level": "Уровень цикла СА",
+    "cycle_years": "Годы цикла СА",
+    "wolf_numbers": "Числа Вольфа",
+}
+
 
 def _solar_cycle_level_title(level: SolarActivityLevel) -> str:
     """Return OST-style solar cycle level title."""
@@ -28,6 +35,35 @@ def _solar_cycle_level_title(level: SolarActivityLevel) -> str:
 
 
 
+
+
+def _input_data_value_title(key: str) -> str:
+    """Return Russian title for an input data value key."""
+
+    return _INPUT_DATA_VALUE_TITLES.get(key, key)
+
+
+def _input_data_value_text(key: str, value: str) -> str:
+    """Return display text for an input data value."""
+
+    if key == "level":
+        try:
+            return _solar_cycle_level_title(SolarActivityLevel(value))
+        except ValueError:
+            return value
+
+    return value
+
+
+def _print_input_data_info(info: InputDataInfo) -> None:
+    """Print calculation input data information."""
+
+    print(f"Исходные данные расчёта: {info.name}")
+    print(f"  Документ: {info.source}")
+    print(f"  Таблица: {info.table_id}")
+
+    for key, value in info.values:
+        print(f"  {_input_data_value_title(key)}: {_input_data_value_text(key, value)}")
 
 def _build_argument_parser() -> argparse.ArgumentParser:
     """Create RADAR command line argument parser."""
@@ -231,6 +267,12 @@ def _print_project_summary(project_file: ProjectFile) -> None:
         return
 
     print("Результат расчёта: есть")
+    if result.input_data_info:
+        for info in result.input_data_info:
+            _print_input_data_info(info)
+    else:
+        print("Исходные данные расчёта: отсутствуют")
+
     if result.output_tables:
         table_ids = ", ".join(table.table_id for table in result.output_tables)
         print(f"Выходные таблицы: {table_ids}")

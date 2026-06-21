@@ -258,6 +258,12 @@ def test_main_show_project_with_result(tmp_path, capsys) -> None:
 
     assert exit_code == 0
     assert "Результат расчёта: есть" in captured.out
+    assert "Исходные данные расчёта: СА" in captured.out
+    assert "Документ: ОСТ 134-1044-2007" in captured.out
+    assert "Таблица: ost_134_1044_2007_table_g_1_wolf_numbers" in captured.out
+    assert "Уровень цикла СА: средний уровень цикла" in captured.out
+    assert "Годы цикла СА:" in captured.out
+    assert "Числа Вольфа:" in captured.out
     assert "dose_by_thickness" in captured.out
     assert "source_contributions" in captured.out
 
