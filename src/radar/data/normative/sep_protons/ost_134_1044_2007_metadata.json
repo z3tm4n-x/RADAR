@@ -1,0 +1,18 @@
+{
+  "model": "ost_134_1044_2007",
+  "document": "ОСТ 134-1044-2007",
+  "appendix": "Б",
+  "document_status": "industry_standard",
+  "tables": [
+    "Б.1",
+    "Б.2",
+    "Б.3",
+    "Б.4",
+    "Б.5",
+    "Б.6",
+    "Б.7",
+    "Б.8"
+  ],
+  "description": "Параметры протонных спектров СКЛ по приложению Б.",
+  "validation_status": "checked"
+}

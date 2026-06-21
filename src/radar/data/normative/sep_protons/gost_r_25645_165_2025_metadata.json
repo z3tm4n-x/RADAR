@@ -1,0 +1,18 @@
+{
+  "model": "gost_r_25645_165_2025",
+  "document": "ГОСТ Р 25645.165, проект, окончательная редакция",
+  "replaces": "ГОСТ Р 25645.165-2001",
+  "document_status": "project_final_redaction",
+  "tables": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8"
+  ],
+  "description": "Параметры протонных спектров СКЛ по ГОСТ 2025.",
+  "validation_status": "checked"
+}
