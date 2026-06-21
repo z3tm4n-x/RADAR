@@ -37,9 +37,9 @@ _SOURCE_MODEL_FAMILY_TITLES: dict[SourceModelFamily, str] = {
 }
 
 _SOLAR_ACTIVITY_TITLES: dict[str, str] = {
-    "minimum": "минимальная",
-    "mean": "средняя",
-    "maximum": "максимальная",
+    "minimum": "минимальный уровень цикла",
+    "mean": "средний уровень цикла",
+    "maximum": "максимальный уровень цикла",
 }
 
 _ORBIT_TYPE_TITLES: dict[str, str] = {
@@ -160,7 +160,7 @@ def calculation_protocol_entries(
         _entry("Миссия", "Срок активного существования, лет", config.mission.lifetime_years),
         _entry(
             "Миссия",
-            "Уровень солнечной активности",
+            "Уровень цикла СА",
             _title_from_value(
                 _SOLAR_ACTIVITY_TITLES,
                 config.mission.solar_activity_level.value,

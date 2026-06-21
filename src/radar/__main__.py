@@ -14,6 +14,20 @@ from radar.project_io import calculate_project_file, read_project_file, save_pro
 
 _GEO_ALTITUDE_KM = 35786.0
 
+_SOLAR_CYCLE_LEVEL_TITLES: dict[SolarActivityLevel, str] = {
+    SolarActivityLevel.MINIMUM: "минимальный уровень цикла",
+    SolarActivityLevel.MEAN: "средний уровень цикла",
+    SolarActivityLevel.MAXIMUM: "максимальный уровень цикла",
+}
+
+
+def _solar_cycle_level_title(level: SolarActivityLevel) -> str:
+    """Return OST-style solar cycle level title."""
+
+    return _SOLAR_CYCLE_LEVEL_TITLES[level]
+
+
+
 
 def _build_argument_parser() -> argparse.ArgumentParser:
     """Create RADAR command line argument parser."""
@@ -47,10 +61,12 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
 
     init_parser.add_argument(
+        "--solar-cycle-level",
         "--solar-activity",
+        dest="solar_activity",
         choices=tuple(level.value for level in SolarActivityLevel),
         default=SolarActivityLevel.MEAN.value,
-        help="уровень солнечной активности: minimum, mean или maximum",
+        help="уровень цикла СА: minimum, mean или maximum",
     )
     init_parser.add_argument(
         "--orbit",
@@ -190,7 +206,10 @@ def _print_project_summary(project_file: ProjectFile) -> None:
     print(f"Дата создания: {project_file.created_at}")
     print(f"Год запуска: {config.mission.launch_year}")
     print(f"Срок миссии, лет: {config.mission.lifetime_years}")
-    print(f"Солнечная активность: {config.mission.solar_activity_level.value}")
+    print(
+        "Уровень цикла СА: "
+        f"{_solar_cycle_level_title(config.mission.solar_activity_level)}"
+    )
     print(f"Вероятность превышения СКЛ: {config.mission.sep_exceedance_probability}")
     print(f"Тип орбиты: {config.orbit.orbit_type.value}")
     print(f"Перигей, км: {config.orbit.perigee_altitude_km}")

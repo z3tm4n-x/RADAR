@@ -1,4 +1,4 @@
-﻿from radar.calculation_protocol import (
+from radar.calculation_protocol import (
     CalculationProtocolEntry,
     calculation_protocol_entries,
     calculation_protocol_snapshot,
@@ -91,7 +91,7 @@ def test_calculation_protocol_entries_include_mission_orbit_and_shielding() -> N
 
     assert _value(entries, "Миссия", "Год запуска") == "2028"
     assert _value(entries, "Миссия", "Срок активного существования, лет") == "7"
-    assert _value(entries, "Миссия", "Уровень солнечной активности") == "средняя"
+    assert _value(entries, "Миссия", "Уровень цикла СА") == "средний уровень цикла"
     assert _value(entries, "Орбита", "Тип орбиты") == "круговая"
     assert _value(entries, "Орбита", "Высота перигея, км") == "35786"
     assert _value(entries, "Орбита", "Наклонение, град") == "0"

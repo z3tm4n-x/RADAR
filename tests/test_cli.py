@@ -112,7 +112,7 @@ def test_main_init_accepts_solar_activity_level(tmp_path) -> None:
             "7",
             "--orbit",
             "geo",
-            "--solar-activity",
+            "--solar-cycle-level",
             "maximum",
         ],
     )
@@ -233,7 +233,7 @@ def test_main_show_project_without_result(tmp_path, capsys) -> None:
     assert exit_code == 0
     assert "Год запуска: 2028" in captured.out
     assert "Срок миссии, лет: 7" in captured.out
-    assert "Солнечная активность: mean" in captured.out
+    assert "Уровень цикла СА: средний уровень цикла" in captured.out
     assert "Вероятность превышения СКЛ: 0.1" in captured.out
     assert "Kp: 4" in captured.out
     assert "Геометрия защиты: sphere" in captured.out
@@ -276,7 +276,7 @@ def test_main_run_preserves_solar_activity_in_protocol(tmp_path) -> None:
             "7",
             "--orbit",
             "geo",
-            "--solar-activity",
+            "--solar-cycle-level",
             "minimum",
         ],
     )
@@ -291,7 +291,7 @@ def test_main_run_preserves_solar_activity_in_protocol(tmp_path) -> None:
         (entry["section"], entry["parameter"], entry["value"])
         for entry in restored.calculation_protocol
     } >= {
-        ("Миссия", "Уровень солнечной активности", "минимальная"),
+        ("Миссия", "Уровень цикла СА", "минимальный уровень цикла"),
     }
 
 
