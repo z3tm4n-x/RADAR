@@ -1,0 +1,10 @@
+﻿{
+  "schema_version": "1.0",
+  "collections": [
+    {
+      "collection_id": "ost_134_1044_2007",
+      "title": "ОСТ 134-1044-2007",
+      "manifest": "ost_134_1044_2007/manifest.json"
+    }
+  ]
+}

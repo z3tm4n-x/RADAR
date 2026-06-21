@@ -1,0 +1,23 @@
+﻿{
+  "schema_version": "1.0",
+  "collection_id": "ost_134_1044_2007",
+  "title": "ОСТ 134-1044-2007",
+  "document": "ОСТ 134-1044-2007",
+  "status": "skeleton",
+  "tables": [
+    {
+      "table_id": "ost_134_1044_2007_placeholder",
+      "title": "Паспорт набора нормативных таблиц ОСТ 134-1044-2007",
+      "document": "ОСТ 134-1044-2007",
+      "appendix": "",
+      "table_number": "",
+      "model": "общий паспорт",
+      "quantity": "",
+      "x_unit": "",
+      "y_unit": "",
+      "data_file": "",
+      "verification_status": "not_transferred",
+      "control_values": []
+    }
+  ]
+}
