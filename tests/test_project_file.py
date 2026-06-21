@@ -1,4 +1,4 @@
-﻿import json
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -57,6 +57,47 @@ def test_project_file_to_dict_contains_project_metadata_and_calculation_config()
     assert isinstance(source_selection, dict)
     assert source_selection["sep_model_family"] == SourceModelFamily.GOST_SEP.value
     assert source_selection["gcr_model_family"] == SourceModelFamily.OST_134_1044_2007.value
+
+
+def test_project_file_to_dict_contains_calculation_protocol() -> None:
+    project_file = ProjectFile.create(
+        _calculation_config(),
+        created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+    )
+
+    data = project_file.to_dict()
+    protocol = data["calculation_protocol"]
+
+    assert isinstance(protocol, list)
+    assert {
+        "section": "Программа",
+        "parameter": "Название программы",
+        "value": PROJECT_PROGRAM_NAME,
+    } in protocol
+    assert {
+        "section": "Модели источников излучения",
+        "parameter": "СКЛ",
+        "value": "ГОСТ СКЛ",
+    } in protocol
+
+
+def test_project_file_from_dict_rejects_protocol_mismatch() -> None:
+    project_file = ProjectFile.create(
+        _calculation_config(),
+        created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+    )
+    data = project_file.to_dict()
+    protocol = data["calculation_protocol"]
+    assert isinstance(protocol, list)
+    first_entry = protocol[0]
+    assert isinstance(first_entry, dict)
+    first_entry["value"] = "BROKEN"
+
+    with pytest.raises(
+        ValueError,
+        match="calculation protocol does not match calculation configuration",
+    ):
+        project_file_from_dict(data)
 
 
 def test_project_file_json_round_trip() -> None:

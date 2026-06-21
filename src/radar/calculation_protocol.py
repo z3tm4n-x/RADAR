@@ -1,4 +1,4 @@
-﻿"""Calculation input protocol."""
+"""Calculation input protocol."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import CalculationConfig
-from radar.project_file import PROJECT_PROGRAM_NAME, PROJECT_SCHEMA_VERSION
+from radar.project_metadata import PROJECT_PROGRAM_NAME, PROJECT_SCHEMA_VERSION
 from radar.version import __version__
 
 

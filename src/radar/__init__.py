@@ -40,9 +40,8 @@ from radar.project_io import (
     read_project_file,
     save_project_file,
 )
+from radar.project_metadata import PROJECT_PROGRAM_NAME, PROJECT_SCHEMA_VERSION
 from radar.project_file import (
-    PROJECT_PROGRAM_NAME,
-    PROJECT_SCHEMA_VERSION,
     ProjectFile,
     project_file_from_dict,
     project_file_from_json,
