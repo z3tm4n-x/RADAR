@@ -78,6 +78,19 @@ SOURCE_RADIATION_PRODUCT_SPECS: tuple[SourceRadiationProductSpec, ...] = (
     ),
     SourceRadiationProductSpec(
         source=RadiationSource.SEP,
+        particle=Particle.PROTON,
+        product_kind=RadiationProductKind.MEAN_FLUX,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(
+            RadiationProductPurpose.INTERMEDIATE,
+            RadiationProductPurpose.OUTPUT_CHARACTERISTIC,
+        ),
+        normative_status=RadiationProductNormativeStatus.OUTPUT_FORM,
+        title="Средний поток протонов СКЛ",
+        note="Продукт для полной формы выходных характеристик по средним потокам.",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.SEP,
         particle=Particle.HZE,
         product_kind=RadiationProductKind.PEAK_FLUX,
         location=RadiationProductLocation.BEFORE_SHIELDING,

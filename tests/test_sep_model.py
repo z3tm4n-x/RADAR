@@ -16,8 +16,32 @@ from radar.sep.model import (
     SepModelProtocol,
     SepModelResult,
     StaticSepModel,
+    validate_sep_energy_spectrum,
     validate_sep_proton_fluence_spectrum,
 )
+
+
+def _sep_energy_spectrum(
+    *,
+    particle: Particle = Particle.PROTON,
+    source: RadiationSource = RadiationSource.SEP,
+    quantity: SpectrumQuantity = SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+    x_unit: Unit = Unit.MEV,
+    y_unit: Unit = Unit.DIFFERENTIAL_FLUENCE,
+    x: tuple[float, ...] = (10.0, 100.0, 1000.0),
+    y: tuple[float, ...] = (1.0, 2.0, 3.0),
+    model: str = "test_sep_energy",
+) -> Spectrum1D:
+    return Spectrum1D(
+        x=x,
+        y=y,
+        x_unit=x_unit,
+        y_unit=y_unit,
+        quantity=quantity,
+        particle=particle,
+        source=source,
+        model=model,
+    )
 
 
 def _sep_proton_fluence_spectrum(
@@ -31,15 +55,60 @@ def _sep_proton_fluence_spectrum(
     y: tuple[float, ...] = (1.0, 2.0, 3.0),
     model: str = "annual_test_sep",
 ) -> Spectrum1D:
-    return Spectrum1D(
-        x=x,
-        y=y,
-        x_unit=x_unit,
-        y_unit=y_unit,
-        quantity=quantity,
+    return _sep_energy_spectrum(
         particle=particle,
         source=source,
+        quantity=quantity,
+        x_unit=x_unit,
+        y_unit=y_unit,
+        x=x,
+        y=y,
         model=model,
+    )
+
+
+def _sep_proton_peak_flux_spectrum() -> Spectrum1D:
+    return _sep_energy_spectrum(
+        particle=Particle.PROTON,
+        quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+        model="sep_proton_peak_flux",
+    )
+
+
+def _sep_proton_mean_flux_spectrum() -> Spectrum1D:
+    return _sep_energy_spectrum(
+        particle=Particle.PROTON,
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+        model="sep_proton_mean_flux",
+    )
+
+
+def _sep_hze_fluence_spectrum() -> Spectrum1D:
+    return _sep_energy_spectrum(
+        particle=Particle.HZE,
+        quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+        y_unit=Unit.DIFFERENTIAL_FLUENCE,
+        model="sep_hze_fluence",
+    )
+
+
+def _sep_hze_peak_flux_spectrum() -> Spectrum1D:
+    return _sep_energy_spectrum(
+        particle=Particle.HZE,
+        quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+        model="sep_hze_peak_flux",
+    )
+
+
+def _sep_hze_mean_flux_spectrum() -> Spectrum1D:
+    return _sep_energy_spectrum(
+        particle=Particle.HZE,
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+        model="sep_hze_mean_flux",
     )
 
 
@@ -60,6 +129,15 @@ def _run_sep_model(
 
 def test_validate_sep_proton_fluence_spectrum_accepts_valid_spectrum() -> None:
     validate_sep_proton_fluence_spectrum(_sep_proton_fluence_spectrum())
+
+
+def test_validate_sep_energy_spectrum_accepts_hze_energy_products() -> None:
+    for spectrum in (
+        _sep_hze_fluence_spectrum(),
+        _sep_hze_peak_flux_spectrum(),
+        _sep_hze_mean_flux_spectrum(),
+    ):
+        validate_sep_energy_spectrum(spectrum)
 
 
 def test_validate_sep_proton_fluence_spectrum_rejects_non_proton() -> None:
@@ -289,3 +367,113 @@ def test_normative_sep_model_stubs_raise_not_implemented() -> None:
     for model in (OstSepModel(), GostSepModel()):
         with pytest.raises(NotImplementedError, match="not implemented"):
             model.calculate(model_input)
+
+
+
+def test_sep_model_result_accepts_multiple_source_products() -> None:
+    mission_fluence = _sep_proton_fluence_spectrum()
+    proton_peak = _sep_proton_peak_flux_spectrum()
+    proton_mean = _sep_proton_mean_flux_spectrum()
+    hze_fluence = _sep_hze_fluence_spectrum()
+    hze_peak = _sep_hze_peak_flux_spectrum()
+    hze_mean = _sep_hze_mean_flux_spectrum()
+
+    mission_product = SpectrumProduct(
+        kind=RadiationProductKind.MISSION_FLUENCE,
+        spectrum=mission_fluence,
+    )
+
+    result = SepModelResult(
+        spectrum=mission_fluence,
+        lifetime_years=5,
+        exceedance_probability=0.1,
+        model="test",
+        document="test",
+        products=(
+            SpectrumProduct(
+                kind=RadiationProductKind.PEAK_FLUX,
+                spectrum=proton_peak,
+            ),
+            mission_product,
+            SpectrumProduct(
+                kind=RadiationProductKind.MEAN_FLUX,
+                spectrum=proton_mean,
+            ),
+            SpectrumProduct(
+                kind=RadiationProductKind.MISSION_FLUENCE,
+                spectrum=hze_fluence,
+            ),
+            SpectrumProduct(
+                kind=RadiationProductKind.PEAK_FLUX,
+                spectrum=hze_peak,
+            ),
+            SpectrumProduct(
+                kind=RadiationProductKind.MEAN_FLUX,
+                spectrum=hze_mean,
+            ),
+        ),
+    )
+
+    assert result.spectrum == mission_fluence
+    assert result.product == mission_product
+    assert result.spectra == (
+        proton_peak,
+        mission_fluence,
+        proton_mean,
+        hze_fluence,
+        hze_peak,
+        hze_mean,
+    )
+
+
+def test_sep_model_result_requires_proton_mission_fluence_for_compatibility() -> None:
+    mission_fluence = _sep_proton_fluence_spectrum()
+    proton_peak = _sep_proton_peak_flux_spectrum()
+
+    with pytest.raises(ValueError, match="proton mission fluence"):
+        SepModelResult(
+            spectrum=mission_fluence,
+            lifetime_years=5,
+            exceedance_probability=0.1,
+            model="test",
+            document="test",
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.PEAK_FLUX,
+                    spectrum=proton_peak,
+                ),
+            ),
+        )
+
+
+def test_sep_model_result_rejects_let_products_before_shielding() -> None:
+    mission_fluence = _sep_proton_fluence_spectrum()
+    hze_let_flux = Spectrum1D(
+        x=(1.0, 2.0, 3.0),
+        y=(4.0, 5.0, 6.0),
+        x_unit=Unit.LET,
+        y_unit=Unit.DIFFERENTIAL_LET_FLUX,
+        quantity=SpectrumQuantity.LET_DIFFERENTIAL_FLUX,
+        particle=Particle.HZE,
+        source=RadiationSource.SEP,
+        model="sep_hze_let_flux",
+    )
+
+    with pytest.raises(ValueError, match="energy fluence or flux"):
+        SepModelResult(
+            spectrum=mission_fluence,
+            lifetime_years=5,
+            exceedance_probability=0.1,
+            model="test",
+            document="test",
+            products=(
+                SpectrumProduct(
+                    kind=RadiationProductKind.MISSION_FLUENCE,
+                    spectrum=mission_fluence,
+                ),
+                SpectrumProduct(
+                    kind=RadiationProductKind.PEAK_LET_FLUX,
+                    spectrum=hze_let_flux,
+                ),
+            ),
+        )

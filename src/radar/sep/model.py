@@ -12,7 +12,7 @@ from radar.core.profiles import (
     SourceModelFamily,
     SourceModelMetadata,
 )
-from radar.core.source_products import validate_product_allowed_for_source
+from radar.core.source_products import validate_products_match_spectra_and_source
 from radar.core.project import MissionConfig
 from radar.core.spectra import Spectrum1D
 from radar.core.spectrum_ops import scale_spectrum
@@ -23,6 +23,60 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
+
+
+SEP_ALLOWED_PARTICLES = (
+    Particle.PROTON,
+    Particle.HZE,
+)
+
+SEP_ALLOWED_ENERGY_X_UNITS = (
+    Unit.MEV,
+    Unit.GEV_PER_NUCLEON,
+)
+
+SEP_ALLOWED_ENERGY_QUANTITIES = (
+    SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+    SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+)
+
+
+def validate_sep_energy_spectrum(spectrum: Spectrum1D) -> None:
+    """Validate that a spectrum is a SEP energy spectrum before shielding."""
+
+    if spectrum.source is not RadiationSource.SEP:
+        msg = "SEP model spectrum source must be SEP."
+        raise ValueError(msg)
+
+    if spectrum.particle not in SEP_ALLOWED_PARTICLES:
+        msg = "SEP model spectrum must describe protons or HZE particles."
+        raise ValueError(msg)
+
+    if spectrum.quantity not in SEP_ALLOWED_ENERGY_QUANTITIES:
+        msg = "SEP model spectrum quantity must be an energy fluence or flux."
+        raise ValueError(msg)
+
+    if spectrum.x_unit not in SEP_ALLOWED_ENERGY_X_UNITS:
+        msg = "SEP model energy grid must be in MeV or GeV/nucleon."
+        raise ValueError(msg)
+
+    if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE:
+        if spectrum.y_unit is not Unit.DIFFERENTIAL_FLUENCE:
+            msg = "SEP differential fluence spectrum values must use differential fluence units."
+            raise ValueError(msg)
+
+    if spectrum.quantity in (
+        SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+        SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+    ):
+        if spectrum.y_unit is not Unit.DIFFERENTIAL_FLUX:
+            msg = "SEP differential flux spectrum values must use differential flux units."
+            raise ValueError(msg)
+
+    if any(energy <= 0.0 for energy in spectrum.x):
+        msg = "SEP model energy grid values must be positive."
+        raise ValueError(msg)
 
 
 def validate_sep_proton_fluence_spectrum(spectrum: Spectrum1D) -> None:
@@ -61,6 +115,27 @@ def _mission_fluence_product(spectrum: Spectrum1D) -> SpectrumProduct:
     )
 
 
+def _is_sep_proton_mission_fluence_product(product: SpectrumProduct) -> bool:
+    return (
+        product.kind is RadiationProductKind.MISSION_FLUENCE
+        and product.spectrum.source is RadiationSource.SEP
+        and product.spectrum.particle is Particle.PROTON
+        and product.spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
+    )
+
+
+def _sep_proton_mission_fluence_products(
+    products: tuple[SpectrumProduct, ...],
+    spectrum: Spectrum1D,
+) -> tuple[SpectrumProduct, ...]:
+    return tuple(
+        product
+        for product in products
+        if _is_sep_proton_mission_fluence_product(product)
+        and product.spectrum == spectrum
+    )
+
+
 @dataclass(frozen=True)
 class SepModelInput:
     """Input parameters passed to a SEP model."""
@@ -96,23 +171,32 @@ class SepModelResult:
 
         products = self.products or (_mission_fluence_product(self.spectrum),)
 
-        if len(products) != 1:
-            msg = "SEP model result must contain exactly one radiation product."
+        if not products:
+            msg = "SEP model result must contain at least one radiation product."
             raise ValueError(msg)
 
-        product = products[0]
+        spectra = tuple(product.spectrum for product in products)
 
-        if product.kind is not RadiationProductKind.MISSION_FLUENCE:
-            msg = "SEP model product must be mission fluence."
-            raise ValueError(msg)
+        for spectrum in spectra:
+            validate_sep_energy_spectrum(spectrum)
 
-        validate_product_allowed_for_source(
-            product=product,
+        validate_products_match_spectra_and_source(
+            products=products,
+            spectra=spectra,
             source=RadiationSource.SEP,
+            mismatch_message="SEP model product spectra must match result spectra.",
         )
 
-        if product.spectrum != self.spectrum:
-            msg = "SEP model product spectrum must match result spectrum."
+        mission_fluence_products = _sep_proton_mission_fluence_products(
+            products=products,
+            spectrum=self.spectrum,
+        )
+
+        if len(mission_fluence_products) != 1:
+            msg = (
+                "SEP model product spectrum set must contain exactly one proton "
+                "mission fluence product matching result spectrum."
+            )
             raise ValueError(msg)
 
         object.__setattr__(self, "products", products)
@@ -138,10 +222,25 @@ class SepModelResult:
             raise ValueError(msg)
 
     @property
-    def product(self) -> SpectrumProduct:
-        """Return the SEP mission fluence product."""
+    def spectra(self) -> tuple[Spectrum1D, ...]:
+        """Return spectra carried by SEP radiation products."""
 
-        return self.products[0]
+        return tuple(product.spectrum for product in self.products)
+
+    @property
+    def product(self) -> SpectrumProduct:
+        """Return the SEP proton mission fluence product."""
+
+        mission_fluence_products = _sep_proton_mission_fluence_products(
+            products=self.products,
+            spectrum=self.spectrum,
+        )
+
+        if len(mission_fluence_products) != 1:
+            msg = "SEP model result does not contain exactly one proton mission fluence product."
+            raise ValueError(msg)
+
+        return mission_fluence_products[0]
 
 
 class SepModelProtocol(Protocol):
@@ -153,7 +252,7 @@ class SepModelProtocol(Protocol):
         ...
 
     def calculate(self, model_input: SepModelInput) -> SepModelResult:
-        """Calculate mission SEP fluence spectrum."""
+        """Calculate mission SEP radiation products."""
 
 
 @dataclass(frozen=True)

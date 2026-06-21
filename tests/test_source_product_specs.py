@@ -160,25 +160,29 @@ def test_single_event_product_specs_cover_five_mechanisms() -> None:
     assert required <= actual
 
 
-def test_output_form_specs_are_behind_shielding_let_products() -> None:
-    output_form_specs = source_radiation_product_specs_for_status(
-        RadiationProductNormativeStatus.OUTPUT_FORM
+def test_let_output_form_specs_are_behind_shielding_let_products() -> None:
+    let_product_kinds = {
+        RadiationProductKind.PEAK_LET_FLUX,
+        RadiationProductKind.MEAN_LET_FLUX,
+        RadiationProductKind.MAXIMUM_LET_FLUX,
+    }
+    let_output_form_specs = tuple(
+        spec
+        for spec in source_radiation_product_specs_for_status(
+            RadiationProductNormativeStatus.OUTPUT_FORM
+        )
+        if spec.product_kind in let_product_kinds
     )
 
-    assert output_form_specs
+    assert let_output_form_specs
     assert all(
         spec.location is RadiationProductLocation.BEHIND_SHIELDING
-        for spec in output_form_specs
+        for spec in let_output_form_specs
     )
-    assert all(spec.particle is Particle.HZE for spec in output_form_specs)
+    assert all(spec.particle is Particle.HZE for spec in let_output_form_specs)
     assert all(
-        spec.product_kind
-        in {
-            RadiationProductKind.PEAK_LET_FLUX,
-            RadiationProductKind.MEAN_LET_FLUX,
-            RadiationProductKind.MAXIMUM_LET_FLUX,
-        }
-        for spec in output_form_specs
+        spec.product_kind in let_product_kinds
+        for spec in let_output_form_specs
     )
 
 
@@ -245,4 +249,14 @@ def test_erb_electron_mean_flux_is_intermediate_product() -> None:
         particle=Particle.ELECTRON,
         product_kind=RadiationProductKind.MEAN_FLUX,
         purpose=RadiationProductPurpose.INTERMEDIATE,
+    )
+
+
+
+def test_sep_proton_mean_flux_is_output_characteristic() -> None:
+    assert has_source_radiation_product_spec(
+        source=RadiationSource.SEP,
+        particle=Particle.PROTON,
+        product_kind=RadiationProductKind.MEAN_FLUX,
+        purpose=RadiationProductPurpose.OUTPUT_CHARACTERISTIC,
     )
