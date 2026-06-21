@@ -8,7 +8,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
-from radar.project_io import calculate_project_file, save_project_file
+from radar.project_file import ProjectFile
+from radar.project_io import calculate_project_file, read_project_file, save_project_file
 
 _GEO_ALTITUDE_KM = 35786.0
 
@@ -85,6 +86,16 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="выходной файл проекта RADAR; по умолчанию перезаписывается входной файл",
     )
 
+    show_parser = subparsers.add_parser(
+        "show",
+        help="показать краткое описание файла проекта RADAR",
+    )
+    show_parser.add_argument(
+        "input",
+        type=Path,
+        help="файл проекта RADAR",
+    )
+
     return parser
 
 
@@ -139,6 +150,48 @@ def _run_calculation_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_project_summary(project_file: ProjectFile) -> None:
+    """Print project file summary."""
+
+    config = project_file.calculation_config
+    result = project_file.calculation_result
+
+    print(f"Программа: {project_file.program_name}")
+    print(f"Версия схемы: {project_file.schema_version}")
+    print(f"Версия программы: {project_file.program_version}")
+    print(f"Дата создания: {project_file.created_at}")
+    print(f"Год запуска: {config.mission.launch_year}")
+    print(f"Срок миссии, лет: {config.mission.lifetime_years}")
+    print(f"Тип орбиты: {config.orbit.orbit_type.value}")
+    print(f"Перигей, км: {config.orbit.perigee_altitude_km}")
+    print(f"Апогей, км: {config.orbit.apogee_altitude_km}")
+    print(f"Наклонение, град: {config.orbit.inclination_deg}")
+    print(f"Kp: {config.kp}")
+    print(f"Методика: {config.methodology.profile.value}")
+    print(f"Дозовая величина: {config.dose_quantity.value}")
+    print(f"Единица дозы: {config.dose_unit.value}")
+
+    if result is None:
+        print("Результат расчёта: отсутствует")
+        print("Выходные таблицы: отсутствуют")
+        return
+
+    print("Результат расчёта: есть")
+    if result.output_tables:
+        table_ids = ", ".join(table.table_id for table in result.output_tables)
+        print(f"Выходные таблицы: {table_ids}")
+    else:
+        print("Выходные таблицы: отсутствуют")
+
+
+def _run_show_command(args: argparse.Namespace) -> int:
+    """Run show command."""
+
+    project_file = read_project_file(args.input)
+    _print_project_summary(project_file)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run RADAR command line interface."""
 
@@ -151,6 +204,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "run":
             return _run_calculation_command(args)
+
+        if args.command == "show":
+            return _run_show_command(args)
 
         parser.error(f"Неподдерживаемая команда: {args.command}")
         return 2

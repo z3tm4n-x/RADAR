@@ -2,7 +2,7 @@
 
 from radar.__main__ import main
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
-from radar.project_io import read_project_file, save_project_file
+from radar.project_io import calculate_and_save_project_file, read_project_file, save_project_file
 
 
 def _calculation_config() -> CalculationConfig:
@@ -134,6 +134,55 @@ def test_main_run_reports_missing_input_file(tmp_path, capsys) -> None:
     input_path = tmp_path / "missing.radar.json"
 
     exit_code = main(["run", str(input_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Ошибка RADAR: файл не найден" in captured.err
+    assert str(input_path) in captured.err
+
+
+def test_main_show_project_without_result(tmp_path, capsys) -> None:
+    input_path = tmp_path / "input.radar.json"
+
+    save_project_file(
+        input_path,
+        _calculation_config(),
+        created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+    )
+
+    exit_code = main(["show", str(input_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Год запуска: 2028" in captured.out
+    assert "Срок миссии, лет: 7" in captured.out
+    assert "Kp: 4" in captured.out
+    assert "Результат расчёта: отсутствует" in captured.out
+    assert "Выходные таблицы: отсутствуют" in captured.out
+
+
+def test_main_show_project_with_result(tmp_path, capsys) -> None:
+    input_path = tmp_path / "output.radar.json"
+
+    calculate_and_save_project_file(
+        input_path,
+        _calculation_config(),
+        created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+    )
+
+    exit_code = main(["show", str(input_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Результат расчёта: есть" in captured.out
+    assert "dose_by_thickness" in captured.out
+    assert "source_contributions" in captured.out
+
+
+def test_main_show_reports_missing_input_file(tmp_path, capsys) -> None:
+    input_path = tmp_path / "missing.radar.json"
+
+    exit_code = main(["show", str(input_path)])
     captured = capsys.readouterr()
 
     assert exit_code == 1
