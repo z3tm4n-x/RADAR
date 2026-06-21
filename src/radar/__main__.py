@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
+from radar.core.types import SolarActivityLevel
 from radar.project_file import ProjectFile
 from radar.project_io import calculate_project_file, read_project_file, save_project_file
 
@@ -43,6 +44,13 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         type=int,
         required=True,
         help="длительность миссии, лет",
+    )
+
+    init_parser.add_argument(
+        "--solar-activity",
+        choices=tuple(level.value for level in SolarActivityLevel),
+        default=SolarActivityLevel.MEAN.value,
+        help="уровень солнечной активности: minimum, mean или maximum",
     )
     init_parser.add_argument(
         "--orbit",
@@ -132,6 +140,7 @@ def _calculation_config_from_init_args(args: argparse.Namespace) -> CalculationC
         mission=MissionConfig(
             launch_year=args.launch_year,
             lifetime_years=args.lifetime_years,
+            solar_activity_level=SolarActivityLevel(args.solar_activity),
         ),
         orbit=OrbitConfig.circular(
             altitude_km=altitude_km,
@@ -181,6 +190,8 @@ def _print_project_summary(project_file: ProjectFile) -> None:
     print(f"Дата создания: {project_file.created_at}")
     print(f"Год запуска: {config.mission.launch_year}")
     print(f"Срок миссии, лет: {config.mission.lifetime_years}")
+    print(f"Солнечная активность: {config.mission.solar_activity_level.value}")
+    print(f"Вероятность превышения СКЛ: {config.mission.sep_exceedance_probability}")
     print(f"Тип орбиты: {config.orbit.orbit_type.value}")
     print(f"Перигей, км: {config.orbit.perigee_altitude_km}")
     print(f"Апогей, км: {config.orbit.apogee_altitude_km}")

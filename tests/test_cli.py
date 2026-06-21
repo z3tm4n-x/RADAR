@@ -99,6 +99,29 @@ def test_main_init_accepts_shield_thicknesses(tmp_path) -> None:
     )
 
 
+def test_main_init_accepts_solar_activity_level(tmp_path) -> None:
+    output_path = tmp_path / "input.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "geo",
+            "--solar-activity",
+            "maximum",
+        ],
+    )
+    restored = read_project_file(output_path)
+
+    assert exit_code == 0
+    assert restored.calculation_config.mission.solar_activity_level.value == "maximum"
+
+
 def test_main_init_rejects_invalid_shield_thickness(tmp_path, capsys) -> None:
     output_path = tmp_path / "input.radar.json"
 
@@ -210,6 +233,8 @@ def test_main_show_project_without_result(tmp_path, capsys) -> None:
     assert exit_code == 0
     assert "Год запуска: 2028" in captured.out
     assert "Срок миссии, лет: 7" in captured.out
+    assert "Солнечная активность: mean" in captured.out
+    assert "Вероятность превышения СКЛ: 0.1" in captured.out
     assert "Kp: 4" in captured.out
     assert "Геометрия защиты: sphere" in captured.out
     assert "Толщины защиты, г/см²:" in captured.out
@@ -235,6 +260,39 @@ def test_main_show_project_with_result(tmp_path, capsys) -> None:
     assert "Результат расчёта: есть" in captured.out
     assert "dose_by_thickness" in captured.out
     assert "source_contributions" in captured.out
+
+
+def test_main_run_preserves_solar_activity_in_protocol(tmp_path) -> None:
+    input_path = tmp_path / "input.radar.json"
+    output_path = tmp_path / "output.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(input_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "geo",
+            "--solar-activity",
+            "minimum",
+        ],
+    )
+    assert exit_code == 0
+
+    exit_code = main(["run", str(input_path), "--output", str(output_path)])
+    restored = read_project_file(output_path)
+
+    assert exit_code == 0
+    assert restored.calculation_config.mission.solar_activity_level.value == "minimum"
+    assert {
+        (entry["section"], entry["parameter"], entry["value"])
+        for entry in restored.calculation_protocol
+    } >= {
+        ("Миссия", "Уровень солнечной активности", "минимальная"),
+    }
 
 
 def test_main_run_uses_configured_shield_thicknesses(tmp_path) -> None:
