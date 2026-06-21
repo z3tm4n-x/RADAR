@@ -7,6 +7,7 @@ from radar.core.units import Unit
 from radar.output_tables import OutputTableColumn, OutputTableKind, output_table_from_rows
 from radar.project_file import PROJECT_PROGRAM_NAME, PROJECT_SCHEMA_VERSION
 from radar.project_io import (
+    calculate_project_file,
     calculate_and_save_project_file,
     load_project_config,
     read_project_file,
@@ -166,3 +167,56 @@ def test_calculate_and_save_project_file_writes_result(tmp_path) -> None:
         "dose_by_thickness",
         "source_contributions",
     }
+
+
+def test_calculate_project_file_overwrites_input_file(tmp_path) -> None:
+    path = tmp_path / "project.radar.json"
+    created_at = datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC)
+
+    save_project_file(
+        path,
+        _calculation_config(),
+        created_at=created_at,
+    )
+
+    project_file = calculate_project_file(path)
+    restored = read_project_file(path)
+
+    assert project_file == restored
+    assert restored.created_at == created_at.isoformat()
+    assert restored.calculation_result is not None
+    assert restored.calculation_result.config == _calculation_config()
+    assert {
+        table.table_id
+        for table in restored.calculation_result.output_tables
+    } == {
+        "dose_by_thickness",
+        "source_contributions",
+    }
+
+
+def test_calculate_project_file_can_write_to_output_file(tmp_path) -> None:
+    input_path = tmp_path / "input_project.radar.json"
+    output_path = tmp_path / "output_project.radar.json"
+    created_at = datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC)
+    output_created_at = datetime(2029, 6, 7, 8, 9, 10, tzinfo=UTC)
+
+    save_project_file(
+        input_path,
+        _calculation_config(),
+        created_at=created_at,
+    )
+
+    project_file = calculate_project_file(
+        input_path,
+        output_path=output_path,
+        created_at=output_created_at,
+    )
+    original = read_project_file(input_path)
+    restored = read_project_file(output_path)
+
+    assert original.calculation_result is None
+    assert project_file == restored
+    assert restored.created_at == output_created_at.isoformat()
+    assert restored.calculation_result is not None
+    assert restored.calculation_result.config == _calculation_config()

@@ -1,4 +1,4 @@
-﻿"""Read and write RADAR project files."""
+"""Read and write RADAR project files."""
 
 from __future__ import annotations
 
@@ -47,6 +47,27 @@ def calculate_and_save_project_file(
         calculation_config=calculation_config,
         calculation_result=calculation_result,
         created_at=created_at,
+    )
+
+
+def calculate_project_file(
+    input_path: ProjectPath,
+    *,
+    output_path: ProjectPath | None = None,
+    created_at: datetime | None = None,
+) -> ProjectFile:
+    """Read a RADAR project file, execute calculation and save the result."""
+
+    source_project_file = read_project_file(input_path)
+    timestamp = created_at
+
+    if timestamp is None:
+        timestamp = datetime.fromisoformat(source_project_file.created_at)
+
+    return calculate_and_save_project_file(
+        path=output_path or input_path,
+        calculation_config=source_project_file.calculation_config,
+        created_at=timestamp,
     )
 
 
