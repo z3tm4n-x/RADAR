@@ -6,6 +6,7 @@ from datetime import datetime
 from os import PathLike
 from pathlib import Path
 
+from radar.calculation import execute_calculation
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult
 from radar.project_file import ProjectFile, project_file_from_json
@@ -29,6 +30,24 @@ def save_project_file(
     )
     Path(path).write_text(project_file.to_json() + "\n", encoding="utf-8")
     return project_file
+
+
+def calculate_and_save_project_file(
+    path: ProjectPath,
+    calculation_config: CalculationConfig,
+    *,
+    created_at: datetime | None = None,
+) -> ProjectFile:
+    """Execute calculation and save a RADAR project file with the result."""
+
+    calculation_result = execute_calculation(calculation_config)
+
+    return save_project_file(
+        path=path,
+        calculation_config=calculation_config,
+        calculation_result=calculation_result,
+        created_at=created_at,
+    )
 
 
 def read_project_file(path: ProjectPath) -> ProjectFile:

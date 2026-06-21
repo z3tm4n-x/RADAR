@@ -65,6 +65,7 @@ from radar.output_tables import (
     spectrum_output_table,
 )
 from radar.project_io import (
+    calculate_and_save_project_file,
     load_project_config,
     read_project_file,
     save_project_file,
@@ -128,6 +129,7 @@ __all__ = [
     "DoseByThicknessPoint",
     "project_file_from_json",
     "save_project_file",
+    "calculate_and_save_project_file",
     "read_project_file",
     "load_project_config",
     "project_file_from_dict",

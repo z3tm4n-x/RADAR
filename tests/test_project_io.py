@@ -6,7 +6,12 @@ from radar.core.result import CalculationResult, ComponentStatus
 from radar.core.units import Unit
 from radar.output_tables import OutputTableColumn, OutputTableKind, output_table_from_rows
 from radar.project_file import PROJECT_PROGRAM_NAME, PROJECT_SCHEMA_VERSION
-from radar.project_io import load_project_config, read_project_file, save_project_file
+from radar.project_io import (
+    calculate_and_save_project_file,
+    load_project_config,
+    read_project_file,
+    save_project_file,
+)
 
 
 def _calculation_config() -> CalculationConfig:
@@ -138,3 +143,26 @@ def test_save_project_file_writes_calculation_result(tmp_path) -> None:
     )
 
     assert read_project_file(path).calculation_result == result
+
+
+def test_calculate_and_save_project_file_writes_result(tmp_path) -> None:
+    path = tmp_path / "calculated_project.radar.json"
+
+    project_file = calculate_and_save_project_file(
+        path,
+        _calculation_config(),
+        created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
+    )
+    restored = read_project_file(path)
+
+    assert project_file.calculation_result is not None
+    assert restored == project_file
+    assert restored.calculation_result is not None
+    assert restored.calculation_result.config == _calculation_config()
+    assert {
+        table.table_id
+        for table in restored.calculation_result.output_tables
+    } == {
+        "dose_by_thickness",
+        "source_contributions",
+    }
