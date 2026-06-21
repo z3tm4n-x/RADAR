@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.calculation_result_snapshot import (
     calculation_result_from_snapshot,
@@ -7,6 +7,8 @@ from radar.calculation_result_snapshot import (
 from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
+from radar.core.units import Unit
+from radar.output_tables import OutputTableColumn, OutputTableKind, output_table_from_rows
 
 
 def _calculation_config() -> CalculationConfig:
@@ -14,6 +16,32 @@ def _calculation_config() -> CalculationConfig:
         mission=MissionConfig(launch_year=2028, lifetime_years=7),
         orbit=OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0),
         kp=4,
+    )
+
+
+def _output_table():
+    return output_table_from_rows(
+        table_id="dose",
+        title="Накопленная доза",
+        kind=OutputTableKind.DOSE,
+        columns=(
+            OutputTableColumn(
+                key="thickness",
+                title="Толщина защиты",
+                unit=Unit.THICKNESS.value,
+            ),
+            OutputTableColumn(
+                key="dose",
+                title="Накопленная доза",
+                unit=Unit.RAD.value,
+            ),
+        ),
+        rows=(
+            {
+                "thickness": 1.0,
+                "dose": 10.0,
+            },
+        ),
     )
 
 
@@ -34,7 +62,7 @@ def _calculation_result() -> CalculationResult:
         "исходные данные",
         "расчётная конфигурация принята",
         {"Kp": "4"},
-    )
+    ).set_output_table(_output_table())
 
 
 def test_calculation_result_snapshot_round_trip() -> None:
@@ -52,6 +80,7 @@ def test_calculation_result_snapshot_contains_result_sections() -> None:
     assert "log" in snapshot
     assert "component_statuses" in snapshot
     assert "model_info" in snapshot
+    assert "output_tables" in snapshot
     assert snapshot["has_errors"] is False
 
 

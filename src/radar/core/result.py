@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 from radar.core.log import CalculationLog, LogLevel
 from radar.core.project import CalculationConfig
+
+if TYPE_CHECKING:
+    from radar.output_tables import OutputTable
 
 
 class ComponentStatus(StrEnum):
@@ -63,6 +66,7 @@ class CalculationResult:
     log: CalculationLog = CalculationLog()
     component_statuses: tuple[ComponentStatusEntry, ...] = ()
     model_info: tuple[ModelInfo, ...] = ()
+    output_tables: tuple[OutputTable, ...] = ()
 
     def add_log_entry(
         self,
@@ -122,6 +126,17 @@ class CalculationResult:
         )
 
         return replace(self, model_info=(*other_models, model))
+
+    def set_output_table(self, table: OutputTable) -> CalculationResult:
+        """Return a new result with inserted or replaced output table."""
+
+        other_tables = tuple(
+            existing_table
+            for existing_table in self.output_tables
+            if existing_table.table_id != table.table_id
+        )
+
+        return replace(self, output_tables=(*other_tables, table))
 
     def has_errors(self) -> bool:
         """Return True if result log contains errors or any component failed."""

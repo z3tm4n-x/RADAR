@@ -3,6 +3,8 @@ from datetime import UTC, datetime
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import CalculationConfig, MethodologyConfig, MissionConfig, OrbitConfig
 from radar.core.result import CalculationResult, ComponentStatus
+from radar.core.units import Unit
+from radar.output_tables import OutputTableColumn, OutputTableKind, output_table_from_rows
 from radar.project_file import PROJECT_PROGRAM_NAME, PROJECT_SCHEMA_VERSION
 from radar.project_io import load_project_config, read_project_file, save_project_file
 
@@ -16,11 +18,37 @@ def _calculation_config() -> CalculationConfig:
     )
 
 
+def _output_table():
+    return output_table_from_rows(
+        table_id="dose",
+        title="Накопленная доза",
+        kind=OutputTableKind.DOSE,
+        columns=(
+            OutputTableColumn(
+                key="thickness",
+                title="Толщина защиты",
+                unit=Unit.THICKNESS.value,
+            ),
+            OutputTableColumn(
+                key="dose",
+                title="Накопленная доза",
+                unit=Unit.RAD.value,
+            ),
+        ),
+        rows=(
+            {
+                "thickness": 1.0,
+                "dose": 10.0,
+            },
+        ),
+    )
+
+
 def _calculation_result() -> CalculationResult:
     return CalculationResult(config=_calculation_config()).set_component_status(
         "СКЛ",
         ComponentStatus.COMPLETED,
-    )
+    ).set_output_table(_output_table())
 
 
 def test_save_project_file_writes_project_file(tmp_path) -> None:

@@ -1,6 +1,8 @@
-﻿from radar.core.log import LogLevel
+from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
+from radar.core.units import Unit
+from radar.output_tables import OutputTableColumn, OutputTableKind, output_table_from_rows
 
 
 def _config() -> CalculationConfig:
@@ -81,3 +83,57 @@ def test_result_reports_log_errors() -> None:
     )
 
     assert result.has_errors() is True
+
+
+def test_result_set_output_table() -> None:
+    result = CalculationResult(config=_config())
+    table = output_table_from_rows(
+        table_id="dose",
+        title="Накопленная доза",
+        kind=OutputTableKind.DOSE,
+        columns=(
+            OutputTableColumn(
+                key="thickness",
+                title="Толщина защиты",
+                unit=Unit.THICKNESS.value,
+            ),
+            OutputTableColumn(
+                key="dose",
+                title="Накопленная доза",
+                unit=Unit.RAD.value,
+            ),
+        ),
+        rows=(
+            {
+                "thickness": 1.0,
+                "dose": 10.0,
+            },
+        ),
+    )
+
+    updated = result.set_output_table(table)
+
+    assert result.output_tables == ()
+    assert updated.output_tables == (table,)
+
+
+def test_result_set_output_table_replaces_by_table_id() -> None:
+    result = CalculationResult(config=_config())
+    first = output_table_from_rows(
+        table_id="dose",
+        title="Накопленная доза",
+        kind=OutputTableKind.DOSE,
+        columns=(OutputTableColumn(key="dose", title="Накопленная доза"),),
+        rows=({"dose": 10.0},),
+    )
+    second = output_table_from_rows(
+        table_id="dose",
+        title="Накопленная доза уточнённая",
+        kind=OutputTableKind.DOSE,
+        columns=(OutputTableColumn(key="dose", title="Накопленная доза"),),
+        rows=({"dose": 20.0},),
+    )
+
+    updated = result.set_output_table(first).set_output_table(second)
+
+    assert updated.output_tables == (second,)

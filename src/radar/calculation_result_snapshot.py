@@ -16,6 +16,11 @@ from radar.core.result import (
     ComponentStatusEntry,
     ModelInfo,
 )
+from radar.output_tables import (
+    OutputTable,
+    output_table_from_snapshot,
+    output_table_snapshot,
+)
 
 
 def _required_value(data: Mapping[str, object], key: str) -> object:
@@ -163,19 +168,21 @@ def calculation_log_snapshot(log: CalculationLog) -> dict[str, object]:
 def calculation_log_from_snapshot(data: Mapping[str, object]) -> CalculationLog:
     """Restore calculation log from saved representation."""
 
-    entries = tuple(
-        calculation_log_entry_from_snapshot(
-            cast("Mapping[str, object]", entry),
+    raw_entries = _required_array(data, "entries")
+    entries: list[CalculationLogEntry] = []
+
+    for index, entry in enumerate(raw_entries):
+        if not isinstance(entry, Mapping):
+            msg = f"Calculation log entry must be an object: {index}"
+            raise ValueError(msg)
+
+        entries.append(
+            calculation_log_entry_from_snapshot(
+                cast("Mapping[str, object]", entry),
+            ),
         )
-        for entry in _required_array(data, "entries")
-        if isinstance(entry, Mapping)
-    )
 
-    if len(entries) != len(_required_array(data, "entries")):
-        msg = "Calculation log entry must be an object."
-        raise ValueError(msg)
-
-    return CalculationLog(entries=entries)
+    return CalculationLog(entries=tuple(entries))
 
 
 def component_status_entry_snapshot(entry: ComponentStatusEntry) -> dict[str, str]:
@@ -234,6 +241,10 @@ def calculation_result_snapshot(result: CalculationResult) -> dict[str, object]:
             model_info_snapshot(model)
             for model in result.model_info
         ],
+        "output_tables": [
+            output_table_snapshot(table)
+            for table in result.output_tables
+        ],
         "has_errors": result.has_errors(),
     }
 
@@ -284,6 +295,29 @@ def _model_info_from_snapshot(value: object) -> tuple[ModelInfo, ...]:
     return tuple(models)
 
 
+def _output_tables_from_snapshot(value: object) -> tuple[OutputTable, ...]:
+    """Restore output tables from saved value."""
+
+    if not isinstance(value, (list, tuple)):
+        msg = "Calculation result output_tables field must be an array."
+        raise ValueError(msg)
+
+    tables: list[OutputTable] = []
+
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            msg = f"Calculation output table entry must be an object: {index}"
+            raise ValueError(msg)
+
+        tables.append(
+            output_table_from_snapshot(
+                cast("Mapping[str, object]", item),
+            ),
+        )
+
+    return tuple(tables)
+
+
 def calculation_result_from_snapshot(
     data: Mapping[str, object],
 ) -> CalculationResult:
@@ -298,6 +332,9 @@ def calculation_result_from_snapshot(
             _required_value(data, "component_statuses"),
         ),
         model_info=_model_info_from_snapshot(_required_value(data, "model_info")),
+        output_tables=_output_tables_from_snapshot(
+            _required_value(data, "output_tables"),
+        ),
     )
 
     saved_has_errors = _required_bool(data, "has_errors")
