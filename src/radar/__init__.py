@@ -45,6 +45,12 @@ from radar.core.project_snapshot import (
 )
 from radar.core.result import CalculationResult
 from radar.core.spectra import Spectrum1D
+from radar.standard_output_tables import (
+    DoseByThicknessPoint,
+    SourceContribution,
+    dose_by_thickness_output_table,
+    source_contribution_output_table,
+)
 from radar.output_tables import (
     OutputTable,
     OutputTableColumn,
@@ -114,6 +120,10 @@ __all__ = [
     "OutputTableKind",
     "OutputTableColumn",
     "OutputTable",
+    "source_contribution_output_table",
+    "dose_by_thickness_output_table",
+    "SourceContribution",
+    "DoseByThicknessPoint",
     "project_file_from_json",
     "save_project_file",
     "read_project_file",
