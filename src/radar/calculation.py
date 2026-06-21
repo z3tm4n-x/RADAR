@@ -10,10 +10,16 @@ from radar.model_registry import SourceModelRegistration, source_model_bundle_fo
 from radar.solar_activity.model import build_mission_solar_activity
 from radar.solar_activity.ost import ost_wolf_number_cycle_table
 from radar.output_tables import OutputTable
+from radar.single_event_effects import (
+    SingleEventEffectContribution,
+    SingleEventEffectMechanism,
+    SingleEventEffectPoint,
+)
 from radar.standard_output_tables import (
     DoseByThicknessPoint,
     SourceContribution,
     dose_by_thickness_output_table,
+    single_event_effects_output_table,
     source_contribution_output_table,
 )
 
@@ -158,6 +164,34 @@ def _placeholder_source_contribution_table(config: CalculationConfig) -> OutputT
     )
 
 
+def _placeholder_single_event_effects_table(config: CalculationConfig) -> OutputTable:
+    """Return zero single event effect table for placeholder execution."""
+
+    mechanisms = tuple(SingleEventEffectMechanism)
+
+    return single_event_effects_output_table(
+        table_id="single_event_effects",
+        title="Одиночные эффекты по толщине защиты",
+        points=tuple(
+            SingleEventEffectPoint(
+                thickness_g_cm2=thickness,
+                contributions=tuple(
+                    SingleEventEffectContribution(
+                        mechanism=mechanism,
+                        event_rate_per_day=0.0,
+                        expected_events=0.0,
+                    )
+                    for mechanism in mechanisms
+                ),
+            )
+            for thickness in config.shielding.thicknesses_g_cm2
+        ),
+        metadata={
+            "status": "placeholder",
+        },
+    )
+
+
 def execute_calculation(config: CalculationConfig) -> CalculationResult:
     """Execute temporary RADAR calculation plumbing.
 
@@ -186,6 +220,7 @@ def execute_calculation(config: CalculationConfig) -> CalculationResult:
 
     result = result.set_output_table(_placeholder_dose_table(config))
     result = result.set_output_table(_placeholder_source_contribution_table(config))
+    result = result.set_output_table(_placeholder_single_event_effects_table(config))
 
     return result.add_log_entry(
         LogLevel.WARNING,

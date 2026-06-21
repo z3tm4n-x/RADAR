@@ -1,12 +1,18 @@
-﻿import pytest
+import pytest
 
 from radar.core.types import DoseQuantity, RadiationSource
 from radar.core.units import Unit
 from radar.output_tables import OutputTableKind
+from radar.single_event_effects import (
+    SingleEventEffectContribution,
+    SingleEventEffectMechanism,
+    SingleEventEffectPoint,
+)
 from radar.standard_output_tables import (
     DoseByThicknessPoint,
     SourceContribution,
     dose_by_thickness_output_table,
+    single_event_effects_output_table,
     source_contribution_output_table,
 )
 
@@ -141,3 +147,53 @@ def test_source_contribution_rejects_invalid_share() -> None:
             value=10.0,
             share_percent=101.0,
         )
+
+
+
+def test_single_event_effects_output_table() -> None:
+    table = single_event_effects_output_table(
+        table_id="single_event_effects",
+        title="Одиночные эффекты по толщине защиты",
+        points=(
+            SingleEventEffectPoint(
+                thickness_g_cm2=1.0,
+                contributions=(
+                    SingleEventEffectContribution(
+                        mechanism=SingleEventEffectMechanism.SEP_PROTON,
+                        event_rate_per_day=0.2,
+                        expected_events=3.0,
+                    ),
+                    SingleEventEffectContribution(
+                        mechanism=SingleEventEffectMechanism.GCR_HEAVY_ION,
+                        event_rate_per_day=0.3,
+                        expected_events=4.0,
+                    ),
+                ),
+            ),
+        ),
+        metadata={"status": "test"},
+    )
+
+    assert table.kind is OutputTableKind.SINGLE_EVENT
+    assert table.columns[0].key == "thickness_g_cm2"
+    assert table.columns[0].title == "Толщина защиты"
+    assert table.columns[0].unit == Unit.THICKNESS.value
+
+    column_keys = tuple(column.key for column in table.columns)
+    assert "sep_proton_event_rate_per_day" in column_keys
+    assert "sep_proton_expected_events" in column_keys
+    assert "gcr_heavy_ion_event_rate_per_day" in column_keys
+    assert "gcr_heavy_ion_expected_events" in column_keys
+    assert "total_event_rate_per_day" in column_keys
+    assert "total_expected_events" in column_keys
+
+    row = table.rows[0].cells
+    assert row[column_keys.index("thickness_g_cm2")] == 1.0
+    assert row[column_keys.index("sep_proton_event_rate_per_day")] == 0.2
+    assert row[column_keys.index("sep_proton_expected_events")] == 3.0
+    assert row[column_keys.index("gcr_heavy_ion_event_rate_per_day")] == 0.3
+    assert row[column_keys.index("gcr_heavy_ion_expected_events")] == 4.0
+    assert row[column_keys.index("erb_proton_event_rate_per_day")] == 0.0
+    assert row[column_keys.index("total_event_rate_per_day")] == pytest.approx(0.5)
+    assert row[column_keys.index("total_expected_events")] == pytest.approx(7.0)
+    assert ("status", "test") in table.metadata

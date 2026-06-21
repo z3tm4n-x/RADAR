@@ -67,6 +67,7 @@ def test_execute_calculation_builds_placeholder_output_tables() -> None:
     assert {table.table_id for table in result.output_tables} == {
         "dose_by_thickness",
         "source_contributions",
+        "single_event_effects",
     }
 
     dose_table = next(
@@ -78,6 +79,24 @@ def test_execute_calculation_builds_placeholder_output_tables() -> None:
     assert dose_table.rows[1].cells == (2.0, 0.0)
     assert dose_table.rows[2].cells == (5.0, 0.0)
     assert ("status", "placeholder") in dose_table.metadata
+
+    see_table = next(
+        table
+        for table in result.output_tables
+        if table.table_id == "single_event_effects"
+    )
+    see_column_keys = tuple(column.key for column in see_table.columns)
+    assert [row.cells[0] for row in see_table.rows] == [1.0, 2.0, 5.0]
+    assert see_table.kind.value == "single_event"
+    assert ("status", "placeholder") in see_table.metadata
+    assert all(
+        row.cells[see_column_keys.index("total_event_rate_per_day")] == 0.0
+        for row in see_table.rows
+    )
+    assert all(
+        row.cells[see_column_keys.index("total_expected_events")] == 0.0
+        for row in see_table.rows
+    )
 
 
 def test_execute_calculation_result_can_be_saved_in_project_file() -> None:

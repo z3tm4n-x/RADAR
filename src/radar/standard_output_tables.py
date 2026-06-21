@@ -1,4 +1,4 @@
-﻿"""Standard RADAR output table builders."""
+"""Standard RADAR output table builders."""
 
 from __future__ import annotations
 
@@ -13,6 +13,11 @@ from radar.output_tables import (
     OutputTableColumn,
     OutputTableKind,
     output_table_from_rows,
+)
+from radar.single_event_effects import (
+    SingleEventEffectMechanism,
+    SingleEventEffectPoint,
+    single_event_effect_mechanism_title,
 )
 
 _SOURCE_TITLES: dict[RadiationSource, str] = {
@@ -193,5 +198,121 @@ def source_contribution_output_table(
             }
             for contribution in contributions
         ),
+        metadata=_metadata_with({}, metadata),
+    )
+
+
+_SINGLE_EVENT_EFFECT_MECHANISMS: tuple[SingleEventEffectMechanism, ...] = (
+    SingleEventEffectMechanism.SEP_PROTON,
+    SingleEventEffectMechanism.GCR_PROTON,
+    SingleEventEffectMechanism.ERB_PROTON,
+    SingleEventEffectMechanism.SEP_HEAVY_ION,
+    SingleEventEffectMechanism.GCR_HEAVY_ION,
+)
+
+
+def _single_event_effect_columns() -> tuple[OutputTableColumn, ...]:
+    """Return standard single event effect table columns."""
+
+    columns: list[OutputTableColumn] = [
+        OutputTableColumn(
+            key="thickness_g_cm2",
+            title="Толщина защиты",
+            unit=Unit.THICKNESS.value,
+        ),
+    ]
+
+    for mechanism in _SINGLE_EVENT_EFFECT_MECHANISMS:
+        title = single_event_effect_mechanism_title(mechanism)
+        columns.append(
+            OutputTableColumn(
+                key=f"{mechanism.value}_event_rate_per_day",
+                title=f"Частота, {title}",
+                unit="1/сут",
+            ),
+        )
+        columns.append(
+            OutputTableColumn(
+                key=f"{mechanism.value}_expected_events",
+                title=f"Ожидаемое число, {title}",
+            ),
+        )
+
+    columns.append(
+        OutputTableColumn(
+            key="total_event_rate_per_day",
+            title="Суммарная частота",
+            unit="1/сут",
+        ),
+    )
+    columns.append(
+        OutputTableColumn(
+            key="total_expected_events",
+            title="Суммарное ожидаемое число",
+        ),
+    )
+
+    return tuple(columns)
+
+
+def _single_event_effect_value(
+    point: SingleEventEffectPoint,
+    mechanism: SingleEventEffectMechanism,
+    field: str,
+) -> float:
+    """Return contribution value for a mechanism and field."""
+
+    contribution = point.contribution_for(mechanism)
+    if contribution is None:
+        return 0.0
+
+    if field == "event_rate_per_day":
+        return contribution.event_rate_per_day
+
+    if field == "expected_events":
+        return contribution.expected_events
+
+    msg = f"Unsupported single event effect field: {field}"
+    raise ValueError(msg)
+
+
+def single_event_effects_output_table(
+    *,
+    table_id: str,
+    title: str,
+    points: Sequence[SingleEventEffectPoint],
+    metadata: Mapping[str, str] | None = None,
+) -> OutputTable:
+    """Create standard single event effect table by shielding thickness."""
+
+    rows: list[dict[str, float]] = []
+
+    for point in points:
+        row: dict[str, float] = {
+            "thickness_g_cm2": point.thickness_g_cm2,
+        }
+
+        for mechanism in _SINGLE_EVENT_EFFECT_MECHANISMS:
+            row[f"{mechanism.value}_event_rate_per_day"] = _single_event_effect_value(
+                point,
+                mechanism,
+                "event_rate_per_day",
+            )
+            row[f"{mechanism.value}_expected_events"] = _single_event_effect_value(
+                point,
+                mechanism,
+                "expected_events",
+            )
+
+        row["total_event_rate_per_day"] = point.total_event_rate_per_day
+        row["total_expected_events"] = point.total_expected_events
+        rows.append(row)
+
+    return output_table_from_rows(
+        table_id=table_id,
+        title=title,
+        kind=OutputTableKind.SINGLE_EVENT,
+        columns=_single_event_effect_columns(),
+        rows=tuple(rows),
         metadata=_metadata_with({}, metadata),
     )
