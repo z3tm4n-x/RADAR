@@ -166,6 +166,7 @@ def test_calculate_and_save_project_file_writes_result(tmp_path) -> None:
     } == {
         "dose_by_thickness",
         "source_contributions",
+        "single_event_effects",
     }
 
 
@@ -192,6 +193,7 @@ def test_calculate_project_file_overwrites_input_file(tmp_path) -> None:
     } == {
         "dose_by_thickness",
         "source_contributions",
+        "single_event_effects",
     }
 
 
