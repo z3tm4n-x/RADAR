@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass
+from io import StringIO
 from importlib import resources
 from pathlib import PurePosixPath
 from typing import cast
@@ -61,6 +63,42 @@ def _load_json_resource(relative_path: str) -> dict[str, object]:
         raise ValueError(msg)
 
     return cast("dict[str, object]", loaded)
+
+
+def _safe_normative_path(relative_path: str, kind: str) -> PurePosixPath:
+    """Return safe relative resource path."""
+
+    path = PurePosixPath(relative_path)
+    if path.is_absolute() or ".." in path.parts:
+        msg = f"Unsafe normative {kind} path: {relative_path}"
+        raise ValueError(msg)
+
+    return path
+
+
+def _load_csv_resource(relative_path: str) -> tuple[dict[str, str], ...]:
+    """Load CSV resource from normative data package."""
+
+    resource_path = _safe_normative_path(relative_path, "table")
+    resource = resources.files(_NORMATIVE_PACKAGE).joinpath(str(resource_path))
+    text = resource.read_text(encoding="utf-8-sig")
+    reader = csv.DictReader(StringIO(text))
+
+    if reader.fieldnames is None:
+        msg = f"Normative CSV resource has no header: {relative_path}"
+        raise ValueError(msg)
+
+    rows: list[dict[str, str]] = []
+    for row in reader:
+        normalized_row: dict[str, str] = {}
+        for key, value in row.items():
+            if key is None:
+                msg = f"Normative CSV resource has unnamed column: {relative_path}"
+                raise ValueError(msg)
+            normalized_row[key] = "" if value is None else value
+        rows.append(normalized_row)
+
+    return tuple(rows)
 
 
 def _required_str(data: dict[str, object], key: str) -> str:
@@ -169,10 +207,7 @@ def load_normative_collection_manifest(
         msg = f"Unknown normative collection: {collection_id}"
         raise ValueError(msg) from exc
 
-    manifest_path = PurePosixPath(collection_ref.manifest)
-    if manifest_path.is_absolute() or ".." in manifest_path.parts:
-        msg = f"Unsafe normative manifest path: {collection_ref.manifest}"
-        raise ValueError(msg)
+    _safe_normative_path(collection_ref.manifest, "manifest")
 
     data = _load_json_resource(collection_ref.manifest)
     schema_version = _required_str(data, "schema_version")
@@ -213,3 +248,36 @@ def get_normative_table_ref(
     except KeyError as exc:
         msg = f"Unknown normative table: {collection_id}/{table_id}"
         raise ValueError(msg) from exc
+
+def load_normative_table_rows(
+    collection_id: str,
+    table_id: str,
+) -> tuple[dict[str, str], ...]:
+    """Load normative table rows."""
+
+    table = get_normative_table_ref(collection_id, table_id)
+    if not table.data_file:
+        msg = f"Normative table data file is missing: {collection_id}/{table_id}"
+        raise ValueError(msg)
+
+    return _load_csv_resource(table.data_file)
+
+
+def validate_normative_table_control_values(
+    collection_id: str,
+    table_id: str,
+) -> None:
+    """Validate table control values against transferred rows."""
+
+    table = get_normative_table_ref(collection_id, table_id)
+    rows = load_normative_table_rows(collection_id, table_id)
+    row_set = {tuple(sorted(row.items())) for row in rows}
+
+    for control_value in table.control_values:
+        expected = tuple(
+            sorted((str(key), str(value)) for key, value in control_value.items())
+        )
+        if expected not in row_set:
+            msg = f"Normative table control value is missing: {collection_id}/{table_id}"
+            raise ValueError(msg)
+
