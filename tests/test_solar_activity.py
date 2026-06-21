@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.core.project import MissionConfig
 from radar.core.types import SolarActivityLevel
@@ -8,6 +8,11 @@ from radar.solar_activity.cycle import (
     mission_cycle_years,
 )
 from radar.solar_activity.model import build_mission_solar_activity
+from radar.solar_activity.ost import (
+    OST_WOLF_NUMBER_TABLE_ID,
+    ost_wolf_number_cycle_table,
+    ost_wolf_number_for_cycle_year,
+)
 
 
 def _test_mean_cycle_table() -> SolarCycleTable:
@@ -111,3 +116,82 @@ def test_build_mission_solar_activity_rejects_level_mismatch() -> None:
             cycle_table=table,
             reference_start_year=2024,
         )
+
+def test_ost_wolf_number_cycle_table_uses_first_11_cycle_points() -> None:
+    table = ost_wolf_number_cycle_table(SolarActivityLevel.MEAN)
+
+    assert table.level is SolarActivityLevel.MEAN
+    assert table.source == "ОСТ 134-1044-2007"
+    assert table.table_id == OST_WOLF_NUMBER_TABLE_ID
+    assert table.wolf_numbers == (
+        7.1,
+        19.4,
+        63.2,
+        98.4,
+        107.4,
+        104.9,
+        82.0,
+        55.1,
+        34.5,
+        21.3,
+        11.7,
+    )
+
+
+def test_ost_wolf_number_cycle_table_supports_minimum_and_maximum_cycles() -> None:
+    minimum_table = ost_wolf_number_cycle_table(SolarActivityLevel.MINIMUM)
+    maximum_table = ost_wolf_number_cycle_table(SolarActivityLevel.MAXIMUM)
+
+    assert minimum_table.wolf_numbers == (
+        2.6,
+        15.0,
+        25.6,
+        49.3,
+        67.4,
+        70.3,
+        61.3,
+        42.7,
+        25.6,
+        13.3,
+        7.4,
+    )
+    assert maximum_table.wolf_numbers == (
+        11.5,
+        33.9,
+        100.8,
+        147.5,
+        147.4,
+        139.5,
+        102.6,
+        67.4,
+        43.4,
+        29.4,
+        16.0,
+    )
+
+
+def test_ost_wolf_number_for_cycle_year() -> None:
+    assert ost_wolf_number_for_cycle_year(SolarActivityLevel.MEAN, 1) == 7.1
+    assert ost_wolf_number_for_cycle_year(SolarActivityLevel.MEAN, 5) == 107.4
+    assert ost_wolf_number_for_cycle_year(SolarActivityLevel.MEAN, 11) == 11.7
+
+
+def test_build_mission_solar_activity_with_ost_wolf_number_table() -> None:
+    mission = MissionConfig(
+        launch_year=2027,
+        lifetime_years=4,
+        solar_activity_level=SolarActivityLevel.MEAN,
+    )
+    table = ost_wolf_number_cycle_table(SolarActivityLevel.MEAN)
+
+    activity = build_mission_solar_activity(
+        mission=mission,
+        cycle_table=table,
+        reference_start_year=2024,
+    )
+
+    assert activity.cycle_years == (4, 5, 6, 7)
+    assert activity.wolf_numbers == (98.4, 107.4, 104.9, 82.0)
+    assert activity.source == "ОСТ 134-1044-2007"
+    assert activity.table_id == OST_WOLF_NUMBER_TABLE_ID
+
