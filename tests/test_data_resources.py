@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.data.metadata import DataFormat, TableMetadata, ValidationStatus
 from radar.data.resources import ResourceManager
@@ -137,3 +137,12 @@ def test_resource_manager_reports_missing_file(tmp_path) -> None:
 
     with pytest.raises(FileNotFoundError):
         manager.resolve(metadata)
+
+def test_data_package_exports_resource_types() -> None:
+    from radar.data import DataFormat, ResourceManager, TableMetadata, ValidationStatus
+
+    assert DataFormat.CSV.value == "csv"
+    assert ResourceManager is not None
+    assert TableMetadata is not None
+    assert ValidationStatus is not None
+
