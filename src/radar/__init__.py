@@ -45,6 +45,18 @@ from radar.core.project_snapshot import (
 )
 from radar.core.result import CalculationResult
 from radar.core.spectra import Spectrum1D
+from radar.output_tables import (
+    OutputTable,
+    OutputTableColumn,
+    OutputTableKind,
+    OutputTableRow,
+    output_table_from_rows,
+    output_table_from_snapshot,
+    output_table_snapshot,
+    output_tables_from_snapshot,
+    output_tables_snapshot,
+    spectrum_output_table,
+)
 from radar.project_io import (
     load_project_config,
     read_project_file,
@@ -92,6 +104,16 @@ __all__ = [
     "MethodologyConfig",
     "MissionConfig",
     "OrbitConfig",
+    "spectrum_output_table",
+    "output_tables_snapshot",
+    "output_tables_from_snapshot",
+    "output_table_snapshot",
+    "output_table_from_snapshot",
+    "output_table_from_rows",
+    "OutputTableRow",
+    "OutputTableKind",
+    "OutputTableColumn",
+    "OutputTable",
     "project_file_from_json",
     "save_project_file",
     "read_project_file",
