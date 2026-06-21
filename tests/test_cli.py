@@ -1,4 +1,4 @@
-﻿from datetime import UTC, datetime
+from datetime import UTC, datetime
 
 from radar.__main__ import main
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
@@ -66,6 +66,60 @@ def test_main_init_creates_circular_project_file(tmp_path) -> None:
     assert restored.calculation_config.orbit.perigee_altitude_km == 550.0
     assert restored.calculation_config.orbit.inclination_deg == 97.6
     assert restored.calculation_config.kp == 5
+
+
+def test_main_init_accepts_shield_thicknesses(tmp_path) -> None:
+    output_path = tmp_path / "input.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "geo",
+            "--shield-thickness",
+            "2.0",
+            "--shield-thickness",
+            "0.5",
+            "--shield-thickness",
+            "1.0",
+        ],
+    )
+    restored = read_project_file(output_path)
+
+    assert exit_code == 0
+    assert restored.calculation_config.shielding.thicknesses_g_cm2 == (
+        0.5,
+        1.0,
+        2.0,
+    )
+
+
+def test_main_init_rejects_invalid_shield_thickness(tmp_path, capsys) -> None:
+    output_path = tmp_path / "input.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "geo",
+            "--shield-thickness",
+            "0",
+        ],
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Shield thicknesses must be positive" in captured.err
 
 
 def test_main_init_rejects_circular_orbit_without_altitude(tmp_path, capsys) -> None:
@@ -157,6 +211,10 @@ def test_main_show_project_without_result(tmp_path, capsys) -> None:
     assert "Год запуска: 2028" in captured.out
     assert "Срок миссии, лет: 7" in captured.out
     assert "Kp: 4" in captured.out
+    assert "Геометрия защиты: sphere" in captured.out
+    assert "Толщины защиты, г/см²:" in captured.out
+    assert "0.01" in captured.out
+    assert "10.0" in captured.out
     assert "Результат расчёта: отсутствует" in captured.out
     assert "Выходные таблицы: отсутствуют" in captured.out
 
@@ -177,6 +235,48 @@ def test_main_show_project_with_result(tmp_path, capsys) -> None:
     assert "Результат расчёта: есть" in captured.out
     assert "dose_by_thickness" in captured.out
     assert "source_contributions" in captured.out
+
+
+def test_main_run_uses_configured_shield_thicknesses(tmp_path) -> None:
+    input_path = tmp_path / "input.radar.json"
+    output_path = tmp_path / "output.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(input_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "geo",
+            "--shield-thickness",
+            "0.25",
+            "--shield-thickness",
+            "0.75",
+        ],
+    )
+    assert exit_code == 0
+
+    exit_code = main(["run", str(input_path), "--output", str(output_path)])
+    restored = read_project_file(output_path)
+
+    assert exit_code == 0
+    assert restored.calculation_result is not None
+
+    dose_table = next(
+        table
+        for table in restored.calculation_result.output_tables
+        if table.table_id == "dose_by_thickness"
+    )
+    thickness_column_index = tuple(
+        column.key for column in dose_table.columns
+    ).index("thickness_g_cm2")
+    assert [row.cells[thickness_column_index] for row in dose_table.rows] == [
+        0.25,
+        0.75,
+    ]
 
 
 def test_main_show_reports_missing_input_file(tmp_path, capsys) -> None:

@@ -1,4 +1,4 @@
-﻿"""Command line entry point for RADAR."""
+"""Command line entry point for RADAR."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
+from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
 from radar.project_file import ProjectFile
 from radar.project_io import calculate_project_file, read_project_file, save_project_file
 
@@ -69,6 +69,18 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="индекс Kp",
     )
 
+    init_parser.add_argument(
+        "--shield-thickness",
+        dest="shield_thicknesses",
+        action="append",
+        type=float,
+        default=None,
+        help=(
+            "толщина сферической алюминиевой защиты, г/см²; "
+            "можно указать несколько раз"
+        ),
+    )
+
     run_parser = subparsers.add_parser(
         "run",
         help="прочитать файл проекта RADAR, выполнить расчёт и сохранить результат",
@@ -110,6 +122,12 @@ def _calculation_config_from_init_args(args: argparse.Namespace) -> CalculationC
         msg = "Для круговой орбиты укажите --altitude-km."
         raise ValueError(msg)
 
+    shielding = (
+        ShieldingConfig(thicknesses_g_cm2=tuple(args.shield_thicknesses))
+        if args.shield_thicknesses is not None
+        else ShieldingConfig()
+    )
+
     return CalculationConfig(
         mission=MissionConfig(
             launch_year=args.launch_year,
@@ -119,6 +137,7 @@ def _calculation_config_from_init_args(args: argparse.Namespace) -> CalculationC
             altitude_km=altitude_km,
             inclination_deg=args.inclination_deg,
         ),
+        shielding=shielding,
         kp=args.kp,
     )
 
@@ -167,6 +186,11 @@ def _print_project_summary(project_file: ProjectFile) -> None:
     print(f"Апогей, км: {config.orbit.apogee_altitude_km}")
     print(f"Наклонение, град: {config.orbit.inclination_deg}")
     print(f"Kp: {config.kp}")
+    print(f"Геометрия защиты: {config.shielding.geometry.value}")
+    thicknesses = ", ".join(
+        str(thickness) for thickness in config.shielding.thicknesses_g_cm2
+    )
+    print(f"Толщины защиты, г/см²: {thicknesses}")
     print(f"Методика: {config.methodology.profile.value}")
     print(f"Дозовая величина: {config.dose_quantity.value}")
     print(f"Единица дозы: {config.dose_unit.value}")
