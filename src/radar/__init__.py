@@ -1,6 +1,7 @@
 """RADAR — Radiation Analysis and Design Assessment Resource."""
 
 from radar.version import __version__
+from radar.calculation import execute_calculation
 from radar.calculation_protocol import (
     CalculationProtocolEntry,
     calculation_protocol_entries,
@@ -92,6 +93,7 @@ from radar.model_registry import (
 
 __all__ = [
     "CalculationConfig",
+    "execute_calculation",
     "source_model_family_title",
     "methodology_profile_title",
     "calculation_protocol_text",
