@@ -31,6 +31,7 @@ class RadiationProductNormativeStatus(StrEnum):
     OST_MINIMUM = "ost_minimum"
     EXTENDED_BALANCE = "extended_balance"
     OUTPUT_FORM = "output_form"
+    INTERMEDIATE = "intermediate"
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,43 @@ SOURCE_RADIATION_PRODUCT_SPECS: tuple[SourceRadiationProductSpec, ...] = (
         purposes=(RadiationProductPurpose.SINGLE_EVENT_EFFECT,),
         normative_status=RadiationProductNormativeStatus.OST_MINIMUM,
         title="Пиковый поток протонов СКЛ",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.SEP,
+        particle=Particle.HZE,
+        product_kind=RadiationProductKind.PEAK_FLUX,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(
+            RadiationProductPurpose.INTERMEDIATE,
+            RadiationProductPurpose.SINGLE_EVENT_EFFECT,
+        ),
+        normative_status=RadiationProductNormativeStatus.INTERMEDIATE,
+        title="Пиковый поток ТЗЧ СКЛ до защиты",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.SEP,
+        particle=Particle.HZE,
+        product_kind=RadiationProductKind.MEAN_FLUX,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(
+            RadiationProductPurpose.INTERMEDIATE,
+            RadiationProductPurpose.SINGLE_EVENT_EFFECT,
+        ),
+        normative_status=RadiationProductNormativeStatus.INTERMEDIATE,
+        title="Средний поток ТЗЧ СКЛ до защиты",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.SEP,
+        particle=Particle.HZE,
+        product_kind=RadiationProductKind.MISSION_FLUENCE,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(
+            RadiationProductPurpose.INTERMEDIATE,
+            RadiationProductPurpose.ACCUMULATED_DOSE,
+        ),
+        normative_status=RadiationProductNormativeStatus.EXTENDED_BALANCE,
+        title="Флюенс ТЗЧ СКЛ за САС до защиты",
+        note="Промежуточная величина для ЛПЭ-спектра за защитой.",
     ),
     SourceRadiationProductSpec(
         source=RadiationSource.SEP,
@@ -137,6 +175,43 @@ SOURCE_RADIATION_PRODUCT_SPECS: tuple[SourceRadiationProductSpec, ...] = (
     SourceRadiationProductSpec(
         source=RadiationSource.GCR,
         particle=Particle.HZE,
+        product_kind=RadiationProductKind.MEAN_FLUX,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(
+            RadiationProductPurpose.INTERMEDIATE,
+            RadiationProductPurpose.SINGLE_EVENT_EFFECT,
+        ),
+        normative_status=RadiationProductNormativeStatus.INTERMEDIATE,
+        title="Средний поток ТЗЧ ГКЛ до защиты",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.GCR,
+        particle=Particle.HZE,
+        product_kind=RadiationProductKind.MAXIMUM_FLUX,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(
+            RadiationProductPurpose.INTERMEDIATE,
+            RadiationProductPurpose.SINGLE_EVENT_EFFECT,
+        ),
+        normative_status=RadiationProductNormativeStatus.INTERMEDIATE,
+        title="Максимальный поток ТЗЧ ГКЛ до защиты",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.GCR,
+        particle=Particle.HZE,
+        product_kind=RadiationProductKind.MISSION_FLUENCE,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(
+            RadiationProductPurpose.INTERMEDIATE,
+            RadiationProductPurpose.ACCUMULATED_DOSE,
+        ),
+        normative_status=RadiationProductNormativeStatus.EXTENDED_BALANCE,
+        title="Флюенс ТЗЧ ГКЛ за САС до защиты",
+        note="Промежуточная величина для ЛПЭ-спектра за защитой.",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.GCR,
+        particle=Particle.HZE,
         product_kind=RadiationProductKind.MAXIMUM_LET_FLUX,
         location=RadiationProductLocation.BEHIND_SHIELDING,
         purposes=(RadiationProductPurpose.SINGLE_EVENT_EFFECT,),
@@ -174,6 +249,16 @@ SOURCE_RADIATION_PRODUCT_SPECS: tuple[SourceRadiationProductSpec, ...] = (
     SourceRadiationProductSpec(
         source=RadiationSource.ERB,
         particle=Particle.PROTON,
+        product_kind=RadiationProductKind.MEAN_FLUX,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(RadiationProductPurpose.INTERMEDIATE,),
+        normative_status=RadiationProductNormativeStatus.INTERMEDIATE,
+        title="Средний поток протонов ЕРПЗ",
+        note="Допустимая промежуточная величина; для ОЭ используется максимальный поток.",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.ERB,
+        particle=Particle.PROTON,
         product_kind=RadiationProductKind.MISSION_FLUENCE,
         location=RadiationProductLocation.BEFORE_SHIELDING,
         purposes=(RadiationProductPurpose.ACCUMULATED_DOSE,),
@@ -197,6 +282,16 @@ SOURCE_RADIATION_PRODUCT_SPECS: tuple[SourceRadiationProductSpec, ...] = (
         purposes=(RadiationProductPurpose.INTERMEDIATE,),
         normative_status=RadiationProductNormativeStatus.OST_MINIMUM,
         title="Орбитально-усреднённый поток электронов ЕРПЗ",
+    ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.ERB,
+        particle=Particle.ELECTRON,
+        product_kind=RadiationProductKind.MEAN_FLUX,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(RadiationProductPurpose.INTERMEDIATE,),
+        normative_status=RadiationProductNormativeStatus.INTERMEDIATE,
+        title="Средний поток электронов ЕРПЗ",
+        note="Допустимая промежуточная величина для дозового тракта электронов ЕРПЗ.",
     ),
     SourceRadiationProductSpec(
         source=RadiationSource.ERB,

@@ -82,14 +82,20 @@ def test_validate_erb_energy_spectrum_accepts_electron_flux() -> None:
     validate_erb_energy_spectrum(_erb_electron_flux_spectrum())
 
 
-def test_validate_erb_energy_spectrum_accepts_peak_maximum_and_mean_flux() -> None:
+def test_validate_erb_energy_spectrum_accepts_maximum_and_mean_flux() -> None:
     for quantity in (
-        SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
         SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
         SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
     ):
         validate_erb_energy_spectrum(
             _erb_flux_spectrum(quantity=quantity)
+        )
+
+
+def test_validate_erb_energy_spectrum_rejects_peak_flux() -> None:
+    with pytest.raises(ValueError, match="supported differential flux"):
+        validate_erb_energy_spectrum(
+            _erb_flux_spectrum(quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX)
         )
 
 
@@ -244,17 +250,16 @@ def test_erb_model_result_exposes_products() -> None:
     assert result.products[1].spectrum == electron_spectrum
 
 
-def test_erb_model_result_maps_peak_maximum_and_mean_products() -> None:
+def test_erb_model_result_maps_maximum_and_mean_products() -> None:
     from radar.core.types import RadiationProductKind
 
-    peak_spectrum = _erb_flux_spectrum(quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX)
     maximum_spectrum = _erb_flux_spectrum(
         quantity=SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
     )
     mean_spectrum = _erb_flux_spectrum(quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX)
 
     result = ErbModelResult(
-        spectra=(peak_spectrum, maximum_spectrum, mean_spectrum),
+        spectra=(maximum_spectrum, mean_spectrum),
         lifetime_years=5,
         kp=3,
         model="test",
@@ -262,7 +267,6 @@ def test_erb_model_result_maps_peak_maximum_and_mean_products() -> None:
     )
 
     assert tuple(product.kind for product in result.products) == (
-        RadiationProductKind.PEAK_FLUX,
         RadiationProductKind.MAXIMUM_FLUX,
         RadiationProductKind.MEAN_FLUX,
     )

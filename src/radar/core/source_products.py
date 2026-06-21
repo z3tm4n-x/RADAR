@@ -3,29 +3,31 @@
 from __future__ import annotations
 
 from radar.core.products import SpectrumProduct
+from radar.core.source_product_specs import (
+    has_source_radiation_product_spec,
+    source_radiation_product_specs_for_source,
+)
 from radar.core.spectra import Spectrum1D
 from radar.core.types import RadiationProductKind, RadiationSource
 
+
+def _product_kinds_for_source(
+    source: RadiationSource,
+) -> tuple[RadiationProductKind, ...]:
+    """Return product kinds specified for a radiation source."""
+
+    product_kinds: list[RadiationProductKind] = []
+
+    for spec in source_radiation_product_specs_for_source(source):
+        if spec.product_kind not in product_kinds:
+            product_kinds.append(spec.product_kind)
+
+    return tuple(product_kinds)
+
+
 SOURCE_PRODUCT_KINDS: dict[RadiationSource, tuple[RadiationProductKind, ...]] = {
-    RadiationSource.SEP: (
-        RadiationProductKind.MISSION_FLUENCE,
-        RadiationProductKind.PEAK_FLUX,
-    ),
-    RadiationSource.GCR: (
-        RadiationProductKind.MISSION_FLUENCE,
-        RadiationProductKind.MEAN_FLUX,
-        RadiationProductKind.MAXIMUM_FLUX,
-        RadiationProductKind.MISSION_LET_FLUENCE,
-        RadiationProductKind.MEAN_LET_FLUX,
-        RadiationProductKind.MAXIMUM_LET_FLUX,
-    ),
-    RadiationSource.ERB: (
-        RadiationProductKind.ORBIT_AVERAGED_FLUX,
-        RadiationProductKind.MISSION_FLUENCE,
-        RadiationProductKind.MEAN_FLUX,
-        RadiationProductKind.MAXIMUM_FLUX,
-        RadiationProductKind.PEAK_FLUX,
-    ),
+    source: _product_kinds_for_source(source)
+    for source in RadiationSource
 }
 
 
@@ -76,19 +78,31 @@ def validate_product_allowed_for_source(
     product: SpectrumProduct,
     source: RadiationSource,
 ) -> None:
-    """Validate that product kind and spectrum source match a radiation source."""
+    """Validate that product kind, particle and spectrum source match a source."""
 
     validate_product_kind_allowed_for_source(
         product_kind=product.kind,
         source=source,
     )
 
-    if product.spectrum.source is source:
+    if product.spectrum.source is not source:
+        msg = (
+            f"Radiation product spectrum source {product.spectrum.source.value} "
+            f"does not match expected radiation source {source.value}."
+        )
+        raise ValueError(msg)
+
+    if has_source_radiation_product_spec(
+        source=source,
+        particle=product.spectrum.particle,
+        product_kind=product.kind,
+    ):
         return
 
     msg = (
-        f"Radiation product spectrum source {product.spectrum.source.value} "
-        f"does not match expected radiation source {source.value}."
+        f"Radiation product {product.kind.value} for particle "
+        f"{product.spectrum.particle.value} is not specified for "
+        f"radiation source {source.value}."
     )
     raise ValueError(msg)
 

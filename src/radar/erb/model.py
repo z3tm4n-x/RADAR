@@ -29,7 +29,6 @@ ERB_ALLOWED_PARTICLES = (
 
 ERB_ALLOWED_QUANTITIES = (
     SpectrumQuantity.DIFFERENTIAL_FLUX,
-    SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
     SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
     SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
 )
@@ -72,9 +71,6 @@ def _default_erb_product_kind(spectrum: Spectrum1D) -> RadiationProductKind:
 
     if spectrum.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX:
         return RadiationProductKind.MAXIMUM_FLUX
-
-    if spectrum.quantity is SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX:
-        return RadiationProductKind.PEAK_FLUX
 
     msg = f"Unsupported ERB spectrum quantity: {spectrum.quantity}"
     raise ValueError(msg)

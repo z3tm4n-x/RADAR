@@ -214,3 +214,35 @@ def test_source_radiation_product_spec_rejects_empty_title() -> None:
         assert "title" in str(exc)
     else:
         raise AssertionError("Expected ValueError for empty title")
+
+
+
+def test_hze_intermediate_products_are_defined_before_let_output_forms() -> None:
+    assert has_source_radiation_product_spec(
+        source=RadiationSource.SEP,
+        particle=Particle.HZE,
+        product_kind=RadiationProductKind.PEAK_FLUX,
+        purpose=RadiationProductPurpose.INTERMEDIATE,
+    )
+    assert has_source_radiation_product_spec(
+        source=RadiationSource.GCR,
+        particle=Particle.HZE,
+        product_kind=RadiationProductKind.MAXIMUM_FLUX,
+        purpose=RadiationProductPurpose.INTERMEDIATE,
+    )
+    assert has_source_radiation_product_spec(
+        source=RadiationSource.GCR,
+        particle=Particle.HZE,
+        product_kind=RadiationProductKind.MEAN_FLUX,
+        purpose=RadiationProductPurpose.INTERMEDIATE,
+    )
+
+
+
+def test_erb_electron_mean_flux_is_intermediate_product() -> None:
+    assert has_source_radiation_product_spec(
+        source=RadiationSource.ERB,
+        particle=Particle.ELECTRON,
+        product_kind=RadiationProductKind.MEAN_FLUX,
+        purpose=RadiationProductPurpose.INTERMEDIATE,
+    )
