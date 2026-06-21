@@ -63,3 +63,33 @@ def build_mission_solar_activity(
         source=cycle_table.source,
         table_id=cycle_table.table_id,
     )
+
+
+
+def expand_annual_wolf_numbers_to_monthly(
+    annual_wolf_numbers: tuple[float, ...],
+) -> tuple[float, ...]:
+    """Return a monthly Wolf-number sequence by repeating each annual value 12 times."""
+
+    if not annual_wolf_numbers:
+        msg = "Annual Wolf number sequence must not be empty."
+        raise ValueError(msg)
+
+    monthly_values: list[float] = []
+
+    for value in annual_wolf_numbers:
+        if value < 0.0:
+            msg = "Annual Wolf numbers must be non-negative."
+            raise ValueError(msg)
+
+        monthly_values.extend([value] * 12)
+
+    return tuple(monthly_values)
+
+
+def mission_solar_activity_monthly_wolf_numbers(
+    solar_activity: MissionSolarActivity,
+) -> tuple[float, ...]:
+    """Return monthly Wolf numbers for a mission solar-activity sequence."""
+
+    return expand_annual_wolf_numbers_to_monthly(solar_activity.wolf_numbers)

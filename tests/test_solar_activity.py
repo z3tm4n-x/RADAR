@@ -7,7 +7,11 @@ from radar.solar_activity.cycle import (
     calendar_year_to_cycle_year,
     mission_cycle_years,
 )
-from radar.solar_activity.model import build_mission_solar_activity
+from radar.solar_activity.model import (
+    build_mission_solar_activity,
+    expand_annual_wolf_numbers_to_monthly,
+    mission_solar_activity_monthly_wolf_numbers,
+)
 from radar.solar_activity.ost import (
     OST_WOLF_NUMBER_TABLE_ID,
     ost_wolf_number_cycle_table,
@@ -195,3 +199,44 @@ def test_build_mission_solar_activity_with_ost_wolf_number_table() -> None:
     assert activity.source == "ОСТ 134-1044-2007"
     assert activity.table_id == OST_WOLF_NUMBER_TABLE_ID
 
+
+
+
+def test_expand_annual_wolf_numbers_to_monthly_repeats_each_year_12_times() -> None:
+    monthly = expand_annual_wolf_numbers_to_monthly((100.0, 120.0))
+
+    assert monthly == (100.0,) * 12 + (120.0,) * 12
+
+
+def test_expand_annual_wolf_numbers_to_monthly_rejects_empty_sequence() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        expand_annual_wolf_numbers_to_monthly(())
+
+
+def test_expand_annual_wolf_numbers_to_monthly_rejects_negative_value() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        expand_annual_wolf_numbers_to_monthly((100.0, -1.0))
+
+
+def test_mission_solar_activity_monthly_wolf_numbers_uses_mission_sequence() -> None:
+    mission = MissionConfig(
+        launch_year=2027,
+        lifetime_years=2,
+        solar_activity_level=SolarActivityLevel.MEAN,
+    )
+    cycle_table = SolarCycleTable(
+        level=SolarActivityLevel.MEAN,
+        wolf_numbers=(10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0),
+        source="test",
+        table_id="test_table",
+    )
+
+    solar_activity = build_mission_solar_activity(
+        mission=mission,
+        cycle_table=cycle_table,
+        reference_start_year=2027,
+    )
+
+    monthly = mission_solar_activity_monthly_wolf_numbers(solar_activity)
+
+    assert monthly == (10.0,) * 12 + (20.0,) * 12
