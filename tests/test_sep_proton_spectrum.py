@@ -13,6 +13,7 @@ from radar.sep.proton_spectrum import (
     evaluate_sep_proton_spectrum_value,
     load_sep_proton_coefficient_records,
     lookup_sep_proton_coefficients_exact,
+    lookup_sep_proton_coefficients_interpolated,
     proton_momentum_mev,
 )
 
@@ -352,3 +353,137 @@ def test_spectrum_grid_rejects_empty_grid() -> None:
 
     with pytest.raises(ValueError, match="energy grid"):
         evaluate_sep_proton_spectrum((), coefficients)
+
+
+
+def test_interpolated_lookup_matches_exact_lookup_at_available_table_point() -> None:
+    exact = lookup_sep_proton_coefficients_exact(
+        _gost_records(),
+        model=GOST_2025_MODEL,
+        product=SepProtonSpectrumProduct.FLUENCE,
+        event_count=2,
+        probability=0.5,
+    )
+    interpolated = lookup_sep_proton_coefficients_interpolated(
+        _gost_records(),
+        model=GOST_2025_MODEL,
+        product=SepProtonSpectrumProduct.FLUENCE,
+        event_count=2.0,
+        probability=0.5,
+    )
+
+    assert interpolated == exact
+
+
+def test_interpolated_lookup_uses_log2_event_count_coordinate() -> None:
+    coefficients = lookup_sep_proton_coefficients_interpolated(
+        _gost_records(),
+        model=GOST_2025_MODEL,
+        product=SepProtonSpectrumProduct.FLUENCE,
+        event_count=2.0**0.5,
+        probability=0.5,
+    )
+
+    assert coefficients.log10_c == pytest.approx((6.041 + 7.041) / 2.0)
+
+
+def test_interpolated_lookup_uses_linear_probability_coordinate() -> None:
+    coefficients = lookup_sep_proton_coefficients_interpolated(
+        _gost_records(),
+        model=GOST_2025_MODEL,
+        product=SepProtonSpectrumProduct.FLUENCE,
+        event_count=2.0,
+        probability=0.625,
+    )
+
+    assert coefficients.log10_c == pytest.approx((7.041 + 6.076) / 2.0)
+
+
+def test_interpolated_lookup_uses_bilinear_interpolation() -> None:
+    coefficients = lookup_sep_proton_coefficients_interpolated(
+        _gost_records(),
+        model=GOST_2025_MODEL,
+        product=SepProtonSpectrumProduct.FLUENCE,
+        event_count=8.0**0.5,
+        probability=0.625,
+    )
+
+    expected = (7.041 + 7.870 + 6.076 + 6.972) / 4.0
+
+    assert coefficients.log10_c == pytest.approx(expected)
+
+
+def test_interpolated_lookup_rejects_unavailable_exact_table_point() -> None:
+    with pytest.raises(ValueError, match="unavailable"):
+        lookup_sep_proton_coefficients_interpolated(
+            _gost_records(),
+            model=GOST_2025_MODEL,
+            product=SepProtonSpectrumProduct.FLUENCE,
+            event_count=1.0,
+            probability=0.75,
+        )
+
+
+def test_interpolated_lookup_rejects_interpolation_through_unavailable_point() -> None:
+    with pytest.raises(ValueError, match="unavailable"):
+        lookup_sep_proton_coefficients_interpolated(
+            _gost_records(),
+            model=GOST_2025_MODEL,
+            product=SepProtonSpectrumProduct.FLUENCE,
+            event_count=2.0**0.5,
+            probability=0.75,
+        )
+
+
+@pytest.mark.parametrize("event_count", (0.0, -1.0))
+def test_interpolated_lookup_rejects_non_positive_event_count(event_count: float) -> None:
+    with pytest.raises(ValueError, match="event count"):
+        lookup_sep_proton_coefficients_interpolated(
+            _gost_records(),
+            model=GOST_2025_MODEL,
+            product=SepProtonSpectrumProduct.FLUENCE,
+            event_count=event_count,
+            probability=0.5,
+        )
+
+
+@pytest.mark.parametrize("event_count", (0.5, 1024.0))
+def test_interpolated_lookup_rejects_event_count_outside_table_range(
+    event_count: float,
+) -> None:
+    with pytest.raises(ValueError, match="outside"):
+        lookup_sep_proton_coefficients_interpolated(
+            _gost_records(),
+            model=GOST_2025_MODEL,
+            product=SepProtonSpectrumProduct.FLUENCE,
+            event_count=event_count,
+            probability=0.5,
+        )
+
+
+@pytest.mark.parametrize("probability", (0.0001, 0.95))
+def test_interpolated_lookup_rejects_probability_outside_table_range(
+    probability: float,
+) -> None:
+    with pytest.raises(ValueError, match="outside"):
+        lookup_sep_proton_coefficients_interpolated(
+            _gost_records(),
+            model=GOST_2025_MODEL,
+            product=SepProtonSpectrumProduct.FLUENCE,
+            event_count=2.0,
+            probability=probability,
+        )
+
+
+def test_interpolated_lookup_works_for_ost_table() -> None:
+    coefficients = lookup_sep_proton_coefficients_interpolated(
+        _ost_records(),
+        model=OST_MODEL,
+        product=SepProtonSpectrumProduct.PEAK_FLUX,
+        event_count=8.0**0.5,
+        probability=0.625,
+    )
+
+    expected = (1.097 + 1.744 + 0.238 + 1.111) / 4.0
+
+    assert coefficients.log10_c == pytest.approx(expected)

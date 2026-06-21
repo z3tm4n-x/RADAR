@@ -213,6 +213,276 @@ def lookup_sep_proton_coefficients_exact(
     )
 
 
+
+def _interpolation_fraction(
+    value: float,
+    lower: float,
+    upper: float,
+) -> float:
+    if math.isclose(lower, upper, rel_tol=0.0, abs_tol=1e-12):
+        return 0.0
+
+    return float((value - lower) / (upper - lower))
+
+
+def _bracket_event_count(event_count: float) -> tuple[int, int, float]:
+    if not math.isfinite(event_count):
+        msg = "SEP proton event count must be finite."
+        raise ValueError(msg)
+
+    if event_count <= 0.0:
+        msg = "SEP proton event count must be positive."
+        raise ValueError(msg)
+
+    min_event_count = float(SEP_PROTON_EVENT_COUNTS[0])
+    max_event_count = float(SEP_PROTON_EVENT_COUNTS[-1])
+
+    if event_count < min_event_count or event_count > max_event_count:
+        msg = "SEP proton event count is outside the coefficient table range."
+        raise ValueError(msg)
+
+    event_coordinate = math.log2(event_count)
+    grid_coordinates = tuple(math.log2(float(value)) for value in SEP_PROTON_EVENT_COUNTS)
+
+    for grid_value, grid_coordinate in zip(
+        SEP_PROTON_EVENT_COUNTS,
+        grid_coordinates,
+        strict=True,
+    ):
+        if math.isclose(
+            event_coordinate,
+            grid_coordinate,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            return grid_value, grid_value, 0.0
+
+    for index in range(len(SEP_PROTON_EVENT_COUNTS) - 1):
+        lower_count = SEP_PROTON_EVENT_COUNTS[index]
+        upper_count = SEP_PROTON_EVENT_COUNTS[index + 1]
+        lower_coordinate = grid_coordinates[index]
+        upper_coordinate = grid_coordinates[index + 1]
+
+        if lower_coordinate < event_coordinate < upper_coordinate:
+            fraction = _interpolation_fraction(
+                event_coordinate,
+                lower_coordinate,
+                upper_coordinate,
+            )
+            return lower_count, upper_count, fraction
+
+    msg = "Could not bracket SEP proton event count."
+    raise ValueError(msg)
+
+
+def _bracket_probability(probability: float) -> tuple[float, float, float]:
+    if not math.isfinite(probability):
+        msg = "SEP proton exceedance probability must be finite."
+        raise ValueError(msg)
+
+    probability_grid = tuple(sorted(SEP_PROTON_PROBABILITIES))
+
+    if probability < probability_grid[0] or probability > probability_grid[-1]:
+        msg = "SEP proton exceedance probability is outside the coefficient table range."
+        raise ValueError(msg)
+
+    for grid_probability in probability_grid:
+        if math.isclose(probability, grid_probability, rel_tol=0.0, abs_tol=1e-12):
+            return grid_probability, grid_probability, 0.0
+
+    for index in range(len(probability_grid) - 1):
+        lower_probability = probability_grid[index]
+        upper_probability = probability_grid[index + 1]
+
+        if lower_probability < probability < upper_probability:
+            fraction = _interpolation_fraction(
+                probability,
+                lower_probability,
+                upper_probability,
+            )
+            return lower_probability, upper_probability, fraction
+
+    msg = "Could not bracket SEP proton exceedance probability."
+    raise ValueError(msg)
+
+
+def _parameter_value_at_exact_point(
+    records: tuple[SepProtonCoefficientRecord, ...],
+    *,
+    model: str,
+    product: SepProtonSpectrumProduct,
+    parameter: SepProtonCoefficientName,
+    event_count: int,
+    probability: float,
+) -> float:
+    point_records = _records_for_exact_point(
+        records,
+        model=model,
+        product=product,
+        event_count=event_count,
+        probability=probability,
+    )
+
+    return _required_parameter_value(point_records, parameter)
+
+
+def _linear_interpolate(
+    lower_value: float,
+    upper_value: float,
+    fraction: float,
+) -> float:
+    return float(lower_value + (upper_value - lower_value) * fraction)
+
+
+def _interpolate_parameter(
+    records: tuple[SepProtonCoefficientRecord, ...],
+    *,
+    model: str,
+    product: SepProtonSpectrumProduct,
+    parameter: SepProtonCoefficientName,
+    event_count: float,
+    probability: float,
+) -> float:
+    lower_count, upper_count, event_fraction = _bracket_event_count(event_count)
+    lower_probability, upper_probability, probability_fraction = _bracket_probability(
+        probability,
+    )
+
+    if lower_count == upper_count and math.isclose(
+        lower_probability,
+        upper_probability,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        return _parameter_value_at_exact_point(
+            records,
+            model=model,
+            product=product,
+            parameter=parameter,
+            event_count=lower_count,
+            probability=lower_probability,
+        )
+
+    lower_lower_value = _parameter_value_at_exact_point(
+        records,
+        model=model,
+        product=product,
+        parameter=parameter,
+        event_count=lower_count,
+        probability=lower_probability,
+    )
+
+    if lower_count == upper_count:
+        lower_upper_value = _parameter_value_at_exact_point(
+            records,
+            model=model,
+            product=product,
+            parameter=parameter,
+            event_count=lower_count,
+            probability=upper_probability,
+        )
+        return _linear_interpolate(
+            lower_lower_value,
+            lower_upper_value,
+            probability_fraction,
+        )
+
+    upper_lower_value = _parameter_value_at_exact_point(
+        records,
+        model=model,
+        product=product,
+        parameter=parameter,
+        event_count=upper_count,
+        probability=lower_probability,
+    )
+
+    if math.isclose(lower_probability, upper_probability, rel_tol=0.0, abs_tol=1e-12):
+        return _linear_interpolate(
+            lower_lower_value,
+            upper_lower_value,
+            event_fraction,
+        )
+
+    lower_upper_value = _parameter_value_at_exact_point(
+        records,
+        model=model,
+        product=product,
+        parameter=parameter,
+        event_count=lower_count,
+        probability=upper_probability,
+    )
+    upper_upper_value = _parameter_value_at_exact_point(
+        records,
+        model=model,
+        product=product,
+        parameter=parameter,
+        event_count=upper_count,
+        probability=upper_probability,
+    )
+
+    lower_probability_value = _linear_interpolate(
+        lower_lower_value,
+        upper_lower_value,
+        event_fraction,
+    )
+    upper_probability_value = _linear_interpolate(
+        lower_upper_value,
+        upper_upper_value,
+        event_fraction,
+    )
+
+    return _linear_interpolate(
+        lower_probability_value,
+        upper_probability_value,
+        probability_fraction,
+    )
+
+
+def lookup_sep_proton_coefficients_interpolated(
+    records: tuple[SepProtonCoefficientRecord, ...],
+    *,
+    model: str,
+    product: SepProtonSpectrumProduct,
+    event_count: float,
+    probability: float,
+) -> SepProtonSpectrumCoefficients:
+    """Return coefficients interpolated from SEP proton model tables."""
+
+    return SepProtonSpectrumCoefficients(
+        log10_c=_interpolate_parameter(
+            records,
+            model=model,
+            product=product,
+            parameter=SepProtonCoefficientName.LOG10_C,
+            event_count=event_count,
+            probability=probability,
+        ),
+        break_energy_mev=_interpolate_parameter(
+            records,
+            model=model,
+            product=product,
+            parameter=SepProtonCoefficientName.BREAK_ENERGY_MEV,
+            event_count=event_count,
+            probability=probability,
+        ),
+        gamma1=_interpolate_parameter(
+            records,
+            model=model,
+            product=product,
+            parameter=SepProtonCoefficientName.GAMMA1,
+            event_count=event_count,
+            probability=probability,
+        ),
+        gamma2=_interpolate_parameter(
+            records,
+            model=model,
+            product=product,
+            parameter=SepProtonCoefficientName.GAMMA2,
+            event_count=event_count,
+            probability=probability,
+        ),
+    )
+
 def proton_momentum_mev(energy_mev: float) -> float:
     """Return proton momentum term p(E) in MeV for the SEP spectrum formula."""
 
