@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from radar.core.project import SourceModelSelectionConfig
+from radar.core.project import CalculationConfig, SourceModelSelectionConfig
 from radar.core.profiles import (
     MethodologyProfile,
     SourceModelFamily,
@@ -15,6 +15,11 @@ from radar.core.types import RadiationSource
 from radar.erb.model import OstErbModel
 from radar.gcr.model import GostGcrModel, OstGcrModel
 from radar.sep.model import GostSepModel, OstSepModel
+from radar.solar_activity.model import (
+    build_mission_solar_activity,
+    mission_solar_activity_monthly_wolf_numbers,
+)
+from radar.solar_activity.ost import ost_wolf_number_cycle_table
 
 
 @dataclass(frozen=True)
@@ -202,6 +207,69 @@ def source_model_instances_for_profile(
         _model_instance(bundle.sep, sep_kwargs),
         _model_instance(bundle.gcr, gcr_kwargs),
         _model_instance(bundle.erb, erb_kwargs),
+    )
+
+
+def _normalized_sep_energy_grid_mev(
+    sep_energy_grid_mev: tuple[float, ...],
+) -> tuple[float, ...]:
+    """Return a validated SEP proton energy grid."""
+
+    if not sep_energy_grid_mev:
+        msg = "SEP energy grid must not be empty."
+        raise ValueError(msg)
+
+    return tuple(float(value) for value in sep_energy_grid_mev)
+
+
+def _ost_sep_kwargs_from_config(
+    config: CalculationConfig,
+    *,
+    sep_energy_grid_mev: tuple[float, ...],
+) -> dict[str, Any]:
+    """Return constructor kwargs for configured OST SEP proton source model."""
+
+    solar_activity = build_mission_solar_activity(
+        mission=config.mission,
+        cycle_table=ost_wolf_number_cycle_table(config.mission.solar_activity_level),
+        reference_start_year=config.mission.launch_year,
+    )
+
+    return {
+        "energy_grid_mev": _normalized_sep_energy_grid_mev(sep_energy_grid_mev),
+        "monthly_smoothed_wolf_numbers": mission_solar_activity_monthly_wolf_numbers(
+            solar_activity,
+        ),
+        "version": "proton_only",
+    }
+
+
+def source_model_instances_for_config(
+    config: CalculationConfig,
+    *,
+    sep_energy_grid_mev: tuple[float, ...] | None = None,
+) -> tuple[Any, Any, Any]:
+    """Return SEP, GCR and ERB model instances configured from calculation input.
+
+    Only the OST SEP proton source model is configurable at this layer for now.
+    Other selected models are instantiated with their default constructor.
+    """
+
+    sep_kwargs: dict[str, Any] | None = None
+
+    if (
+        sep_energy_grid_mev is not None
+        and config.source_model_selection.sep_model_family
+        is SourceModelFamily.OST_134_1044_2007
+    ):
+        sep_kwargs = _ost_sep_kwargs_from_config(
+            config,
+            sep_energy_grid_mev=sep_energy_grid_mev,
+        )
+
+    return source_model_instances_for_selection(
+        config.source_model_selection,
+        sep_kwargs=sep_kwargs,
     )
 
 

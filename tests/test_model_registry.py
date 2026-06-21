@@ -2,7 +2,13 @@ import pytest
 
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.types import RadiationSource
-from radar.core.project import SourceModelSelectionConfig
+from radar.core.project import (
+    CalculationConfig,
+    MethodologyConfig,
+    MissionConfig,
+    OrbitConfig,
+    SourceModelSelectionConfig,
+)
 from radar.erb.model import OstErbModel
 from radar.gcr.model import GostGcrModel, OstGcrModel
 from radar.model_registry import (
@@ -17,6 +23,7 @@ from radar.model_registry import (
     source_model_classes_for_profile,
     source_model_classes_for_selection,
     source_model_instances_for_profile,
+    source_model_instances_for_config,
     source_model_instances_for_selection,
     source_model_registration,
     source_model_registration_for_profile,
@@ -305,6 +312,84 @@ def test_source_model_instances_for_selection_respects_gost_sep_profile() -> Non
     )
 
     sep_model, gcr_model, erb_model = source_model_instances_for_selection(selection)
+
+    assert isinstance(sep_model, GostSepModel)
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+
+
+
+def _calculation_config_for_model_builder(
+    profile: MethodologyProfile = MethodologyProfile.OST_134_1044_2007,
+    *,
+    lifetime_years: int = 2,
+) -> CalculationConfig:
+    return CalculationConfig(
+        mission=MissionConfig(
+            launch_year=2027,
+            lifetime_years=lifetime_years,
+        ),
+        orbit=OrbitConfig.circular(
+            altitude_km=35786.0,
+            inclination_deg=0.0,
+        ),
+        methodology=MethodologyConfig(profile=profile),
+    )
+
+
+def test_source_model_instances_for_config_returns_default_instances_without_sep_grid() -> None:
+    config = _calculation_config_for_model_builder()
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_config(config)
+
+    assert isinstance(sep_model, OstSepModel)
+    assert sep_model.energy_grid_mev == ()
+    assert sep_model.monthly_smoothed_wolf_numbers == ()
+    assert sep_model.version == "not_implemented"
+
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_config_configures_ost_sep_model() -> None:
+    config = _calculation_config_for_model_builder(lifetime_years=2)
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_config(
+        config,
+        sep_energy_grid_mev=(10.0, 20.0, 100.0),
+    )
+
+    assert isinstance(sep_model, OstSepModel)
+    assert sep_model.energy_grid_mev == (10.0, 20.0, 100.0)
+    assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
+    assert sep_model.monthly_smoothed_wolf_numbers[:12] == (
+        sep_model.monthly_smoothed_wolf_numbers[0],
+    ) * 12
+    assert sep_model.version == "proton_only"
+
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_config_rejects_empty_sep_grid() -> None:
+    config = _calculation_config_for_model_builder()
+
+    with pytest.raises(ValueError, match="SEP energy grid must not be empty"):
+        source_model_instances_for_config(
+            config,
+            sep_energy_grid_mev=(),
+        )
+
+
+def test_source_model_instances_for_config_does_not_configure_gost_sep_model() -> None:
+    config = _calculation_config_for_model_builder(
+        profile=MethodologyProfile.OST_WITH_GOST_SEP,
+    )
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_config(
+        config,
+        sep_energy_grid_mev=(10.0, 20.0),
+    )
 
     assert isinstance(sep_model, GostSepModel)
     assert isinstance(gcr_model, OstGcrModel)
