@@ -1,6 +1,6 @@
 from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
-from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
+from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
 from radar.core.units import Unit
 from radar.output_tables import OutputTableColumn, OutputTableKind, output_table_from_rows
 
@@ -71,6 +71,34 @@ def test_result_sets_model_info() -> None:
 
     assert len(result.model_info) == 1
     assert result.model_info[0].version == "0.1.1"
+
+
+def test_result_sets_input_data_info() -> None:
+    result = CalculationResult(config=_config())
+
+    result = result.set_input_data_info(
+        InputDataInfo(
+            name="СА",
+            source="ОСТ 134-1044-2007",
+            table_id="ost_134_1044_2007_table_g_1_wolf_numbers",
+            values=(("wolf_numbers", "7.1, 19.4"),),
+        )
+    )
+
+    assert len(result.input_data_info) == 1
+    assert result.input_data_info[0].name == "СА"
+
+    result = result.set_input_data_info(
+        InputDataInfo(
+            name="СА",
+            source="ОСТ 134-1044-2007",
+            table_id="ost_134_1044_2007_table_g_1_wolf_numbers",
+            values=(("wolf_numbers", "7.1, 19.4, 63.2"),),
+        )
+    )
+
+    assert len(result.input_data_info) == 1
+    assert result.input_data_info[0].values == (("wolf_numbers", "7.1, 19.4, 63.2"),)
 
 
 def test_result_reports_log_errors() -> None:

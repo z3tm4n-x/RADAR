@@ -1,4 +1,4 @@
-﻿"""Calculation result containers for RADAR."""
+"""Calculation result containers for RADAR."""
 
 from __future__ import annotations
 
@@ -59,6 +59,38 @@ class ModelInfo:
 
 
 @dataclass(frozen=True)
+class InputDataInfo:
+    """Input data reference included in calculation results."""
+
+    name: str
+    source: str
+    table_id: str
+    values: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            msg = "Input data name must not be empty."
+            raise ValueError(msg)
+
+        if not self.source:
+            msg = "Input data source must not be empty."
+            raise ValueError(msg)
+
+        if not self.table_id:
+            msg = "Input data table_id must not be empty."
+            raise ValueError(msg)
+
+        for key, value in self.values:
+            if not key:
+                msg = "Input data value key must not be empty."
+                raise ValueError(msg)
+
+            if not value:
+                msg = "Input data value must not be empty."
+                raise ValueError(msg)
+
+
+@dataclass(frozen=True)
 class CalculationResult:
     """Top-level immutable calculation result container."""
 
@@ -66,6 +98,7 @@ class CalculationResult:
     log: CalculationLog = CalculationLog()
     component_statuses: tuple[ComponentStatusEntry, ...] = ()
     model_info: tuple[ModelInfo, ...] = ()
+    input_data_info: tuple[InputDataInfo, ...] = ()
     output_tables: tuple[OutputTable, ...] = ()
 
     def add_log_entry(
@@ -126,6 +159,17 @@ class CalculationResult:
         )
 
         return replace(self, model_info=(*other_models, model))
+
+    def set_input_data_info(self, info: InputDataInfo) -> CalculationResult:
+        """Return a new result with inserted or replaced input data information."""
+
+        other_entries = tuple(
+            existing_info
+            for existing_info in self.input_data_info
+            if existing_info.name != info.name
+        )
+
+        return replace(self, input_data_info=(*other_entries, info))
 
     def set_output_table(self, table: OutputTable) -> CalculationResult:
         """Return a new result with inserted or replaced output table."""

@@ -6,7 +6,7 @@ from radar.calculation_result_snapshot import (
 )
 from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
-from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
+from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
 from radar.core.units import Unit
 from radar.output_tables import OutputTableColumn, OutputTableKind, output_table_from_rows
 
@@ -57,6 +57,14 @@ def _calculation_result() -> CalculationResult:
             source="ГОСТ СКЛ",
         ),
     )
+    result = result.set_input_data_info(
+        InputDataInfo(
+            name="СА",
+            source="ОСТ 134-1044-2007",
+            table_id="ost_134_1044_2007_table_g_1_wolf_numbers",
+            values=(("wolf_numbers", "7.1, 19.4"),),
+        )
+    )
     return result.add_log_entry(
         LogLevel.INFO,
         "исходные данные",
@@ -80,6 +88,7 @@ def test_calculation_result_snapshot_contains_result_sections() -> None:
     assert "log" in snapshot
     assert "component_statuses" in snapshot
     assert "model_info" in snapshot
+    assert "input_data_info" in snapshot
     assert "output_tables" in snapshot
     assert snapshot["has_errors"] is False
 

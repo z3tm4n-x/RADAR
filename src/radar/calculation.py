@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig
-from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
+from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
 from radar.core.types import RadiationSource
 from radar.model_registry import SourceModelRegistration, source_model_bundle_for_selection
 from radar.solar_activity.model import build_mission_solar_activity
@@ -82,12 +82,22 @@ def _set_solar_activity_state(
         reference_start_year=config.mission.launch_year,
     )
 
-    result = result.set_model_info(
-        ModelInfo(
-            name="solar_activity",
-            version=solar_activity.table_id,
-            status="использовано",
+    result = result.set_input_data_info(
+        InputDataInfo(
+            name="СА",
             source=solar_activity.source,
+            table_id=solar_activity.table_id,
+            values=(
+                ("level", config.mission.solar_activity_level.value),
+                (
+                    "cycle_years",
+                    ", ".join(str(year) for year in solar_activity.cycle_years),
+                ),
+                (
+                    "wolf_numbers",
+                    ", ".join(f"{value:g}" for value in solar_activity.wolf_numbers),
+                ),
+            ),
         )
     )
 

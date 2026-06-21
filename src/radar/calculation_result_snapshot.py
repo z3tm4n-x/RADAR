@@ -1,4 +1,4 @@
-﻿"""Calculation result snapshots."""
+"""Calculation result snapshots."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from radar.core.result import (
     CalculationResult,
     ComponentStatus,
     ComponentStatusEntry,
+    InputDataInfo,
     ModelInfo,
 )
 from radar.output_tables import (
@@ -227,6 +228,28 @@ def model_info_from_snapshot(data: Mapping[str, object]) -> ModelInfo:
     )
 
 
+def input_data_info_snapshot(info: InputDataInfo) -> dict[str, object]:
+    """Return JSON-compatible input data information."""
+
+    return {
+        "name": info.name,
+        "source": info.source,
+        "table_id": info.table_id,
+        "values": _details_snapshot(info.values),
+    }
+
+
+def input_data_info_from_snapshot(data: Mapping[str, object]) -> InputDataInfo:
+    """Restore input data information from saved representation."""
+
+    return InputDataInfo(
+        name=_required_str(data, "name"),
+        source=_required_str(data, "source"),
+        table_id=_required_str(data, "table_id"),
+        values=_details_from_snapshot(_required_value(data, "values")),
+    )
+
+
 def calculation_result_snapshot(result: CalculationResult) -> dict[str, object]:
     """Return JSON-compatible calculation result representation."""
 
@@ -240,6 +263,10 @@ def calculation_result_snapshot(result: CalculationResult) -> dict[str, object]:
         "model_info": [
             model_info_snapshot(model)
             for model in result.model_info
+        ],
+        "input_data_info": [
+            input_data_info_snapshot(info)
+            for info in result.input_data_info
         ],
         "output_tables": [
             output_table_snapshot(table)
@@ -295,6 +322,29 @@ def _model_info_from_snapshot(value: object) -> tuple[ModelInfo, ...]:
     return tuple(models)
 
 
+def _input_data_info_from_snapshot(value: object) -> tuple[InputDataInfo, ...]:
+    """Restore input data information from saved value."""
+
+    if not isinstance(value, (list, tuple)):
+        msg = "Calculation result input_data_info field must be an array."
+        raise ValueError(msg)
+
+    entries: list[InputDataInfo] = []
+
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            msg = f"Calculation input data information entry must be an object: {index}"
+            raise ValueError(msg)
+
+        entries.append(
+            input_data_info_from_snapshot(
+                cast("Mapping[str, object]", item),
+            ),
+        )
+
+    return tuple(entries)
+
+
 def _output_tables_from_snapshot(value: object) -> tuple[OutputTable, ...]:
     """Restore output tables from saved value."""
 
@@ -332,6 +382,7 @@ def calculation_result_from_snapshot(
             _required_value(data, "component_statuses"),
         ),
         model_info=_model_info_from_snapshot(_required_value(data, "model_info")),
+        input_data_info=_input_data_info_from_snapshot(data.get("input_data_info", ())),
         output_tables=_output_tables_from_snapshot(
             _required_value(data, "output_tables"),
         ),

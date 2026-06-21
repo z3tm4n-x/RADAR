@@ -39,27 +39,16 @@ def test_execute_calculation_sets_source_component_statuses() -> None:
 def test_execute_calculation_records_model_information() -> None:
     result = execute_calculation(_config())
 
-    assert len(result.model_info) == 4
+    assert len(result.model_info) == 3
     assert {model.name for model in result.model_info} == {
-        "solar_activity",
         "ost_sep_model",
         "ost_gcr_model",
         "ost_erb_model",
     }
-    assert {
-        model.version for model in result.model_info if model.name != "solar_activity"
-    } == {"not_implemented"}
-
-    solar_model = next(
-        model for model in result.model_info if model.name == "solar_activity"
-    )
-    assert solar_model.version == "ost_134_1044_2007_table_g_1_wolf_numbers"
-    assert solar_model.status == "использовано"
-    assert solar_model.source == "ОСТ 134-1044-2007"
+    assert {model.version for model in result.model_info} == {"not_implemented"}
     assert all(
         model.status == "численная часть не реализована"
         for model in result.model_info
-        if model.name != "solar_activity"
     )
 
 
@@ -103,7 +92,7 @@ def test_execute_calculation_result_can_be_saved_in_project_file() -> None:
 
     assert restored.calculation_result == result
 
-def test_execute_calculation_records_ost_solar_activity_model() -> None:
+def test_execute_calculation_records_ost_solar_activity_input_data() -> None:
     base_config = _config()
     config = CalculationConfig(
         mission=MissionConfig(
@@ -121,12 +110,12 @@ def test_execute_calculation_records_ost_solar_activity_model() -> None:
 
     result = execute_calculation(config)
 
-    solar_model = next(
-        model for model in result.model_info if model.name == "solar_activity"
-    )
-    assert solar_model.name == "solar_activity"
-    assert solar_model.source == "ОСТ 134-1044-2007"
-    assert solar_model.version == "ost_134_1044_2007_table_g_1_wolf_numbers"
+    solar_data = next(info for info in result.input_data_info if info.name == "СА")
+    assert solar_data.source == "ОСТ 134-1044-2007"
+    assert solar_data.table_id == "ost_134_1044_2007_table_g_1_wolf_numbers"
+    assert ("level", "maximum") in solar_data.values
+    assert ("cycle_years", "1, 2, 3") in solar_data.values
+    assert ("wolf_numbers", "11.5, 33.9, 100.8") in solar_data.values
 
 
 def test_execute_calculation_logs_ost_wolf_numbers_for_mission() -> None:
