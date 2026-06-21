@@ -13,25 +13,28 @@
       "table_number": "Г.1",
       "model": "Методика прогнозирования СА",
       "quantity": "Среднегодовое число Вольфа в цикле СА",
-      "x_unit": "год от начала солнечного цикла",
+      "x_unit": "опорная точка цикла СА",
       "y_unit": "число Вольфа",
       "data_file": "ost_134_1044_2007/table_g_1_wolf_numbers.csv",
       "verification_status": "transferred_from_ost",
+      "cycle_period_years": "11",
+      "cycle_points": "12",
+      "note": "Таблица содержит 12 опорных точек для 11-летнего цикла СА; точка 12 является замыкающей и совпадает с точкой 1. Для дискретного повторяющегося 11-летнего ряда используются точки 1..11.",
       "control_values": [
         {
-          "year_from_cycle_start": "1",
+          "cycle_point": "1",
           "mean_cycle_wolf_number": "7.1",
           "maximum_cycle_wolf_number": "11.5",
           "minimum_cycle_wolf_number": "2.6"
         },
         {
-          "year_from_cycle_start": "5",
+          "cycle_point": "5",
           "mean_cycle_wolf_number": "107.4",
           "maximum_cycle_wolf_number": "147.4",
           "minimum_cycle_wolf_number": "67.4"
         },
         {
-          "year_from_cycle_start": "12",
+          "cycle_point": "12",
           "mean_cycle_wolf_number": "7.1",
           "maximum_cycle_wolf_number": "11.5",
           "minimum_cycle_wolf_number": "2.6"

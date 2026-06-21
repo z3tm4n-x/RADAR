@@ -37,6 +37,9 @@ class NormativeTableRef:
     y_unit: str
     data_file: str
     verification_status: str
+    cycle_period_years: str
+    cycle_points: str
+    note: str
     control_values: tuple[dict[str, object], ...]
 
 
@@ -172,6 +175,9 @@ def _table_ref_from_dict(data: object) -> NormativeTableRef:
         y_unit=_required_str(data, "y_unit"),
         data_file=_required_str(data, "data_file"),
         verification_status=_required_str(data, "verification_status"),
+        cycle_period_years=_required_str(data, "cycle_period_years"),
+        cycle_points=_required_str(data, "cycle_points"),
+        note=_required_str(data, "note"),
         control_values=tuple(cast("dict[str, object]", item) for item in control_values),
     )
 

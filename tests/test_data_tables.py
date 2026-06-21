@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.data_tables import (
     NormativeCollectionManifest,
@@ -51,25 +51,32 @@ def test_get_normative_table_ref() -> None:
         table_number="Г.1",
         model="Методика прогнозирования СА",
         quantity="Среднегодовое число Вольфа в цикле СА",
-        x_unit="год от начала солнечного цикла",
+        x_unit="опорная точка цикла СА",
         y_unit="число Вольфа",
         data_file="ost_134_1044_2007/table_g_1_wolf_numbers.csv",
         verification_status="transferred_from_ost",
+        cycle_period_years="11",
+        cycle_points="12",
+        note=(
+            "Таблица содержит 12 опорных точек для 11-летнего цикла СА; "
+            "точка 12 является замыкающей и совпадает с точкой 1. "
+            "Для дискретного повторяющегося 11-летнего ряда используются точки 1..11."
+        ),
         control_values=(
             {
-                "year_from_cycle_start": "1",
+                "cycle_point": "1",
                 "mean_cycle_wolf_number": "7.1",
                 "maximum_cycle_wolf_number": "11.5",
                 "minimum_cycle_wolf_number": "2.6",
             },
             {
-                "year_from_cycle_start": "5",
+                "cycle_point": "5",
                 "mean_cycle_wolf_number": "107.4",
                 "maximum_cycle_wolf_number": "147.4",
                 "minimum_cycle_wolf_number": "67.4",
             },
             {
-                "year_from_cycle_start": "12",
+                "cycle_point": "12",
                 "mean_cycle_wolf_number": "7.1",
                 "maximum_cycle_wolf_number": "11.5",
                 "minimum_cycle_wolf_number": "2.6",
@@ -83,23 +90,33 @@ def test_load_normative_table_rows_reads_wolf_number_table() -> None:
 
     assert len(rows) == 12
     assert rows[0] == {
-        "year_from_cycle_start": "1",
+        "cycle_point": "1",
         "mean_cycle_wolf_number": "7.1",
         "maximum_cycle_wolf_number": "11.5",
         "minimum_cycle_wolf_number": "2.6",
     }
     assert rows[4] == {
-        "year_from_cycle_start": "5",
+        "cycle_point": "5",
         "mean_cycle_wolf_number": "107.4",
         "maximum_cycle_wolf_number": "147.4",
         "minimum_cycle_wolf_number": "67.4",
     }
     assert rows[-1] == {
-        "year_from_cycle_start": "12",
+        "cycle_point": "12",
         "mean_cycle_wolf_number": "7.1",
         "maximum_cycle_wolf_number": "11.5",
         "minimum_cycle_wolf_number": "2.6",
     }
+
+
+def test_wolf_number_table_uses_closing_cycle_point() -> None:
+    table = get_normative_table_ref("ost_134_1044_2007", _WOLF_TABLE_ID)
+    rows = load_normative_table_rows("ost_134_1044_2007", _WOLF_TABLE_ID)
+
+    assert table.cycle_period_years == "11"
+    assert table.cycle_points == "12"
+    assert rows[0] == rows[-1] | {"cycle_point": "1"}
+    assert "точка 12 является замыкающей" in table.note
 
 
 def test_validate_normative_table_control_values_accepts_wolf_number_table() -> None:
