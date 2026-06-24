@@ -1,5 +1,3 @@
-import math
-
 import pytest
 
 from radar.core.products import SpectrumProduct
@@ -11,6 +9,12 @@ from radar.core.project import (
     OrbitConfig,
 )
 from radar.core.result import ComponentStatus
+from radar.geomagnetic.ost_penetration import (
+    build_ost_penetration_function_for_config,
+)
+from radar.geomagnetic.rigidity import RigidityGrid
+from radar.geomagnetic.spectrum import apply_proton_penetration
+from radar.physics.rigidity import proton_kinetic_energy_to_rigidity_gv
 from radar.core.spectra import Spectrum1D
 from radar.core.types import (
     Particle,
@@ -26,6 +30,7 @@ from radar.sep.proton_spectrum import (
     SepProtonSpectrumProduct,
 )
 from radar.pipelines.sep_source_products import (
+    SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
     SEP_SOURCE_MODEL_COMPONENT,
     SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT,
     SepSourceProductsPipelineResult,
@@ -176,7 +181,7 @@ def test_sep_source_products_pipeline_records_model_info() -> None:
     assert model_info[0].source == "test_document"
 
 
-def test_sep_source_products_pipeline_preserves_ost_proton_products() -> None:
+def test_sep_source_products_pipeline_applies_ost_proton_penetration() -> None:
     pipeline_result = calculate_sep_source_products_pipeline(
         config=_config(
             profile=MethodologyProfile.OST_134_1044_2007,
@@ -197,16 +202,40 @@ def test_sep_source_products_pipeline_preserves_ost_proton_products() -> None:
         RadiationProductKind.MEAN_FLUX,
     }
 
-    assert products_by_kind[RadiationProductKind.MISSION_FLUENCE].spectrum.y == (
-        pytest.approx((10.0,))
+    test_config = _config(
+        profile=MethodologyProfile.OST_134_1044_2007,
+        lifetime_years=5,
+        probability=0.5,
     )
-    assert products_by_kind[RadiationProductKind.PEAK_FLUX].spectrum.y == pytest.approx(
-        (4.0 * math.pi,)
+    rigidity_grid = RigidityGrid(
+        values_gv=(proton_kinetic_energy_to_rigidity_gv(10.0),)
     )
+    penetration = build_ost_penetration_function_for_config(
+        test_config,
+        rigidity_grid=rigidity_grid,
+    )
+
+    raw_products_by_kind = {
+        product.kind: product
+        for product in pipeline_result.sep_model_result.products
+    }
+
+    for kind, product in products_by_kind.items():
+        expected_spectrum = apply_proton_penetration(
+            spectrum=raw_products_by_kind[kind].spectrum,
+            penetration=penetration,
+        )
+        assert product.spectrum.y == pytest.approx(expected_spectrum.y)
+        assert product.spectrum.model == expected_spectrum.model
+
     assert (
         products_by_kind[RadiationProductKind.MEAN_FLUX].spectrum.quantity
         is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
     )
+
+    assert pipeline_result.calculation_result.component_status(
+        SEP_GEOMAGNETIC_PENETRATION_COMPONENT
+    ) is ComponentStatus.COMPLETED
 
     model_info = pipeline_result.calculation_result.model_info
     assert model_info[0].name == "ost_sep_model"
@@ -230,7 +259,7 @@ def test_sep_source_products_pipeline_result_rejects_products_not_from_model_res
         spectrum=_sep_proton_fluence_spectrum(model="other"),
     )
 
-    with pytest.raises(ValueError, match="must match SEP model result products"):
+    with pytest.raises(ValueError, match="must identify their source model"):
         SepSourceProductsPipelineResult(
             calculation_result=calculate_sep_source_products_pipeline(
                 config=_config(),
