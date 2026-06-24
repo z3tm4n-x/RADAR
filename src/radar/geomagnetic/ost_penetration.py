@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from radar.core.constants import DEFAULT_KP
-from radar.core.project import OrbitConfig
+from radar.core.project import CalculationConfig, OrbitConfig
 from radar.geomagnetic.ost import ost_cutoff_rigidity_gv, ost_earth_shadow_factor
 from radar.geomagnetic.ost_orbit import OstOrbitSample, sample_ost_orbit
 from radar.geomagnetic.ost_disturbance import (
@@ -156,6 +156,40 @@ def build_ost_penetration_function_for_orbit(
         rigidity_grid=rigidity_grid,
         model=model,
         kp=kp,
+        apply_disturbance=apply_disturbance,
+        mlt_sample_count=mlt_sample_count,
+    )
+
+
+
+def build_ost_penetration_function_for_config(
+    config: CalculationConfig,
+    *,
+    rigidity_grid: RigidityGrid,
+    raan_deg: float = 0.0,
+    min_days: float = 16.0,
+    steps_per_orbit: int = 60,
+    max_samples: int = 400000,
+    model: str = OST_GEOMAGNETIC_PENETRATION_MODEL,
+    apply_disturbance: bool = True,
+    mlt_sample_count: int = 24,
+) -> PenetrationFunction:
+    """Build OST geomagnetic penetration function from calculation config.
+
+    The production config-level builder uses the mission orbit and Kp index
+    from ``CalculationConfig``. Kp disturbance correction is enabled by default
+    because Appendix Zh defines the disturbed cutoff rigidity Rc* through Kp.
+    """
+
+    return build_ost_penetration_function_for_orbit(
+        config.orbit,
+        rigidity_grid=rigidity_grid,
+        raan_deg=raan_deg,
+        min_days=min_days,
+        steps_per_orbit=steps_per_orbit,
+        max_samples=max_samples,
+        model=model,
+        kp=config.kp,
         apply_disturbance=apply_disturbance,
         mlt_sample_count=mlt_sample_count,
     )

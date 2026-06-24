@@ -1,6 +1,6 @@
 import pytest
 
-from radar.core.project import OrbitConfig
+from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
 from radar.geomagnetic.ost import (
     EARTH_RADIUS_KM,
     OST_CUTOFF_REFERENCE_ALTITUDE_KM,
@@ -9,6 +9,7 @@ from radar.geomagnetic.ost import (
 from radar.geomagnetic.ost_orbit import OstOrbitSample
 from radar.geomagnetic.ost_penetration import (
     OST_GEOMAGNETIC_PENETRATION_MODEL,
+    build_ost_penetration_function_for_config,
     build_ost_penetration_function_for_orbit,
     build_ost_penetration_function_from_samples,
     ost_penetration_values_from_samples,
@@ -177,3 +178,66 @@ def test_ost_penetration_builder_passes_disturbance_options() -> None:
             mlt_sample_count=12,
         )
     )
+
+
+
+def test_build_ost_penetration_function_for_config_uses_orbit_and_kp() -> None:
+    config = CalculationConfig(
+        mission=MissionConfig(launch_year=2025, lifetime_years=1),
+        orbit=OrbitConfig.circular(altitude_km=500.0, inclination_deg=0.0),
+        kp=6,
+    )
+    rigidity_grid = RigidityGrid(values_gv=(0.001, 1.0, 20.0))
+
+    from_config = build_ost_penetration_function_for_config(
+        config,
+        rigidity_grid=rigidity_grid,
+        min_days=0.05,
+        steps_per_orbit=12,
+        max_samples=200,
+        mlt_sample_count=12,
+    )
+    from_orbit = build_ost_penetration_function_for_orbit(
+        config.orbit,
+        rigidity_grid=rigidity_grid,
+        min_days=0.05,
+        steps_per_orbit=12,
+        max_samples=200,
+        kp=config.kp,
+        apply_disturbance=True,
+        mlt_sample_count=12,
+    )
+
+    assert from_config.kp == config.kp
+    assert from_config.rigidity_grid == rigidity_grid
+    assert from_config.values == pytest.approx(from_orbit.values)
+
+
+def test_build_ost_penetration_function_for_config_can_disable_disturbance() -> None:
+    config = CalculationConfig(
+        mission=MissionConfig(launch_year=2025, lifetime_years=1),
+        orbit=OrbitConfig.circular(altitude_km=500.0, inclination_deg=0.0),
+        kp=8,
+    )
+    rigidity_grid = RigidityGrid(values_gv=(0.001, 1.0, 20.0))
+
+    quiet = build_ost_penetration_function_for_config(
+        config,
+        rigidity_grid=rigidity_grid,
+        min_days=0.05,
+        steps_per_orbit=12,
+        max_samples=200,
+        apply_disturbance=False,
+    )
+    explicit_quiet = build_ost_penetration_function_for_orbit(
+        config.orbit,
+        rigidity_grid=rigidity_grid,
+        min_days=0.05,
+        steps_per_orbit=12,
+        max_samples=200,
+        kp=config.kp,
+        apply_disturbance=False,
+    )
+
+    assert quiet.kp == config.kp
+    assert quiet.values == pytest.approx(explicit_quiet.values)
