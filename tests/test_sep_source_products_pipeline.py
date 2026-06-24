@@ -10,6 +10,7 @@ from radar.core.project import (
 )
 from radar.core.result import ComponentStatus
 from radar.geomagnetic.ost_penetration import (
+    OST_GEOMAGNETIC_PENETRATION_MODEL,
     build_ost_penetration_function_for_config,
 )
 from radar.geomagnetic.rigidity import RigidityGrid
@@ -31,6 +32,8 @@ from radar.sep.proton_spectrum import (
 )
 from radar.pipelines.sep_source_products import (
     SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+    SEP_GEOMAGNETIC_PENETRATION_DOCUMENT,
+    SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
     SEP_SOURCE_MODEL_COMPONENT,
     SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT,
     SepSourceProductsPipelineResult,
@@ -237,9 +240,31 @@ def test_sep_source_products_pipeline_applies_ost_proton_penetration() -> None:
         SEP_GEOMAGNETIC_PENETRATION_COMPONENT
     ) is ComponentStatus.COMPLETED
 
-    model_info = pipeline_result.calculation_result.model_info
-    assert model_info[0].name == "ost_sep_model"
-    assert model_info[0].version == "protons_only_v1"
+    completed_entries = [
+        entry
+        for entry in pipeline_result.calculation_result.log.entries
+        if entry.stage == SEP_GEOMAGNETIC_PENETRATION_COMPONENT
+        and entry.message == "SEP geomagnetic penetration completed."
+    ]
+    assert len(completed_entries) == 1
+    completed_details = dict(completed_entries[0].details)
+    assert completed_details["penetration_model"] == OST_GEOMAGNETIC_PENETRATION_MODEL
+    assert completed_details["penetration_version"] == (
+        SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION
+    )
+    assert completed_details["rigidity_grid_points"] == "1"
+
+    assert pipeline_result.source_products == pipeline_result.sep_model_result.products
+
+    model_info_by_name = {
+        info.name: info
+        for info in pipeline_result.calculation_result.model_info
+    }
+    assert model_info_by_name["ost_sep_model"].version == "protons_only_v1"
+
+    penetration_info = model_info_by_name[OST_GEOMAGNETIC_PENETRATION_MODEL]
+    assert penetration_info.version == SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION
+    assert penetration_info.source == SEP_GEOMAGNETIC_PENETRATION_DOCUMENT
 
 
 def test_sep_source_products_pipeline_rejects_profile_model_mismatch() -> None:

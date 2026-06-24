@@ -15,6 +15,7 @@ from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.source_products import validate_products_match_spectra_and_source
 from radar.core.types import Particle, RadiationSource
 from radar.geomagnetic.ost_penetration import build_ost_penetration_function_for_config
+from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.rigidity import RigidityGrid
 from radar.geomagnetic.spectrum import apply_proton_penetration
 from radar.physics.rigidity import proton_kinetic_energy_to_rigidity_gv
@@ -29,6 +30,17 @@ SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT = "sep_source_products_pipeline"
 SEP_SOURCE_MODEL_COMPONENT = "sep_source_model"
 SEP_GEOMAGNETIC_PENETRATION_COMPONENT = "sep_geomagnetic_penetration"
 UNVERSIONED_MODEL = "unversioned"
+SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION = "appendix_zh_mlt_average_v1"
+SEP_GEOMAGNETIC_PENETRATION_DOCUMENT = "OST 134-1044-2007 Appendix Zh"
+
+
+@dataclass(frozen=True)
+class SepGeomagneticPenetrationOutput:
+    """Output of applying geomagnetic penetration to SEP products."""
+
+    products: tuple[SpectrumProduct, ...]
+    penetration: PenetrationFunction
+    rigidity_grid: RigidityGrid
 
 
 def _same_spectrum_domain_and_semantics(
@@ -101,7 +113,7 @@ def _apply_ost_geomagnetic_penetration_to_products(
     *,
     config: CalculationConfig,
     products: tuple[SpectrumProduct, ...],
-) -> tuple[SpectrumProduct, ...]:
+) -> SepGeomagneticPenetrationOutput:
     rigidity_grid = _proton_rigidity_grid_for_products(products)
     penetration = build_ost_penetration_function_for_config(
         config,
@@ -126,7 +138,11 @@ def _apply_ost_geomagnetic_penetration_to_products(
             )
         )
 
-    return tuple(transformed_products)
+    return SepGeomagneticPenetrationOutput(
+        products=tuple(transformed_products),
+        penetration=penetration,
+        rigidity_grid=rigidity_grid,
+    )
 
 
 @dataclass(frozen=True)
@@ -162,6 +178,12 @@ class SepSourceProductsPipelineResult:
         )
 
         object.__setattr__(self, "products", products)
+
+    @property
+    def source_products(self) -> tuple[SpectrumProduct, ...]:
+        """Raw SEP source products before geomagnetic penetration."""
+
+        return self.sep_model_result.products
 
 
 def calculate_sep_source_products_pipeline(
@@ -234,11 +256,20 @@ def calculate_sep_source_products_pipeline(
             },
         )
 
-        products = _apply_ost_geomagnetic_penetration_to_products(
+        penetration_output = _apply_ost_geomagnetic_penetration_to_products(
             config=config,
             products=products,
         )
+        products = penetration_output.products
 
+        calculation_result = calculation_result.set_model_info(
+            ModelInfo(
+                name=penetration_output.penetration.model,
+                version=SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
+                status="calculated",
+                source=SEP_GEOMAGNETIC_PENETRATION_DOCUMENT,
+            )
+        )
         calculation_result = calculation_result.set_component_status(
             component=SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
             status=ComponentStatus.COMPLETED,
@@ -249,6 +280,11 @@ def calculate_sep_source_products_pipeline(
             message="SEP geomagnetic penetration completed.",
             details={
                 "products": str(len(products)),
+                "penetration_model": penetration_output.penetration.model,
+                "penetration_version": SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
+                "rigidity_grid_points": str(
+                    len(penetration_output.rigidity_grid.values_gv)
+                ),
             },
         )
 
