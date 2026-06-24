@@ -293,14 +293,14 @@ def test_source_model_instances_for_selection_configures_ost_sep_model() -> None
         sep_kwargs={
             "energy_grid_mev": (10.0, 20.0),
             "monthly_smoothed_wolf_numbers": (100.0, 120.0),
-            "version": "proton_only",
+            "version": "protons_only_v1",
         },
     )
 
     assert isinstance(sep_model, OstSepModel)
     assert sep_model.energy_grid_mev == (10.0, 20.0)
     assert sep_model.monthly_smoothed_wolf_numbers == (100.0, 120.0)
-    assert sep_model.version == "proton_only"
+    assert sep_model.version == "protons_only_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)
@@ -365,7 +365,7 @@ def test_source_model_instances_for_config_configures_ost_sep_model() -> None:
     assert sep_model.monthly_smoothed_wolf_numbers[:12] == (
         sep_model.monthly_smoothed_wolf_numbers[0],
     ) * 12
-    assert sep_model.version == "proton_only"
+    assert sep_model.version == "protons_only_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)

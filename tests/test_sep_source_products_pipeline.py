@@ -113,9 +113,9 @@ def _simple_ost_sep_proton_coefficient_records() -> tuple[SepProtonCoefficientRe
 def _ost_sep_model() -> OstSepModel:
     return OstSepModel(
         energy_grid_mev=(10.0,),
-        monthly_smoothed_wolf_numbers=(2.0 / 0.0135,),
+        monthly_smoothed_wolf_numbers=(2.0 / (60.0 * 0.0135),) * 60,
         coefficient_records=_simple_ost_sep_proton_coefficient_records(),
-        version="proton_only",
+        version="protons_only_v1",
     )
 
 
@@ -210,7 +210,7 @@ def test_sep_source_products_pipeline_preserves_ost_proton_products() -> None:
 
     model_info = pipeline_result.calculation_result.model_info
     assert model_info[0].name == "ost_sep_model"
-    assert model_info[0].version == "proton_only"
+    assert model_info[0].version == "protons_only_v1"
 
 
 def test_sep_source_products_pipeline_rejects_profile_model_mismatch() -> None:

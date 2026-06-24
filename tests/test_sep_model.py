@@ -537,8 +537,8 @@ def _mission_with_probability(
 def test_ost_sep_model_calculates_proton_source_products() -> None:
     model = OstSepModel(
         energy_grid_mev=(10.0,),
-        version="proton_only",
-        monthly_smoothed_wolf_numbers=(2.0 / 0.0135,),
+        version="protons_only_v1",
+        monthly_smoothed_wolf_numbers=(2.0 / (60.0 * 0.0135),) * 60,
         coefficient_records=_simple_ost_sep_proton_coefficient_records(),
     )
 
@@ -584,7 +584,7 @@ def test_ost_sep_model_calculates_proton_source_products() -> None:
 def test_ost_sep_model_uses_real_coefficient_tables() -> None:
     model = OstSepModel(
         energy_grid_mev=(10.0, 20.0),
-        monthly_smoothed_wolf_numbers=(2.0 / 0.0135,),
+        monthly_smoothed_wolf_numbers=(2.0 / (36.0 * 0.0135),) * 36,
     )
 
     result = model.calculate(
@@ -617,3 +617,44 @@ def test_ost_sep_model_rejects_negative_wolf_number() -> None:
             energy_grid_mev=(10.0,),
             monthly_smoothed_wolf_numbers=(-1.0,),
         )
+
+
+
+def test_ost_sep_model_rejects_wolf_number_series_length_mismatch() -> None:
+    model = OstSepModel(
+        energy_grid_mev=(10.0,),
+        monthly_smoothed_wolf_numbers=(2.0 / 0.0135,),
+        coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+        version="protons_only_v1",
+    )
+
+    with pytest.raises(ValueError, match="12 \\* mission lifetime years"):
+        model.calculate(
+            SepModelInput(
+                mission=_mission_with_probability(lifetime_years=5, probability=0.5),
+            )
+        )
+
+
+def test_ost_sep_model_product_labels_explain_derived_quantities() -> None:
+    model = OstSepModel(
+        energy_grid_mev=(10.0,),
+        monthly_smoothed_wolf_numbers=(2.0 / (12.0 * 0.0135),) * 12,
+        coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+        version="protons_only_v1",
+    )
+
+    result = model.calculate(
+        SepModelInput(
+            mission=_mission_with_probability(lifetime_years=1, probability=0.5),
+        )
+    )
+
+    labels_by_kind = {product.kind: product.label for product in result.products}
+
+    assert "4π times directional per-steradian peak flux" in labels_by_kind[
+        RadiationProductKind.PEAK_FLUX
+    ]
+    assert "mission fluence divided by mission duration" in labels_by_kind[
+        RadiationProductKind.MEAN_FLUX
+    ]

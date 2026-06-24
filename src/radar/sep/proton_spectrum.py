@@ -238,7 +238,10 @@ def _bracket_event_count(event_count: float) -> tuple[int, int, float]:
     max_event_count = float(SEP_PROTON_EVENT_COUNTS[-1])
 
     if event_count < min_event_count or event_count > max_event_count:
-        msg = "SEP proton event count is outside the coefficient table range."
+        msg = (
+            "SEP proton event count is outside the tabulated range [1, 512]; "
+            "extrapolation is disabled."
+        )
         raise ValueError(msg)
 
     event_coordinate = math.log2(event_count)
@@ -446,7 +449,12 @@ def lookup_sep_proton_coefficients_interpolated(
     event_count: float,
     probability: float,
 ) -> SepProtonSpectrumCoefficients:
-    """Return coefficients interpolated from SEP proton model tables."""
+    """Return coefficients interpolated from SEP proton model tables.
+
+    RADAR interpolation policy: linear interpolation in log2(<n>) and linear
+    interpolation in exceedance probability. Extrapolation is disabled, and
+    interpolation through unavailable table cells is rejected.
+    """
 
     return SepProtonSpectrumCoefficients(
         log10_c=_interpolate_parameter(

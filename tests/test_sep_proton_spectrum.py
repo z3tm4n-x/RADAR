@@ -523,3 +523,35 @@ def test_directional_flux_conversion_rejects_non_finite_value(bad_value: float) 
 def test_directional_flux_spectrum_conversion_rejects_empty_values() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         directional_flux_to_omnidirectional_flux(())
+
+
+
+def test_ost_fluence_break_energy_control_point_n1_p05() -> None:
+    records = load_sep_proton_coefficient_records(
+        Path("src/radar/data/normative/sep_protons/ost_134_1044_2007_coefficients.csv")
+    )
+
+    coefficients = lookup_sep_proton_coefficients_exact(
+        records,
+        model="ost_134_1044_2007",
+        product=SepProtonSpectrumProduct.FLUENCE,
+        event_count=1,
+        probability=0.5,
+    )
+
+    assert coefficients.break_energy_mev == pytest.approx(9.715)
+
+
+def test_sep_proton_interpolation_rejects_event_count_below_table_range() -> None:
+    records = load_sep_proton_coefficient_records(
+        Path("src/radar/data/normative/sep_protons/ost_134_1044_2007_coefficients.csv")
+    )
+
+    with pytest.raises(ValueError, match="tabulated range \\[1, 512\\]"):
+        lookup_sep_proton_coefficients_interpolated(
+            records,
+            model="ost_134_1044_2007",
+            product=SepProtonSpectrumProduct.FLUENCE,
+            event_count=0.5,
+            probability=0.5,
+        )

@@ -240,7 +240,7 @@ def _ost_sep_kwargs_from_config(
         "monthly_smoothed_wolf_numbers": mission_solar_activity_monthly_wolf_numbers(
             solar_activity,
         ),
-        "version": "proton_only",
+        "version": "protons_only_v1",
     }
 
 

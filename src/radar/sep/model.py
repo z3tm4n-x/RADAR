@@ -151,6 +151,23 @@ def _mission_duration_seconds(lifetime_years: int) -> float:
     return float(lifetime_years * SECONDS_PER_YEAR)
 
 
+
+def _validate_monthly_wolf_number_count(
+    *,
+    monthly_smoothed_wolf_numbers: tuple[float, ...],
+    lifetime_years: int,
+) -> None:
+    expected_months = 12 * lifetime_years
+
+    if len(monthly_smoothed_wolf_numbers) != expected_months:
+        msg = (
+            "OST SEP monthly Wolf number series length must match "
+            f"12 * mission lifetime years: expected {expected_months}, "
+            f"got {len(monthly_smoothed_wolf_numbers)}."
+        )
+        raise ValueError(msg)
+
+
 def _load_ost_sep_proton_coefficient_records() -> tuple[SepProtonCoefficientRecord, ...]:
     resource = resources.files("radar.data.normative").joinpath(
         OST_SEP_PROTON_COEFFICIENT_RESOURCE,
@@ -467,6 +484,11 @@ class OstSepModel:
             )
             raise NotImplementedError(msg)
 
+        _validate_monthly_wolf_number_count(
+            monthly_smoothed_wolf_numbers=self.monthly_smoothed_wolf_numbers,
+            lifetime_years=model_input.lifetime_years,
+        )
+
         event_count = calculate_sep_expected_events(
             monthly_smoothed_wolf_numbers=self.monthly_smoothed_wolf_numbers,
             policy=SepEventCountPolicy.OST_134_1044_2007,
@@ -536,12 +558,18 @@ class OstSepModel:
         peak_flux_product = _sep_source_product(
             kind=RadiationProductKind.PEAK_FLUX,
             spectrum=peak_flux_spectrum,
-            label="SEP proton peak flux by OST 134-1044-2007 Appendix B",
+            label=(
+                "SEP proton omnidirectional peak flux by OST 134-1044-2007 "
+                "Appendix B; derived as 4π times directional per-steradian peak flux"
+            ),
         )
         mean_flux_product = _sep_source_product(
             kind=RadiationProductKind.MEAN_FLUX,
             spectrum=mean_flux_spectrum,
-            label="SEP proton mean flux by OST 134-1044-2007 Appendix B",
+            label=(
+                "SEP proton mean flux derived from OST 134-1044-2007 "
+                "Appendix B mission fluence divided by mission duration"
+            ),
         )
 
         return SepModelResult(
