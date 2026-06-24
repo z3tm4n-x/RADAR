@@ -81,6 +81,9 @@ def _validate_pipeline_products_derived_from_model_products(
             )
             raise ValueError(msg)
 
+        if product == model_product:
+            continue
+
         expected_model_prefix = f"{model_product.spectrum.model}+"
         if not product.spectrum.model.startswith(expected_model_prefix):
             msg = (

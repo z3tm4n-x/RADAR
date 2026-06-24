@@ -26,8 +26,16 @@ from radar.core.types import (
 )
 from radar.core.units import Unit
 from radar.sep.event_count import SepEventCountPolicy, calculate_sep_expected_events
+from radar.sep.hze_spectrum import (
+    OST_SEP_HZE_B9_RESOURCE,
+    OstSepHzeIonRecord,
+    evaluate_ost_sep_hze_spectrum,
+    load_ost_sep_hze_ion_records,
+    ost_sep_hze_coefficients_from_proton,
+)
 from radar.sep.proton_spectrum import (
     SepProtonCoefficientRecord,
+    SepProtonSpectrumCoefficients,
     SepProtonSpectrumProduct,
     directional_flux_to_omnidirectional_flux,
     evaluate_sep_proton_spectrum,
@@ -177,6 +185,15 @@ def _load_ost_sep_proton_coefficient_records() -> tuple[SepProtonCoefficientReco
         return load_sep_proton_coefficient_records(path)
 
 
+def _load_ost_sep_hze_ion_records() -> tuple[OstSepHzeIonRecord, ...]:
+    resource = resources.files("radar.data.normative").joinpath(
+        OST_SEP_HZE_B9_RESOURCE,
+    )
+
+    with resources.as_file(resource) as path:
+        return load_ost_sep_hze_ion_records(path)
+
+
 def _make_sep_proton_spectrum(
     *,
     energy_grid_mev: tuple[float, ...],
@@ -192,6 +209,26 @@ def _make_sep_proton_spectrum(
         y_unit=y_unit,
         quantity=quantity,
         particle=Particle.PROTON,
+        source=RadiationSource.SEP,
+        model=model,
+    )
+
+
+def _make_sep_hze_spectrum(
+    *,
+    energy_grid_mev_per_nucleon: tuple[float, ...],
+    values: tuple[float, ...],
+    quantity: SpectrumQuantity,
+    y_unit: Unit,
+    model: str,
+) -> Spectrum1D:
+    return Spectrum1D(
+        x=energy_grid_mev_per_nucleon,
+        y=values,
+        x_unit=Unit.MEV,
+        y_unit=y_unit,
+        quantity=quantity,
+        particle=Particle.HZE,
         source=RadiationSource.SEP,
         model=model,
     )
@@ -407,6 +444,8 @@ class OstSepModel:
     energy_grid_mev: tuple[float, ...] = ()
     monthly_smoothed_wolf_numbers: tuple[float, ...] = ()
     coefficient_records: tuple[SepProtonCoefficientRecord, ...] = ()
+    hze_energy_grid_mev_per_nucleon: tuple[float, ...] = ()
+    hze_ion_records: tuple[OstSepHzeIonRecord, ...] = ()
     model: str = "ost_sep_model"
     document: str = OST_134_1044_2007_DOCUMENT
     version: str = "not_implemented"
@@ -457,6 +496,32 @@ class OstSepModel:
                 msg = "OST SEP proton energy grid must be strictly increasing."
                 raise ValueError(msg)
 
+        if self.hze_energy_grid_mev_per_nucleon:
+            if not self.energy_grid_mev or not self.monthly_smoothed_wolf_numbers:
+                msg = "OST SEP HZE grid requires proton source configuration."
+                raise ValueError(msg)
+
+            if any(
+                not math.isfinite(energy)
+                for energy in self.hze_energy_grid_mev_per_nucleon
+            ):
+                msg = "OST SEP HZE energy grid values must be finite."
+                raise ValueError(msg)
+
+            if any(energy <= 0.0 for energy in self.hze_energy_grid_mev_per_nucleon):
+                msg = "OST SEP HZE energy grid values must be positive."
+                raise ValueError(msg)
+
+            if any(
+                right <= left
+                for left, right in zip(
+                    self.hze_energy_grid_mev_per_nucleon,
+                    self.hze_energy_grid_mev_per_nucleon[1:],
+                )
+            ):
+                msg = "OST SEP HZE energy grid must be strictly increasing."
+                raise ValueError(msg)
+
         if self.monthly_smoothed_wolf_numbers:
             if any(not math.isfinite(value) for value in self.monthly_smoothed_wolf_numbers):
                 msg = "OST SEP Wolf numbers must be finite."
@@ -473,6 +538,111 @@ class OstSepModel:
             return self.coefficient_records
 
         return _load_ost_sep_proton_coefficient_records()
+
+    def _hze_ion_records(self) -> tuple[OstSepHzeIonRecord, ...]:
+        if self.hze_ion_records:
+            return self.hze_ion_records
+
+        return _load_ost_sep_hze_ion_records()
+
+    def _hze_source_products(
+        self,
+        *,
+        fluence_coefficients: SepProtonSpectrumCoefficients,
+        peak_flux_coefficients: SepProtonSpectrumCoefficients,
+        mission_duration_seconds: float,
+    ) -> tuple[SpectrumProduct, ...]:
+        if not self.hze_energy_grid_mev_per_nucleon:
+            return ()
+
+        products: list[SpectrumProduct] = []
+
+        for ion in self._hze_ion_records():
+            if ion.relative_abundance == 0.0:
+                continue
+
+            fluence_hze_coefficients = ost_sep_hze_coefficients_from_proton(
+                proton_coefficients=fluence_coefficients,
+                ion=ion,
+            )
+            peak_flux_hze_coefficients = ost_sep_hze_coefficients_from_proton(
+                proton_coefficients=peak_flux_coefficients,
+                ion=ion,
+            )
+
+            mission_fluence_values = evaluate_ost_sep_hze_spectrum(
+                self.hze_energy_grid_mev_per_nucleon,
+                fluence_hze_coefficients,
+            )
+            raw_peak_directional_flux_values = evaluate_ost_sep_hze_spectrum(
+                self.hze_energy_grid_mev_per_nucleon,
+                peak_flux_hze_coefficients,
+            )
+            peak_flux_values = directional_flux_to_omnidirectional_flux(
+                raw_peak_directional_flux_values,
+            )
+            mean_flux_values = tuple(
+                value / mission_duration_seconds
+                for value in mission_fluence_values
+            )
+
+            ion_tag = f"z{ion.z:02d}_{ion.symbol.lower()}"
+            ion_label = f"{ion.symbol} Z={ion.z}"
+
+            mission_fluence_spectrum = _make_sep_hze_spectrum(
+                energy_grid_mev_per_nucleon=self.hze_energy_grid_mev_per_nucleon,
+                values=mission_fluence_values,
+                quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+                y_unit=Unit.DIFFERENTIAL_FLUENCE,
+                model=f"{self.model}:hze:{ion_tag}:mission_fluence",
+            )
+            peak_flux_spectrum = _make_sep_hze_spectrum(
+                energy_grid_mev_per_nucleon=self.hze_energy_grid_mev_per_nucleon,
+                values=peak_flux_values,
+                quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+                y_unit=Unit.DIFFERENTIAL_FLUX,
+                model=f"{self.model}:hze:{ion_tag}:peak_flux",
+            )
+            mean_flux_spectrum = _make_sep_hze_spectrum(
+                energy_grid_mev_per_nucleon=self.hze_energy_grid_mev_per_nucleon,
+                values=mean_flux_values,
+                quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+                y_unit=Unit.DIFFERENTIAL_FLUX,
+                model=f"{self.model}:hze:{ion_tag}:mean_flux",
+            )
+
+            products.extend(
+                (
+                    _sep_source_product(
+                        kind=RadiationProductKind.MISSION_FLUENCE,
+                        spectrum=mission_fluence_spectrum,
+                        label=(
+                            "SEP HZE mission fluence by OST 134-1044-2007 "
+                            f"Appendix B for {ion_label}"
+                        ),
+                    ),
+                    _sep_source_product(
+                        kind=RadiationProductKind.PEAK_FLUX,
+                        spectrum=peak_flux_spectrum,
+                        label=(
+                            "SEP HZE omnidirectional peak flux by OST 134-1044-2007 "
+                            f"Appendix B for {ion_label}; derived as 4π times "
+                            "directional per-steradian peak flux"
+                        ),
+                    ),
+                    _sep_source_product(
+                        kind=RadiationProductKind.MEAN_FLUX,
+                        spectrum=mean_flux_spectrum,
+                        label=(
+                            "SEP HZE mean flux derived from OST 134-1044-2007 "
+                            f"Appendix B mission fluence for {ion_label} divided "
+                            "by mission duration"
+                        ),
+                    ),
+                )
+            )
+
+        return tuple(products)
 
     def calculate(self, model_input: SepModelInput) -> SepModelResult:
         """Calculate OST SEP proton source spectra before geomagnetic penetration."""
@@ -550,6 +720,12 @@ class OstSepModel:
             model=f"{self.model}:mean_flux",
         )
 
+        hze_products = self._hze_source_products(
+            fluence_coefficients=fluence_coefficients,
+            peak_flux_coefficients=peak_flux_coefficients,
+            mission_duration_seconds=mission_duration_seconds,
+        )
+
         mission_fluence_product = _sep_source_product(
             kind=RadiationProductKind.MISSION_FLUENCE,
             spectrum=mission_fluence_spectrum,
@@ -582,6 +758,7 @@ class OstSepModel:
                 mission_fluence_product,
                 peak_flux_product,
                 mean_flux_product,
+                *hze_products,
             ),
         )
 
