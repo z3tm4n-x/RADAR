@@ -5,7 +5,12 @@ from radar.core.types import Particle, RadiationSource, SpectrumQuantity
 from radar.core.units import Unit
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.rigidity import RigidityGrid
-from radar.geomagnetic.spectrum import apply_proton_penetration, proton_penetration_factors
+from radar.geomagnetic.spectrum import (
+    apply_hze_penetration,
+    apply_proton_penetration,
+    hze_penetration_factors,
+    proton_penetration_factors,
+)
 from radar.physics.rigidity import proton_rigidity_to_kinetic_energy_mev
 
 
@@ -27,6 +32,27 @@ def _proton_spectrum_for_rigidities(rigidities_gv: tuple[float, ...]) -> Spectru
         particle=Particle.PROTON,
         source=RadiationSource.SEP,
         model="test_spectrum",
+    )
+
+
+
+def _hze_spectrum_for_rigidities(
+    rigidities_gv: tuple[float, ...],
+    *,
+    mass_to_charge: float = 2.0,
+) -> Spectrum1D:
+    return Spectrum1D(
+        x=tuple(
+            proton_rigidity_to_kinetic_energy_mev(value / mass_to_charge)
+            for value in rigidities_gv
+        ),
+        y=tuple(10.0 for _ in rigidities_gv),
+        x_unit=Unit.MEV,
+        y_unit=Unit.DIFFERENTIAL_FLUENCE,
+        quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+        particle=Particle.HZE,
+        source=RadiationSource.SEP,
+        model="test_hze_spectrum",
     )
 
 
@@ -157,4 +183,59 @@ def test_apply_proton_penetration_rejects_zero_energy() -> None:
         apply_proton_penetration(
             spectrum=spectrum,
             penetration=_penetration(),
+        )
+
+
+
+def test_hze_penetration_factors_are_calculated_from_energy_per_nucleon_grid() -> None:
+    spectrum = _hze_spectrum_for_rigidities((1.0, 2.0, 3.0))
+
+    factors = hze_penetration_factors(
+        spectrum=spectrum,
+        penetration=_penetration(),
+        mass_to_charge=2.0,
+    )
+
+    assert factors == pytest.approx((0.1, 0.5, 0.9))
+
+
+def test_apply_hze_penetration_multiplies_spectrum_values() -> None:
+    spectrum = _hze_spectrum_for_rigidities((1.0, 2.0, 3.0))
+
+    attenuated = apply_hze_penetration(
+        spectrum=spectrum,
+        penetration=_penetration(),
+        mass_to_charge=2.0,
+        model="attenuated_test_hze_spectrum",
+    )
+
+    assert attenuated.x == spectrum.x
+    assert attenuated.y == pytest.approx((1.0, 5.0, 9.0))
+    assert attenuated.x_unit is Unit.MEV
+    assert attenuated.y_unit is Unit.DIFFERENTIAL_FLUENCE
+    assert attenuated.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
+    assert attenuated.particle is Particle.HZE
+    assert attenuated.source is RadiationSource.SEP
+    assert attenuated.model == "attenuated_test_hze_spectrum"
+
+
+def test_apply_hze_penetration_rejects_proton_spectrum() -> None:
+    spectrum = _proton_spectrum_for_rigidities((1.0,))
+
+    with pytest.raises(ValueError, match="HZE"):
+        apply_hze_penetration(
+            spectrum=spectrum,
+            penetration=_penetration(),
+            mass_to_charge=2.0,
+        )
+
+
+def test_apply_hze_penetration_rejects_bad_mass_to_charge() -> None:
+    spectrum = _hze_spectrum_for_rigidities((1.0,))
+
+    with pytest.raises(ValueError, match="mass-to-charge"):
+        apply_hze_penetration(
+            spectrum=spectrum,
+            penetration=_penetration(),
+            mass_to_charge=0.0,
         )

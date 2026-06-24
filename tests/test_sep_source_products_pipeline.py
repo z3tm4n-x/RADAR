@@ -118,6 +118,23 @@ def _simple_ost_sep_proton_coefficient_records() -> tuple[SepProtonCoefficientRe
     return tuple(records)
 
 
+
+def _simple_hze_ion_records():
+    from radar.sep.hze_spectrum import OstSepHzeIonRecord
+
+    return (
+        OstSepHzeIonRecord(
+            model="ost_134_1044_2007",
+            z=2,
+            symbol="He",
+            mass_number=4.0,
+            mass_to_charge=2.0,
+            relative_abundance=1.23e-2,
+            source_table="B.9",
+        ),
+    )
+
+
 def _ost_sep_model() -> OstSepModel:
     return OstSepModel(
         energy_grid_mev=(10.0,),
@@ -292,4 +309,59 @@ def test_sep_source_products_pipeline_result_rejects_products_not_from_model_res
             ).calculation_result,
             sep_model_result=sep_model_result,
             products=(other_product,),
+        )
+
+
+
+def test_sep_source_products_pipeline_applies_ost_hze_penetration_when_configured() -> None:
+    model = OstSepModel(
+        energy_grid_mev=(10.0,),
+        hze_energy_grid_mev_per_nucleon=(5.0,),
+        monthly_smoothed_wolf_numbers=(2.0 / (60.0 * 0.0135),) * 60,
+        coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+        hze_ion_records=_simple_hze_ion_records(),
+        version="protons_hze_v1",
+    )
+
+    pipeline_result = calculate_sep_source_products_pipeline(
+        config=_config(
+            profile=MethodologyProfile.OST_134_1044_2007,
+            lifetime_years=5,
+            probability=0.5,
+        ),
+        sep_model=model,
+    )
+
+    raw_hze_products = tuple(
+        product
+        for product in pipeline_result.sep_model_result.products
+        if product.spectrum.particle is Particle.HZE
+    )
+    penetrated_hze_products = tuple(
+        product
+        for product in pipeline_result.products
+        if product.spectrum.particle is Particle.HZE
+    )
+
+    assert len(raw_hze_products) == 3
+    assert len(penetrated_hze_products) == 3
+
+    for raw_product, penetrated_product in zip(
+        raw_hze_products,
+        penetrated_hze_products,
+        strict=True,
+    ):
+        assert penetrated_product.kind is raw_product.kind
+        assert penetrated_product.spectrum.model.startswith(
+            f"{raw_product.spectrum.model}+"
+        )
+        assert penetrated_product.spectrum.x == raw_product.spectrum.x
+        assert penetrated_product.spectrum.particle is Particle.HZE
+        assert all(
+            penetrated_value <= raw_value
+            for raw_value, penetrated_value in zip(
+                raw_product.spectrum.y,
+                penetrated_product.spectrum.y,
+                strict=True,
+            )
         )

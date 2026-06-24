@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import resources
 
 from radar.core.log import LogLevel
 from radar.core.products import SpectrumProduct
@@ -17,8 +18,16 @@ from radar.core.types import Particle, RadiationSource
 from radar.geomagnetic.ost_penetration import build_ost_penetration_function_for_config
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.rigidity import RigidityGrid
-from radar.geomagnetic.spectrum import apply_proton_penetration
-from radar.physics.rigidity import proton_kinetic_energy_to_rigidity_gv
+from radar.geomagnetic.spectrum import apply_hze_penetration, apply_proton_penetration
+from radar.physics.rigidity import (
+    ion_kinetic_energy_per_nucleon_to_rigidity_gv,
+    proton_kinetic_energy_to_rigidity_gv,
+)
+from radar.sep.hze_spectrum import (
+    OST_SEP_HZE_B9_RESOURCE,
+    OstSepHzeIonRecord,
+    load_ost_sep_hze_ion_records,
+)
 from radar.sep.model import (
     SepModelInput,
     SepModelProtocol,
@@ -93,23 +102,89 @@ def _validate_pipeline_products_derived_from_model_products(
             raise ValueError(msg)
 
 
-def _proton_rigidity_grid_for_products(
-    products: tuple[SpectrumProduct, ...],
-) -> RigidityGrid:
-    values_gv = sorted(
-        {
-            proton_kinetic_energy_to_rigidity_gv(energy_mev)
-            for product in products
-            if product.spectrum.particle is Particle.PROTON
-            for energy_mev in product.spectrum.x
-        }
+def _load_ost_sep_hze_ion_records_for_penetration() -> tuple[OstSepHzeIonRecord, ...]:
+    resource = resources.files("radar.data.normative").joinpath(
+        OST_SEP_HZE_B9_RESOURCE,
     )
 
-    if not values_gv:
-        msg = "SEP geomagnetic penetration requires at least one proton product."
+    with resources.as_file(resource) as path:
+        return load_ost_sep_hze_ion_records(path)
+
+
+def _hze_charge_number_from_product(product: SpectrumProduct) -> int:
+    parts = product.spectrum.model.split(":")
+
+    try:
+        hze_index = parts.index("hze")
+    except ValueError as exc:
+        msg = "SEP HZE product model must contain an hze ion tag."
+        raise ValueError(msg) from exc
+
+    if hze_index + 1 >= len(parts):
+        msg = "SEP HZE product model must contain an ion tag after hze."
         raise ValueError(msg)
 
-    return RigidityGrid(values_gv=tuple(values_gv))
+    ion_tag = parts[hze_index + 1]
+
+    if not ion_tag.startswith("z"):
+        msg = "SEP HZE ion tag must start with z."
+        raise ValueError(msg)
+
+    charge_text = ion_tag[1:].split("_", maxsplit=1)[0]
+
+    try:
+        return int(charge_text)
+    except ValueError as exc:
+        msg = "SEP HZE ion tag must contain an integer charge number."
+        raise ValueError(msg) from exc
+
+
+def _hze_ion_record_for_product(
+    product: SpectrumProduct,
+    ion_records: tuple[OstSepHzeIonRecord, ...],
+) -> OstSepHzeIonRecord:
+    charge_number = _hze_charge_number_from_product(product)
+
+    for ion_record in ion_records:
+        if ion_record.z == charge_number:
+            return ion_record
+
+    msg = f"SEP HZE ion record for Z={charge_number} was not found."
+    raise ValueError(msg)
+
+
+def _rigidity_grid_for_products(
+    products: tuple[SpectrumProduct, ...],
+) -> RigidityGrid:
+    hze_ion_records = _load_ost_sep_hze_ion_records_for_penetration()
+    values_gv: set[float] = set()
+
+    for product in products:
+        if product.spectrum.particle is Particle.PROTON:
+            values_gv.update(
+                proton_kinetic_energy_to_rigidity_gv(energy_mev)
+                for energy_mev in product.spectrum.x
+            )
+            continue
+
+        if product.spectrum.particle is Particle.HZE:
+            ion_record = _hze_ion_record_for_product(
+                product=product,
+                ion_records=hze_ion_records,
+            )
+            values_gv.update(
+                ion_kinetic_energy_per_nucleon_to_rigidity_gv(
+                    kinetic_energy_mev_per_nucleon=energy_mev_per_nucleon,
+                    mass_to_charge=ion_record.mass_to_charge,
+                )
+                for energy_mev_per_nucleon in product.spectrum.x
+            )
+
+    if not values_gv:
+        msg = "SEP geomagnetic penetration requires at least one proton or HZE product."
+        raise ValueError(msg)
+
+    return RigidityGrid(values_gv=tuple(sorted(values_gv)))
 
 
 def _apply_ost_geomagnetic_penetration_to_products(
@@ -117,29 +192,48 @@ def _apply_ost_geomagnetic_penetration_to_products(
     config: CalculationConfig,
     products: tuple[SpectrumProduct, ...],
 ) -> SepGeomagneticPenetrationOutput:
-    rigidity_grid = _proton_rigidity_grid_for_products(products)
+    rigidity_grid = _rigidity_grid_for_products(products)
     penetration = build_ost_penetration_function_for_config(
         config,
         rigidity_grid=rigidity_grid,
     )
 
+    hze_ion_records = _load_ost_sep_hze_ion_records_for_penetration()
     transformed_products: list[SpectrumProduct] = []
 
     for product in products:
-        if product.spectrum.particle is not Particle.PROTON:
-            transformed_products.append(product)
+        if product.spectrum.particle is Particle.PROTON:
+            transformed_products.append(
+                SpectrumProduct(
+                    kind=product.kind,
+                    spectrum=apply_proton_penetration(
+                        spectrum=product.spectrum,
+                        penetration=penetration,
+                    ),
+                    label=product.label,
+                )
+            )
             continue
 
-        transformed_products.append(
-            SpectrumProduct(
-                kind=product.kind,
-                spectrum=apply_proton_penetration(
-                    spectrum=product.spectrum,
-                    penetration=penetration,
-                ),
-                label=product.label,
+        if product.spectrum.particle is Particle.HZE:
+            ion_record = _hze_ion_record_for_product(
+                product=product,
+                ion_records=hze_ion_records,
             )
-        )
+            transformed_products.append(
+                SpectrumProduct(
+                    kind=product.kind,
+                    spectrum=apply_hze_penetration(
+                        spectrum=product.spectrum,
+                        penetration=penetration,
+                        mass_to_charge=ion_record.mass_to_charge,
+                    ),
+                    label=product.label,
+                )
+            )
+            continue
+
+        transformed_products.append(product)
 
     return SepGeomagneticPenetrationOutput(
         products=tuple(transformed_products),

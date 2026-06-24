@@ -6,7 +6,10 @@ from radar.core.spectra import Spectrum1D
 from radar.core.types import Particle, SpectrumQuantity
 from radar.core.units import Unit
 from radar.geomagnetic.penetration import PenetrationFunction
-from radar.physics.rigidity import proton_kinetic_energy_to_rigidity_gv
+from radar.physics.rigidity import (
+    ion_kinetic_energy_per_nucleon_to_rigidity_gv,
+    proton_kinetic_energy_to_rigidity_gv,
+)
 
 ENERGY_SPECTRUM_QUANTITIES = (
     SpectrumQuantity.DIFFERENTIAL_FLUENCE,
@@ -62,6 +65,89 @@ def apply_proton_penetration(
     factors = proton_penetration_factors(
         spectrum=spectrum,
         penetration=penetration,
+    )
+
+    output_model = model
+
+    if output_model is None:
+        output_model = f"{spectrum.model}+{penetration.model}"
+
+    return Spectrum1D(
+        x=spectrum.x,
+        y=tuple(value * factor for value, factor in zip(spectrum.y, factors)),
+        x_unit=spectrum.x_unit,
+        y_unit=spectrum.y_unit,
+        quantity=spectrum.quantity,
+        particle=spectrum.particle,
+        source=spectrum.source,
+        model=output_model,
+    )
+
+
+
+def _validate_hze_energy_spectrum(
+    spectrum: Spectrum1D,
+    mass_to_charge: float,
+) -> None:
+    if spectrum.particle is not Particle.HZE:
+        msg = "Geomagnetic penetration can be applied only to HZE spectra."
+        raise ValueError(msg)
+
+    if spectrum.x_unit is not Unit.MEV:
+        msg = "HZE spectrum energy-per-nucleon grid must be in MeV."
+        raise ValueError(msg)
+
+    if spectrum.quantity not in ENERGY_SPECTRUM_QUANTITIES:
+        msg = "Geomagnetic penetration requires an energy spectrum quantity."
+        raise ValueError(msg)
+
+    if any(energy <= 0.0 for energy in spectrum.x):
+        msg = "HZE spectrum energies per nucleon must be positive."
+        raise ValueError(msg)
+
+    # Also validates the A/Z argument.
+    ion_kinetic_energy_per_nucleon_to_rigidity_gv(
+        kinetic_energy_mev_per_nucleon=spectrum.x[0],
+        mass_to_charge=mass_to_charge,
+    )
+
+
+def hze_penetration_factors(
+    spectrum: Spectrum1D,
+    penetration: PenetrationFunction,
+    mass_to_charge: float,
+) -> tuple[float, ...]:
+    """Return geomagnetic penetration factors for an HZE energy spectrum."""
+
+    _validate_hze_energy_spectrum(
+        spectrum=spectrum,
+        mass_to_charge=mass_to_charge,
+    )
+
+    factors: list[float] = []
+
+    for kinetic_energy_mev_per_nucleon in spectrum.x:
+        rigidity_gv = ion_kinetic_energy_per_nucleon_to_rigidity_gv(
+            kinetic_energy_mev_per_nucleon=kinetic_energy_mev_per_nucleon,
+            mass_to_charge=mass_to_charge,
+        )
+        factors.append(penetration.value_at(rigidity_gv))
+
+    return tuple(factors)
+
+
+def apply_hze_penetration(
+    spectrum: Spectrum1D,
+    penetration: PenetrationFunction,
+    mass_to_charge: float,
+    model: str | None = None,
+) -> Spectrum1D:
+    """Return an HZE spectrum multiplied by the geomagnetic penetration function."""
+
+    factors = hze_penetration_factors(
+        spectrum=spectrum,
+        penetration=penetration,
+        mass_to_charge=mass_to_charge,
     )
 
     output_model = model
