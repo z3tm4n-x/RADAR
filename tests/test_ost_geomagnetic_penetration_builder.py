@@ -124,3 +124,56 @@ def test_build_ost_penetration_function_for_orbit_returns_valid_penetration() ->
     assert len(penetration.values) == 3
     assert penetration.values == tuple(sorted(penetration.values))
     assert all(0.0 <= value <= 1.0 for value in penetration.values)
+
+
+
+def test_ost_penetration_disturbance_increases_access_at_fixed_grid() -> None:
+    samples = (
+        _sample(index=0, latitude_deg=85.0, longitude_deg=0.0),
+        _sample(index=1, latitude_deg=45.0, longitude_deg=0.0),
+        _sample(index=2, latitude_deg=0.0, longitude_deg=0.0),
+    )
+    rigidity_grid = RigidityGrid(values_gv=(0.001, 0.1, 1.0, 5.0, 20.0))
+
+    quiet_values = ost_penetration_values_from_samples(
+        samples=samples,
+        rigidity_grid=rigidity_grid,
+    )
+    disturbed_values = ost_penetration_values_from_samples(
+        samples=samples,
+        rigidity_grid=rigidity_grid,
+        kp=5,
+        apply_disturbance=True,
+    )
+
+    assert all(
+        disturbed_value >= quiet_value
+        for quiet_value, disturbed_value in zip(quiet_values, disturbed_values)
+    )
+
+
+def test_ost_penetration_builder_passes_disturbance_options() -> None:
+    samples = (
+        _sample(index=0, latitude_deg=85.0, longitude_deg=0.0),
+        _sample(index=1, latitude_deg=0.0, longitude_deg=0.0),
+    )
+    rigidity_grid = RigidityGrid(values_gv=(0.001, 0.004, 20.0))
+
+    penetration = build_ost_penetration_function_from_samples(
+        samples=samples,
+        rigidity_grid=rigidity_grid,
+        kp=6,
+        apply_disturbance=True,
+        mlt_sample_count=12,
+    )
+
+    assert penetration.kp == 6
+    assert penetration.values == pytest.approx(
+        ost_penetration_values_from_samples(
+            samples=samples,
+            rigidity_grid=rigidity_grid,
+            kp=6,
+            apply_disturbance=True,
+            mlt_sample_count=12,
+        )
+    )

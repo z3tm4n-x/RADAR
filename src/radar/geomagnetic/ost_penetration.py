@@ -6,6 +6,9 @@ from radar.core.constants import DEFAULT_KP
 from radar.core.project import OrbitConfig
 from radar.geomagnetic.ost import ost_cutoff_rigidity_gv, ost_earth_shadow_factor
 from radar.geomagnetic.ost_orbit import OstOrbitSample, sample_ost_orbit
+from radar.geomagnetic.ost_disturbance import (
+    ost_disturbed_cutoff_rigidity_mlt_average_gv,
+)
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.rigidity import RigidityGrid
 
@@ -42,6 +45,9 @@ def ost_penetration_values_from_samples(
     *,
     samples: tuple[OstOrbitSample, ...],
     rigidity_grid: RigidityGrid,
+    kp: int = DEFAULT_KP,
+    apply_disturbance: bool = False,
+    mlt_sample_count: int = 24,
 ) -> tuple[float, ...]:
     """Return cumulative OST penetration values on a rigidity grid.
 
@@ -50,19 +56,34 @@ def ost_penetration_values_from_samples(
 
         psi(R) = sum(mu_i for Rc_i <= R) / N
 
-    where N is the number of orbit samples. Kp disturbance corrections are not
-    applied in this base builder.
+    where N is the number of orbit samples.
+
+    When apply_disturbance is enabled, Rc is replaced with the MLT-averaged
+    disturbed cutoff rigidity Rc* = Rc / <delta(Rc, Kp, tMLT)>.
     """
 
     normalized_samples = _normalized_samples(samples)
 
-    cutoff_weight_pairs = sorted(
-        (
-            ost_sample_cutoff_rigidity_gv(sample),
-            ost_sample_shadow_weight(sample),
+    cutoff_weight_pairs: list[tuple[float, float]] = []
+
+    for sample in normalized_samples:
+        cutoff_rigidity_gv = ost_sample_cutoff_rigidity_gv(sample)
+
+        if apply_disturbance:
+            cutoff_rigidity_gv = ost_disturbed_cutoff_rigidity_mlt_average_gv(
+                cutoff_rigidity_gv=cutoff_rigidity_gv,
+                kp=kp,
+                mlt_sample_count=mlt_sample_count,
+            )
+
+        cutoff_weight_pairs.append(
+            (
+                cutoff_rigidity_gv,
+                ost_sample_shadow_weight(sample),
+            )
         )
-        for sample in normalized_samples
-    )
+
+    cutoff_weight_pairs = sorted(cutoff_weight_pairs)
 
     sample_count = float(len(normalized_samples))
     cumulative_weight = 0.0
@@ -88,6 +109,8 @@ def build_ost_penetration_function_from_samples(
     rigidity_grid: RigidityGrid,
     model: str = OST_GEOMAGNETIC_PENETRATION_MODEL,
     kp: int = DEFAULT_KP,
+    apply_disturbance: bool = False,
+    mlt_sample_count: int = 24,
 ) -> PenetrationFunction:
     """Build OST geomagnetic penetration function from sampled orbit points."""
 
@@ -96,6 +119,9 @@ def build_ost_penetration_function_from_samples(
         values=ost_penetration_values_from_samples(
             samples=samples,
             rigidity_grid=rigidity_grid,
+            kp=kp,
+            apply_disturbance=apply_disturbance,
+            mlt_sample_count=mlt_sample_count,
         ),
         model=model,
         kp=kp,
@@ -112,6 +138,8 @@ def build_ost_penetration_function_for_orbit(
     max_samples: int = 400000,
     model: str = OST_GEOMAGNETIC_PENETRATION_MODEL,
     kp: int = DEFAULT_KP,
+    apply_disturbance: bool = False,
+    mlt_sample_count: int = 24,
 ) -> PenetrationFunction:
     """Build OST geomagnetic penetration function by sampling an orbit."""
 
@@ -128,4 +156,6 @@ def build_ost_penetration_function_for_orbit(
         rigidity_grid=rigidity_grid,
         model=model,
         kp=kp,
+        apply_disturbance=apply_disturbance,
+        mlt_sample_count=mlt_sample_count,
     )
