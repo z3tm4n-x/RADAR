@@ -107,6 +107,34 @@ def test_spectrum_output_table_uses_spectrum_axes_and_metadata() -> None:
     assert ("model", "ГОСТ СКЛ") in table.metadata
 
 
+def test_spectrum_output_table_accepts_extra_metadata() -> None:
+    table = spectrum_output_table(
+        table_id="sep_proton_behind_shielding",
+        title="СКЛ. Протоны за защитой",
+        spectrum=_spectrum(),
+        metadata={
+            "stage": "shielding",
+            "location": "behind_shielding",
+            "shield_material": "Al",
+        },
+    )
+
+    assert ("quantity", SpectrumQuantity.DIFFERENTIAL_FLUENCE.value) in table.metadata
+    assert ("stage", "shielding") in table.metadata
+    assert ("location", "behind_shielding") in table.metadata
+    assert ("shield_material", "Al") in table.metadata
+
+
+def test_spectrum_output_table_rejects_canonical_metadata_override() -> None:
+    with pytest.raises(ValueError, match="cannot override canonical keys"):
+        spectrum_output_table(
+            table_id="bad",
+            title="Bad",
+            spectrum=_spectrum(),
+            metadata={"quantity": "wrong"},
+        )
+
+
 def test_let_spectrum_is_regular_spectrum_with_let_axis() -> None:
     spectrum = Spectrum1D(
         x=(1.0, 2.0),

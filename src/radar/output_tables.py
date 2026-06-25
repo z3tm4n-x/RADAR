@@ -111,6 +111,13 @@ _LET_QUANTITIES = {
     SpectrumQuantity.LET_DIFFERENTIAL_FLUX,
 }
 
+_SPECTRUM_METADATA_KEYS = {
+    "quantity",
+    "particle",
+    "source",
+    "model",
+}
+
 
 def _validate_cell(value: TableCell) -> None:
     """Validate output table cell value."""
@@ -378,11 +385,37 @@ def _spectrum_value_title(quantity: SpectrumQuantity) -> str:
     return _SPECTRUM_VALUE_TITLES.get(quantity, quantity.value)
 
 
+def _spectrum_metadata(
+    *,
+    spectrum: Spectrum1D,
+    extra_metadata: Mapping[str, str] | None,
+) -> dict[str, str]:
+    metadata = {
+        "quantity": spectrum.quantity.value,
+        "particle": spectrum.particle.value,
+        "source": spectrum.source.value,
+        "model": spectrum.model,
+    }
+
+    if extra_metadata is None:
+        return metadata
+
+    conflicting_keys = _SPECTRUM_METADATA_KEYS & set(extra_metadata)
+    if conflicting_keys:
+        keys = ", ".join(sorted(conflicting_keys))
+        msg = f"Spectrum output metadata cannot override canonical keys: {keys}."
+        raise ValueError(msg)
+
+    metadata.update(extra_metadata)
+    return metadata
+
+
 def spectrum_output_table(
     *,
     table_id: str,
     title: str,
     spectrum: Spectrum1D,
+    metadata: Mapping[str, str] | None = None,
 ) -> OutputTable:
     """Create output table from one-dimensional spectrum."""
 
@@ -409,10 +442,8 @@ def spectrum_output_table(
             }
             for x, y in zip(spectrum.x, spectrum.y)
         ),
-        metadata={
-            "quantity": spectrum.quantity.value,
-            "particle": spectrum.particle.value,
-            "source": spectrum.source.value,
-            "model": spectrum.model,
-        },
+        metadata=_spectrum_metadata(
+            spectrum=spectrum,
+            extra_metadata=metadata,
+        ),
     )
