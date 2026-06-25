@@ -231,6 +231,21 @@ def _require_columns(fieldnames: set[str], required: set[str], name: str) -> Non
         raise ValueError(msg)
 
 
+def _merge_duplicate_energy_rows_keep_max_value(
+    rows: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    merged: dict[float, float] = {}
+
+    for energy, value in rows:
+        previous = merged.get(energy)
+        if previous is None:
+            merged[energy] = value
+        else:
+            merged[energy] = max(previous, value)
+
+    return sorted(merged.items(), key=lambda row: row[0])
+
+
 def load_al27_cross_section_tables(
     path: str | Path,
     *,
@@ -260,11 +275,11 @@ def load_al27_cross_section_tables(
     tables: dict[int, Al27CrossSectionTable] = {}
 
     for mt, rows in rows_by_mt.items():
-        rows.sort(key=lambda item: item[0])
+        merged_rows = _merge_duplicate_energy_rows_keep_max_value(rows)
         tables[mt] = Al27CrossSectionTable(
             mt=mt,
-            energy_mev=tuple(row[0] for row in rows),
-            sigma_barn=tuple(row[1] for row in rows),
+            energy_mev=tuple(row[0] for row in merged_rows),
+            sigma_barn=tuple(row[1] for row in merged_rows),
         )
 
     return tables
@@ -314,8 +329,8 @@ def load_secondary_proton_products(
             continue
 
         mt, product_index = key
-        yield_rows.sort(key=lambda row: row[0])
-        incident_energies = tuple(row[0] for row in yield_rows)
+        merged_yield_rows = _merge_duplicate_energy_rows_keep_max_value(yield_rows)
+        incident_energies = tuple(row[0] for row in merged_yield_rows)
 
         emitted_grids: list[tuple[float, ...]] = []
         pdf_grids: list[tuple[float, ...]] = []
@@ -335,7 +350,7 @@ def load_secondary_proton_products(
                     mt=mt,
                     product_index=product_index,
                     incident_energy_mev=incident_energies,
-                    yield_value=tuple(row[1] for row in yield_rows),
+                    yield_value=tuple(row[1] for row in merged_yield_rows),
                     emitted_energy_mev_by_incident=tuple(emitted_grids),
                     pdf_per_mev_by_incident=tuple(pdf_grids),
                 )

@@ -127,6 +127,21 @@ def _required_text(
     return value.strip()
 
 
+def _merge_duplicate_energy_rows_keep_max_sigma(
+    rows: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    merged: dict[float, float] = {}
+
+    for energy, sigma in rows:
+        previous = merged.get(energy)
+        if previous is None:
+            merged[energy] = sigma
+        else:
+            merged[energy] = max(previous, sigma)
+
+    return sorted(merged.items(), key=lambda row: row[0])
+
+
 def load_al27_nonelastic_cross_section_table(
     path: str | Path,
     *,
@@ -164,7 +179,7 @@ def load_al27_nonelastic_cross_section_table(
         msg = f"p+Al27 cross-section CSV contains no rows for MT={mt}."
         raise ValueError(msg)
 
-    rows.sort(key=lambda row: row[0])
+    rows = _merge_duplicate_energy_rows_keep_max_sigma(rows)
 
     return Al27NonelasticCrossSectionTable(
         mt=mt,
