@@ -1,4 +1,4 @@
-﻿"""Proton LET spectrum construction in silicon."""
+"""Proton LET spectrum construction in silicon."""
 
 from __future__ import annotations
 
@@ -214,8 +214,8 @@ def proton_energy_spectrum_to_let_spectrum(
 ) -> Spectrum1D:
     """Convert shielded proton energy spectrum to a LET spectrum in silicon."""
 
-    if spectrum.source is not RadiationSource.SEP:
-        msg = "Proton LET conversion currently supports SEP spectra only."
+    if spectrum.source not in (RadiationSource.SEP, RadiationSource.GCR):
+        msg = "Proton LET conversion supports SEP and GCR spectra only."
         raise ValueError(msg)
 
     if spectrum.particle is not Particle.PROTON:

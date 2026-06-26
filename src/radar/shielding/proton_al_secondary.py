@@ -1,4 +1,4 @@
-﻿"""Secondary proton production in aluminium shielding from compact TENDL CSV data."""
+"""Secondary proton production in aluminium shielding from compact TENDL CSV data."""
 
 from __future__ import annotations
 
@@ -430,8 +430,8 @@ def calculate_secondary_proton_spectrum_through_al(
         msg = "Secondary-proton Al kernel requires an incident proton spectrum."
         raise ValueError(msg)
 
-    if incident_spectrum.source is not RadiationSource.SEP:
-        msg = "Secondary-proton Al kernel currently supports SEP spectra only."
+    if incident_spectrum.source not in (RadiationSource.SEP, RadiationSource.GCR):
+        msg = "Secondary-proton Al kernel supports SEP and GCR spectra only."
         raise ValueError(msg)
 
     if thickness_g_cm2 == 0.0:

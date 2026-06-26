@@ -1,4 +1,4 @@
-﻿"""Primary HZE CSDA transport through spherical aluminium shielding."""
+"""Primary HZE CSDA transport through spherical aluminium shielding."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ HZE_AL_NO_FRAGMENTATION_NOTE = "hze_nuclear_attenuation_and_fragmentation_not_in
 _ALLOWED_QUANTITIES = (
     SpectrumQuantity.DIFFERENTIAL_FLUENCE,
     SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
     SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
 )
 
@@ -198,8 +199,8 @@ def log_bin_edges_from_centers(centers: tuple[float, ...]) -> tuple[float, ...]:
 
 
 def _validate_spectrum(spectrum: Spectrum1D, table: HzeAlRangeTable) -> None:
-    if spectrum.source is not RadiationSource.SEP:
-        msg = "HZE Al shielding currently supports SEP spectra only."
+    if spectrum.source not in (RadiationSource.SEP, RadiationSource.GCR):
+        msg = "HZE Al shielding supports SEP and GCR spectra only."
         raise ValueError(msg)
 
     if spectrum.particle is not Particle.HZE:

@@ -1,4 +1,4 @@
-﻿"""Primary proton CSDA transport through spherical aluminium shielding."""
+"""Primary proton CSDA transport through spherical aluminium shielding."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ PROTON_AL_PRIMARY_CSDA_MODEL = "proton_primary_al_spherical_csda"
 _ENERGY_QUANTITIES = (
     SpectrumQuantity.DIFFERENTIAL_FLUENCE,
     SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
     SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
 )
 
@@ -199,8 +200,8 @@ def log_bin_edges_from_centers(centers: tuple[float, ...]) -> tuple[float, ...]:
 
 
 def _validate_spectrum(spectrum: Spectrum1D, table: ProtonAlRangeEnergyTable) -> None:
-    if spectrum.source is not RadiationSource.SEP:
-        msg = "Proton Al shielding currently supports SEP spectra only."
+    if spectrum.source not in (RadiationSource.SEP, RadiationSource.GCR):
+        msg = "Proton Al shielding supports SEP and GCR spectra only."
         raise ValueError(msg)
 
     if spectrum.particle is not Particle.PROTON:
