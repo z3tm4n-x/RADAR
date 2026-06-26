@@ -13,6 +13,8 @@ from radar.core.types import Particle, RadiationSource, SolarActivityLevel, Spec
 from radar.core.units import Unit
 from radar.gcr.model import StaticGcrModel
 from radar.pipelines.gcr import (
+    GCR_GEOMAGNETIC_PENETRATION_COMPONENT,
+    GCR_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
     GCR_MODEL_COMPONENT,
     GCR_PIPELINE_COMPONENT,
     GcrPipelineResult,
@@ -307,8 +309,41 @@ def test_gcr_pipeline_accepts_gost_gcr_model_for_gost_profile() -> None:
 
     assert pipeline_result.calculation_result.has_errors() is False
     assert pipeline_result.gcr_model_result.model == "gost_gcr_model"
+    assert len(pipeline_result.source_products) == 3
     assert len(pipeline_result.products) == 3
     assert pipeline_result.products[0].kind is RadiationProductKind.MEAN_FLUX
     assert pipeline_result.products[1].kind is RadiationProductKind.MAXIMUM_FLUX
     assert pipeline_result.products[2].kind is RadiationProductKind.MISSION_FLUENCE
+
+    for source_product, penetrated_product in zip(
+        pipeline_result.source_products,
+        pipeline_result.products,
+        strict=True,
+    ):
+        assert penetrated_product.kind is source_product.kind
+        assert penetrated_product.spectrum.model.startswith(
+            f"{source_product.spectrum.model}+"
+        )
+        assert penetrated_product.spectrum.x == source_product.spectrum.x
+        assert all(
+            penetrated_value <= source_value
+            for source_value, penetrated_value in zip(
+                source_product.spectrum.y,
+                penetrated_product.spectrum.y,
+                strict=True,
+            )
+        )
+
+    assert pipeline_result.calculation_result.component_status(
+        GCR_GEOMAGNETIC_PENETRATION_COMPONENT
+    ) is ComponentStatus.COMPLETED
+
+    model_info_by_name = {
+        info.name: info
+        for info in pipeline_result.calculation_result.model_info
+    }
+    penetration_info = model_info_by_name[
+        "ost_134_1044_2007_geomagnetic_penetration"
+    ]
+    assert penetration_info.version == GCR_GEOMAGNETIC_PENETRATION_MODEL_VERSION
 
