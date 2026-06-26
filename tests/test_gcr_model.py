@@ -11,10 +11,14 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
+from radar.gcr.components import GostGcrSolarState, OstGcrSolarState
 from radar.gcr.model import (
+    GCR_MODEL_SECONDS_PER_YEAR,
     GcrModelInput,
     GcrModelProtocol,
     GcrModelResult,
+    GostGcrModel,
+    OstGcrModel,
     StaticGcrModel,
     validate_gcr_energy_spectrum,
 )
@@ -307,35 +311,117 @@ def test_gcr_model_result_rejects_product_with_wrong_source() -> None:
             ),
         )
 
-def test_normative_gcr_model_stub_metadata() -> None:
+def test_normative_gcr_model_metadata() -> None:
     from radar.core.profiles import (
         GOST_GCR_DOCUMENT,
         OST_134_1044_2007_DOCUMENT,
         SourceModelFamily,
     )
-    from radar.core.types import RadiationSource
-    from radar.gcr.model import GostGcrModel, OstGcrModel
 
-    ost_model = OstGcrModel()
-    gost_model = GostGcrModel()
+    ost_model = OstGcrModel(symbols=("H",))
+    gost_model = GostGcrModel(symbols=("H",))
 
     assert ost_model.metadata.source is RadiationSource.GCR
     assert ost_model.metadata.model_family is SourceModelFamily.OST_134_1044_2007
     assert ost_model.metadata.document == OST_134_1044_2007_DOCUMENT
+    assert ost_model.metadata.version == "source_spectra_outside_magnetosphere_v1"
 
     assert gost_model.metadata.source is RadiationSource.GCR
     assert gost_model.metadata.model_family is SourceModelFamily.GOST_GCR
     assert gost_model.metadata.document == GOST_GCR_DOCUMENT
+    assert gost_model.metadata.version == "source_spectra_outside_magnetosphere_v1"
 
 
-def test_normative_gcr_model_stubs_raise_not_implemented() -> None:
-    from radar.core.project import MissionConfig
-    from radar.gcr.model import GcrModelInput, GostGcrModel, OstGcrModel
+def test_gost_gcr_model_calculates_outside_magnetosphere_products() -> None:
+    model = GostGcrModel(
+        energy_grid_mev_per_nucleon=(10.0, 100.0),
+        solar_state=GostGcrSolarState(wolf_number=70.0, wolf_version="1.0"),
+        nek_wolf_number=70.0,
+        akl_years_from_cycle_start=2.0,
+        symbols=("H", "He"),
+        model="gost_test",
+        document="gost_document",
+    )
+    model_input = GcrModelInput(mission=_mission(lifetime_years=2))
 
-    model_input = GcrModelInput(
-        mission=MissionConfig(launch_year=2027, lifetime_years=5),
+    source_spectra = model.calculate_source_spectra()
+    result = model.calculate(model_input)
+
+    assert result.model == "gost_test"
+    assert result.document == "gost_document"
+    assert result.lifetime_years == 2
+    assert len(result.products) == 6
+    assert result.spectra == tuple(product.spectrum for product in result.products)
+
+    proton_source = source_spectra.ion("H").total
+    duration = 2.0 * GCR_MODEL_SECONDS_PER_YEAR
+
+    assert result.products[0].kind is RadiationProductKind.MEAN_FLUX
+    assert result.products[0].spectrum.particle is Particle.PROTON
+    assert result.products[0].spectrum.y == pytest.approx(proton_source.y)
+
+    assert result.products[1].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert result.products[1].spectrum.y == pytest.approx(proton_source.y)
+
+    assert result.products[2].kind is RadiationProductKind.MISSION_FLUENCE
+    assert result.products[2].spectrum.y == pytest.approx(
+        tuple(value * duration for value in proton_source.y)
     )
 
-    for model in (OstGcrModel(), GostGcrModel()):
-        with pytest.raises(NotImplementedError, match="not implemented"):
-            model.calculate(model_input)
+    assert result.products[3].spectrum.particle is Particle.HZE
+
+
+def test_ost_gcr_model_calculates_outside_magnetosphere_products() -> None:
+    model = OstGcrModel(
+        energy_grid_mev_per_nucleon=(10.0, 100.0),
+        solar_state=OstGcrSolarState(
+            wolf_current=60.0,
+            wolf_lagged=50.0,
+            wolf_min=10.0,
+            wolf_max=100.0,
+            cycle_number=24,
+            after_polarity_reversal=True,
+        ),
+        nek_wolf_number=60.0,
+        akl_years_from_cycle_start=2.0,
+        symbols=("O",),
+        model="ost_test",
+        document="ost_document",
+    )
+    model_input = GcrModelInput(mission=_mission(lifetime_years=3))
+
+    source_spectra = model.calculate_source_spectra()
+    result = model.calculate(model_input)
+
+    assert result.model == "ost_test"
+    assert result.document == "ost_document"
+    assert len(result.products) == 3
+
+    source_total = source_spectra.ion("O").total
+    duration = 3.0 * GCR_MODEL_SECONDS_PER_YEAR
+
+    assert result.products[0].kind is RadiationProductKind.MEAN_FLUX
+    assert result.products[0].spectrum.particle is Particle.HZE
+    assert result.products[0].spectrum.y == pytest.approx(source_total.y)
+
+    assert result.products[1].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert result.products[1].spectrum.y == pytest.approx(source_total.y)
+
+    assert result.products[2].kind is RadiationProductKind.MISSION_FLUENCE
+    assert result.products[2].spectrum.y == pytest.approx(
+        tuple(value * duration for value in source_total.y)
+    )
+
+
+def test_normative_gcr_models_reject_bad_source_spectrum_configuration() -> None:
+    with pytest.raises(ValueError, match="energy grid"):
+        GostGcrModel(
+            energy_grid_mev_per_nucleon=(10.0, 10.0),
+            symbols=("H",),
+        )
+
+    with pytest.raises(ValueError, match="Unknown GCR ion symbol"):
+        OstGcrModel(
+            energy_grid_mev_per_nucleon=(10.0,),
+            symbols=("Xx",),
+        )

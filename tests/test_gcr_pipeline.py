@@ -285,9 +285,8 @@ def test_gcr_pipeline_rejects_model_family_mismatched_profile() -> None:
             gcr_model=_gcr_model(),
         )
 
-def test_gcr_pipeline_accepts_gost_gcr_stub_metadata_before_calculation() -> None:
-    from radar.core.profiles import MethodologyProfile
-    from radar.core.project import MethodologyConfig
+def test_gcr_pipeline_accepts_gost_gcr_model_for_gost_profile() -> None:
+    from radar.core.types import RadiationProductKind
     from radar.gcr.model import GostGcrModel
 
     mission = MissionConfig(launch_year=2027, lifetime_years=7)
@@ -298,8 +297,18 @@ def test_gcr_pipeline_accepts_gost_gcr_stub_metadata_before_calculation() -> Non
         methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_GCR),
     )
 
-    with pytest.raises(NotImplementedError, match="GOST GCR"):
-        calculate_gcr_pipeline(
-            config=config,
-            gcr_model=GostGcrModel(),
-        )
+    pipeline_result = calculate_gcr_pipeline(
+        config=config,
+        gcr_model=GostGcrModel(
+            energy_grid_mev_per_nucleon=(10.0,),
+            symbols=("H",),
+        ),
+    )
+
+    assert pipeline_result.calculation_result.has_errors() is False
+    assert pipeline_result.gcr_model_result.model == "gost_gcr_model"
+    assert len(pipeline_result.products) == 3
+    assert pipeline_result.products[0].kind is RadiationProductKind.MEAN_FLUX
+    assert pipeline_result.products[1].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert pipeline_result.products[2].kind is RadiationProductKind.MISSION_FLUENCE
+

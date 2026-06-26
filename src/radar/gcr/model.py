@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Final, Protocol
 
 from radar.core.products import SpectrumProduct
 from radar.core.profiles import (
@@ -22,6 +22,25 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
+from radar.gcr.components import GostGcrSolarState, OstGcrSolarState
+from radar.gcr.parameters import GCR_ELEMENT_SYMBOLS
+from radar.gcr.products import GcrFluxTimeBin, calculate_gcr_mission_products
+from radar.gcr.source_spectra import (
+    GcrSourceSpectra,
+    calculate_gost_gcr_source_spectra_outside_magnetosphere,
+    calculate_ost_gcr_source_spectra_outside_magnetosphere,
+)
+
+GCR_MODEL_SECONDS_PER_YEAR: Final[float] = 365.25 * 24.0 * 60.0 * 60.0
+DEFAULT_GCR_ENERGY_GRID_MEV_PER_NUCLEON: Final[tuple[float, ...]] = (
+    10.0,
+    30.0,
+    100.0,
+    300.0,
+    1000.0,
+    3000.0,
+    10000.0,
+)
 
 GCR_ALLOWED_PARTICLES = (
     Particle.PROTON,
@@ -250,17 +269,73 @@ class StaticGcrModel:
             document=self.document,
         )
 
+def _mission_duration_seconds(model_input: GcrModelInput) -> float:
+    return float(model_input.lifetime_years * GCR_MODEL_SECONDS_PER_YEAR)
+
+
+def _products_from_source_spectra(
+    *,
+    source_spectra: GcrSourceSpectra,
+    duration_seconds: float,
+) -> tuple[SpectrumProduct, ...]:
+    products: list[SpectrumProduct] = []
+
+    for ion_spectra in source_spectra.ions:
+        mission_products = calculate_gcr_mission_products(
+            (
+                GcrFluxTimeBin(
+                    spectrum=ion_spectra.total,
+                    duration_seconds=duration_seconds,
+                ),
+            )
+        )
+        products.extend(mission_products.products)
+
+    return tuple(products)
+
+
+def _result_from_source_spectra(
+    *,
+    source_spectra: GcrSourceSpectra,
+    model_input: GcrModelInput,
+    model: str,
+    document: str,
+) -> GcrModelResult:
+    products = _products_from_source_spectra(
+        source_spectra=source_spectra,
+        duration_seconds=_mission_duration_seconds(model_input),
+    )
+
+    return GcrModelResult(
+        spectra=tuple(product.spectrum for product in products),
+        lifetime_years=model_input.lifetime_years,
+        model=model,
+        document=document,
+        products=products,
+    )
+
+
 @dataclass(frozen=True)
 class OstGcrModel:
-    """Placeholder for normative OST GCR model.
+    """Normative OST GCR model outside the magnetosphere."""
 
-    The class declares metadata and profile compatibility only.
-    Numerical OST GCR equations are not implemented yet.
-    """
-
+    energy_grid_mev_per_nucleon: tuple[float, ...] = DEFAULT_GCR_ENERGY_GRID_MEV_PER_NUCLEON
+    solar_state: OstGcrSolarState = field(
+        default_factory=lambda: OstGcrSolarState(
+            wolf_current=60.0,
+            wolf_lagged=50.0,
+            wolf_min=10.0,
+            wolf_max=100.0,
+            cycle_number=24,
+            after_polarity_reversal=True,
+        )
+    )
+    nek_wolf_number: float = 60.0
+    akl_years_from_cycle_start: float = 2.0
+    symbols: tuple[str, ...] = GCR_ELEMENT_SYMBOLS
     model: str = "ost_gcr_model"
     document: str = OST_134_1044_2007_DOCUMENT
-    version: str = "not_implemented"
+    version: str = "source_spectra_outside_magnetosphere_v1"
 
     @property
     def metadata(self) -> SourceModelMetadata:
@@ -276,24 +351,51 @@ class OstGcrModel:
 
     def __post_init__(self) -> None:
         _ = self.metadata
+        _ = self.calculate_source_spectra()
+
+    def calculate_source_spectra(self) -> GcrSourceSpectra:
+        """Calculate OST source spectra outside the magnetosphere."""
+
+        return calculate_ost_gcr_source_spectra_outside_magnetosphere(
+            energy_grid_mev_per_nucleon=self.energy_grid_mev_per_nucleon,
+            solar_state=self.solar_state,
+            nek_wolf_number=self.nek_wolf_number,
+            akl_years_from_cycle_start=self.akl_years_from_cycle_start,
+            symbols=self.symbols,
+        )
 
     def calculate(self, model_input: GcrModelInput) -> GcrModelResult:
-        """Raise until the normative OST GCR model is implemented."""
+        """Calculate OST GCR mission products outside the magnetosphere."""
 
-        raise NotImplementedError("OST GCR model is not implemented yet.")
+        return _result_from_source_spectra(
+            source_spectra=self.calculate_source_spectra(),
+            model_input=model_input,
+            model=self.model,
+            document=self.document,
+        )
 
 
 @dataclass(frozen=True)
 class GostGcrModel:
-    """Placeholder for normative GOST GCR model.
+    """Normative GOST GCR model outside the magnetosphere.
 
-    The class declares metadata and profile compatibility only.
-    Numerical GOST GCR equations are not implemented yet.
+    The main GCR component uses the GOST formula. The low-energy NEK and AKL
+    components use OST Appendix V.
     """
 
+    energy_grid_mev_per_nucleon: tuple[float, ...] = DEFAULT_GCR_ENERGY_GRID_MEV_PER_NUCLEON
+    solar_state: GostGcrSolarState = field(
+        default_factory=lambda: GostGcrSolarState(
+            wolf_number=70.0,
+            wolf_version="1.0",
+        )
+    )
+    nek_wolf_number: float = 70.0
+    akl_years_from_cycle_start: float = 2.0
+    symbols: tuple[str, ...] = GCR_ELEMENT_SYMBOLS
     model: str = "gost_gcr_model"
     document: str = GOST_GCR_DOCUMENT
-    version: str = "not_implemented"
+    version: str = "source_spectra_outside_magnetosphere_v1"
 
     @property
     def metadata(self) -> SourceModelMetadata:
@@ -309,8 +411,25 @@ class GostGcrModel:
 
     def __post_init__(self) -> None:
         _ = self.metadata
+        _ = self.calculate_source_spectra()
+
+    def calculate_source_spectra(self) -> GcrSourceSpectra:
+        """Calculate GOST source spectra outside the magnetosphere."""
+
+        return calculate_gost_gcr_source_spectra_outside_magnetosphere(
+            energy_grid_mev_per_nucleon=self.energy_grid_mev_per_nucleon,
+            solar_state=self.solar_state,
+            nek_wolf_number=self.nek_wolf_number,
+            akl_years_from_cycle_start=self.akl_years_from_cycle_start,
+            symbols=self.symbols,
+        )
 
     def calculate(self, model_input: GcrModelInput) -> GcrModelResult:
-        """Raise until the normative GOST GCR model is implemented."""
+        """Calculate GOST GCR mission products outside the magnetosphere."""
 
-        raise NotImplementedError("GOST GCR model is not implemented yet.")
+        return _result_from_source_spectra(
+            source_spectra=self.calculate_source_spectra(),
+            model_input=model_input,
+            model=self.model,
+            document=self.document,
+        )

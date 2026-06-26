@@ -45,7 +45,15 @@ def test_execute_calculation_records_model_information() -> None:
         "ost_gcr_model",
         "ost_erb_model",
     }
-    assert {model.version for model in result.model_info} == {"not_implemented"}
+    model_versions = {
+        model.name: model.version
+        for model in result.model_info
+    }
+    assert model_versions == {
+        "ost_sep_model": "not_implemented",
+        "ost_gcr_model": "source_spectra_outside_magnetosphere_v1",
+        "ost_erb_model": "not_implemented",
+    }
     assert all(
         model.status == "численная часть не реализована"
         for model in result.model_info
