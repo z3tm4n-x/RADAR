@@ -430,8 +430,12 @@ def calculate_secondary_proton_spectrum_through_al(
         msg = "Secondary-proton Al kernel requires an incident proton spectrum."
         raise ValueError(msg)
 
-    if incident_spectrum.source not in (RadiationSource.SEP, RadiationSource.GCR):
-        msg = "Secondary-proton Al kernel supports SEP and GCR spectra only."
+    if incident_spectrum.source not in (
+        RadiationSource.SEP,
+        RadiationSource.GCR,
+        RadiationSource.ERB,
+    ):
+        msg = "Secondary-proton Al kernel supports SEP, GCR and ERB spectra only."
         raise ValueError(msg)
 
     if thickness_g_cm2 == 0.0:

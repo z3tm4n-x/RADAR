@@ -9,6 +9,7 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
+from radar.erb.shielding import ErbProtonShieldingResult
 from radar.erb.output_tables import (
     ERB_OUTPUT_DOSE_SEE_DEFERRED_REASON,
     ERB_OUTPUT_DOSE_STATUS_NOT_CALCULATED,
@@ -16,6 +17,7 @@ from radar.erb.output_tables import (
     ERB_OUTPUT_SHIELDING_NOT_APPLIED,
     ERB_OUTPUT_SINGLE_EVENT_EFFECTS_STATUS_NOT_CALCULATED,
     erb_product_output_tables,
+    erb_proton_shielding_output_tables,
 )
 from radar.output_tables import OutputTableKind
 
@@ -117,3 +119,44 @@ def test_erb_product_output_tables_reject_wrong_source() -> None:
 
     with pytest.raises(ValueError, match="spectrum source"):
         erb_product_output_tables((product,))
+
+def test_erb_proton_shielding_output_tables_can_include_components() -> None:
+    primary = _erb_spectrum(model="erb_test_model:proton:primary")
+    primary_survived = _erb_spectrum(model="erb_test_model:proton:primary_survived")
+    secondary = _erb_spectrum(model="erb_test_model:proton:secondary")
+    total = _erb_spectrum(model="erb_test_model:proton:total")
+
+    shielding_result = ErbProtonShieldingResult(
+        primary=primary,
+        primary_survived=primary_survived,
+        secondary=secondary,
+        total=total,
+        thickness_g_cm2=0.25,
+        nonelastic_survival=True,
+        secondary_protons=False,
+    )
+
+    tables = erb_proton_shielding_output_tables(
+        shielding_result,
+        include_components=True,
+    )
+
+    assert tuple(table.table_id for table in tables) == (
+        "erb_proton_total_energy_behind_al",
+        "erb_proton_primary_energy_behind_al",
+        "erb_proton_primary_survived_energy_behind_al",
+        "erb_proton_secondary_energy_behind_al",
+    )
+
+    total_metadata = dict(tables[0].metadata)
+
+    assert total_metadata["location"] == "behind_shielding"
+    assert total_metadata["shielding"] == "applied"
+    assert total_metadata["shield_material"] == "Al"
+    assert total_metadata["shield_geometry"] == "centered_spherical_shell"
+    assert total_metadata["thickness_g_cm2"] == "0.25"
+    assert total_metadata["component"] == "total"
+    assert total_metadata["source"] == "erb"
+    assert total_metadata["particle"] == "proton"
+    assert total_metadata["dose_status"] == "not_calculated"
+    assert total_metadata["single_event_effects_status"] == "not_calculated"

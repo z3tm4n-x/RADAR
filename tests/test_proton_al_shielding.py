@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import pytest
 
@@ -96,6 +96,16 @@ def test_primary_proton_bins_without_available_range_are_zero() -> None:
     )
 
     assert shielded.y == (0.0, 0.0, 0.0)
+
+
+def test_primary_proton_accepts_erb_spectrum() -> None:
+    shielded = shield_proton_spectrum_primary_through_al(
+        spectrum=_proton_spectrum(source=RadiationSource.ERB),
+        table=_range_table(),
+        thickness_g_cm2=0.0,
+    )
+
+    assert shielded.source is RadiationSource.ERB
 
 
 def test_primary_proton_rejects_non_proton_spectrum() -> None:

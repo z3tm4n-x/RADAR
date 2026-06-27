@@ -200,8 +200,12 @@ def log_bin_edges_from_centers(centers: tuple[float, ...]) -> tuple[float, ...]:
 
 
 def _validate_spectrum(spectrum: Spectrum1D, table: ProtonAlRangeEnergyTable) -> None:
-    if spectrum.source not in (RadiationSource.SEP, RadiationSource.GCR):
-        msg = "Proton Al shielding supports SEP and GCR spectra only."
+    if spectrum.source not in (
+        RadiationSource.SEP,
+        RadiationSource.GCR,
+        RadiationSource.ERB,
+    ):
+        msg = "Proton Al shielding supports SEP, GCR and ERB spectra only."
         raise ValueError(msg)
 
     if spectrum.particle is not Particle.PROTON:

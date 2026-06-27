@@ -8,14 +8,20 @@ physical models are available.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from math import isfinite
 
 from radar.core.products import SpectrumProduct
 from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.types import Particle, RadiationSource
+from radar.erb.shielding import ErbProtonShieldingResult
 from radar.output_tables import OutputTable, spectrum_output_table
 
 ERB_OUTPUT_LOCATION_ON_ORBIT = "on_orbit"
+ERB_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shielding"
 ERB_OUTPUT_SHIELDING_NOT_APPLIED = "not_applied"
+ERB_OUTPUT_SHIELDING_APPLIED = "applied"
+ERB_OUTPUT_SHIELD_MATERIAL_AL = "Al"
+ERB_OUTPUT_SHIELD_GEOMETRY_CENTERED_SPHERICAL_SHELL = "centered_spherical_shell"
 ERB_OUTPUT_DOSE_STATUS_NOT_CALCULATED = "not_calculated"
 ERB_OUTPUT_SINGLE_EVENT_EFFECTS_STATUS_NOT_CALCULATED = "not_calculated"
 ERB_OUTPUT_DOSE_SEE_DEFERRED_REASON = "deferred_until_erb_shielding_dose_see"
@@ -118,3 +124,103 @@ def erb_product_output_tables(
         )
 
     return tuple(tables)
+
+
+def _format_float(value: float) -> str:
+    if not isfinite(value):
+        msg = "ERB output table metadata float value must be finite."
+        raise ValueError(msg)
+
+    return f"{value:.12g}"
+
+
+def _shielding_metadata(
+    *,
+    result: ErbProtonShieldingResult,
+    component: str,
+) -> dict[str, str]:
+    return {
+        "stage": "shielding",
+        "location": ERB_OUTPUT_LOCATION_BEHIND_SHIELDING,
+        "shielding": ERB_OUTPUT_SHIELDING_APPLIED,
+        "shield_material": ERB_OUTPUT_SHIELD_MATERIAL_AL,
+        "shield_geometry": ERB_OUTPUT_SHIELD_GEOMETRY_CENTERED_SPHERICAL_SHELL,
+        "thickness_g_cm2": _format_float(result.thickness_g_cm2),
+        "component": component,
+        "nonelastic_survival": str(result.nonelastic_survival).lower(),
+        "secondary_protons": str(result.secondary_protons).lower(),
+        "dose_status": ERB_OUTPUT_DOSE_STATUS_NOT_CALCULATED,
+        "single_event_effects_status": (
+            ERB_OUTPUT_SINGLE_EVENT_EFFECTS_STATUS_NOT_CALCULATED
+        ),
+        "dose_see_dependency": ERB_OUTPUT_DOSE_SEE_DEFERRED_REASON,
+    }
+
+
+def erb_proton_shielding_output_tables(
+    result: ErbProtonShieldingResult,
+    *,
+    include_components: bool = False,
+) -> tuple[OutputTable, ...]:
+    """Return ERB proton behind-shielding energy spectrum tables."""
+
+    tables = [
+        spectrum_output_table(
+            table_id="erb_proton_total_energy_behind_al",
+            title=(
+                "\u0415\u0420\u041f\u0417. \u041f\u0440\u043e\u0442\u043e\u043d\u044b "
+                "\u0437\u0430 Al-\u0437\u0430\u0449\u0438\u0442\u043e\u0439. "
+                "\u041f\u043e\u043b\u043d\u044b\u0439 "
+                "\u044d\u043d\u0435\u0440\u0433\u0435\u0442\u0438\u0447\u0435\u0441\u043a\u0438\u0439 "
+                "\u0441\u043f\u0435\u043a\u0442\u0440"
+            ),
+            spectrum=result.total,
+            metadata=_shielding_metadata(result=result, component="total"),
+        )
+    ]
+
+    if include_components:
+        tables.extend(
+            (
+                spectrum_output_table(
+                    table_id="erb_proton_primary_energy_behind_al",
+                    title=(
+                        "\u0415\u0420\u041f\u0417. \u041f\u0440\u043e\u0442\u043e\u043d\u044b "
+                        "\u0437\u0430 Al-\u0437\u0430\u0449\u0438\u0442\u043e\u0439. "
+                        "\u041f\u0435\u0440\u0432\u0438\u0447\u043d\u044b\u0439 "
+                        "CSDA-\u0441\u043f\u0435\u043a\u0442\u0440"
+                    ),
+                    spectrum=result.primary,
+                    metadata=_shielding_metadata(result=result, component="primary_csda"),
+                ),
+                spectrum_output_table(
+                    table_id="erb_proton_primary_survived_energy_behind_al",
+                    title=(
+                        "\u0415\u0420\u041f\u0417. \u041f\u0440\u043e\u0442\u043e\u043d\u044b "
+                        "\u0437\u0430 Al-\u0437\u0430\u0449\u0438\u0442\u043e\u0439. "
+                        "\u041f\u0435\u0440\u0432\u0438\u0447\u043d\u044b\u0439 "
+                        "\u0441\u043f\u0435\u043a\u0442\u0440 "
+                        "\u0441 survival"
+                    ),
+                    spectrum=result.primary_survived,
+                    metadata=_shielding_metadata(
+                        result=result,
+                        component="primary_survived",
+                    ),
+                ),
+                spectrum_output_table(
+                    table_id="erb_proton_secondary_energy_behind_al",
+                    title=(
+                        "\u0415\u0420\u041f\u0417. \u041f\u0440\u043e\u0442\u043e\u043d\u044b "
+                        "\u0437\u0430 Al-\u0437\u0430\u0449\u0438\u0442\u043e\u0439. "
+                        "\u0412\u0442\u043e\u0440\u0438\u0447\u043d\u044b\u0439 "
+                        "\u0441\u043f\u0435\u043a\u0442\u0440"
+                    ),
+                    spectrum=result.secondary,
+                    metadata=_shielding_metadata(result=result, component="secondary"),
+                ),
+            )
+        )
+
+    return tuple(tables)
+
