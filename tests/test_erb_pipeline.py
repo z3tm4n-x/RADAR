@@ -6,6 +6,7 @@ from radar.core.project import (
     MethodologyConfig,
     MissionConfig,
     OrbitConfig,
+    ShieldingConfig,
 )
 from radar.core.result import ComponentStatus
 from radar.core.spectra import Spectrum1D
@@ -16,6 +17,7 @@ from radar.pipelines.erb import (
     ERB_MODEL_COMPONENT,
     ERB_OUTPUT_TABLES_COMPONENT,
     ERB_PIPELINE_COMPONENT,
+    ERB_SHIELDING_COMPONENT,
     ErbPipelineResult,
     calculate_erb_pipeline,
 )
@@ -157,6 +159,52 @@ def test_erb_pipeline_records_output_tables() -> None:
     assert dict(tables[0].metadata)["shielding"] == "not_applied"
     assert dict(tables[0].metadata)["dose_status"] == "not_calculated"
     assert dict(tables[1].metadata)["particle"] == "electron"
+
+
+def test_erb_pipeline_records_integrated_proton_shielding_tables() -> None:
+    from radar.erb.igrf import IgrfCoefficients
+    from radar.erb.model import OstErbModel
+
+    mission = MissionConfig(launch_year=2027, lifetime_years=2)
+    orbit = OrbitConfig.circular(altitude_km=2_000.0, inclination_deg=0.0)
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        shielding=ShieldingConfig(thicknesses_g_cm2=(0.1,)),
+    )
+
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=IgrfCoefficients(
+            epoch=1985.0,
+            g={(1, 0): -31_165.3},
+            h={},
+            nmax=1,
+        ),
+    )
+
+    pipeline_result = calculate_erb_pipeline(config=config, erb_model=model)
+    table_ids = tuple(
+        table.table_id
+        for table in pipeline_result.calculation_result.output_tables
+    )
+
+    assert len(table_ids) == 9
+    assert "erb_proton_mean_flux_mean_differential_flux_on_orbit" in table_ids
+    assert "erb_electron_mean_flux_mean_differential_flux_on_orbit" in table_ids
+    assert (
+        "erb_t0_1_mean_flux_erb_proton_total_energy_behind_al"
+        in table_ids
+    )
+    assert (
+        "erb_t0_1_maximum_flux_erb_proton_total_energy_behind_al"
+        in table_ids
+    )
+    assert (
+        "erb_t0_1_mission_fluence_erb_proton_total_energy_behind_al"
+        in table_ids
+    )
 
 
 def test_erb_pipeline_result_validates_spectra() -> None:
@@ -302,7 +350,11 @@ def test_erb_pipeline_result_rejects_product_with_wrong_source() -> None:
 def test_erb_pipeline_rejects_model_family_mismatched_profile() -> None:
     mission = MissionConfig(launch_year=2027, lifetime_years=7)
     orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
-    config = CalculationConfig(mission=mission, orbit=orbit)
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        shielding=ShieldingConfig(thicknesses_g_cm2=(0.1,)),
+    )
 
     with pytest.raises(ValueError, match="model family"):
         calculate_erb_pipeline(
@@ -317,7 +369,11 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
 
     mission = MissionConfig(launch_year=2027, lifetime_years=2)
     orbit = OrbitConfig.circular(altitude_km=2_000.0, inclination_deg=0.0)
-    config = CalculationConfig(mission=mission, orbit=orbit)
+    config = CalculationConfig(
+        mission=mission,
+        orbit=orbit,
+        shielding=ShieldingConfig(thicknesses_g_cm2=(0.1,)),
+    )
 
     model = OstErbModel(
         anomaly_samples=2,
@@ -335,8 +391,11 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
         erb_model=model,
     )
 
-    assert len(pipeline_result.spectra) == 6
-    assert tuple(product.kind for product in pipeline_result.products) == (
+    assert len(pipeline_result.on_orbit_products) == 6
+    assert len(pipeline_result.shielded_products) == 3
+    assert len(pipeline_result.products) == 9
+    assert len(pipeline_result.spectra) == 9
+    assert tuple(product.kind for product in pipeline_result.on_orbit_products) == (
         RadiationProductKind.MEAN_FLUX,
         RadiationProductKind.MAXIMUM_FLUX,
         RadiationProductKind.MISSION_FLUENCE,
@@ -344,8 +403,21 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
         RadiationProductKind.MAXIMUM_FLUX,
         RadiationProductKind.MISSION_FLUENCE,
     )
-    assert pipeline_result.calculation_result.component_status(ERB_MODEL_COMPONENT) is ComponentStatus.COMPLETED
-
+    assert tuple(
+        product.spectrum.particle
+        for product in pipeline_result.shielded_products
+    ) == (Particle.PROTON, Particle.PROTON, Particle.PROTON)
+    assert all(
+        "+erb_proton_al_shielding_primary_survival_secondary+"
+        in product.spectrum.model
+        for product in pipeline_result.shielded_products
+    )
+    assert pipeline_result.calculation_result.component_status(
+        ERB_MODEL_COMPONENT
+    ) is ComponentStatus.COMPLETED
+    assert pipeline_result.calculation_result.component_status(
+        ERB_SHIELDING_COMPONENT
+    ) is ComponentStatus.COMPLETED
 
 
 def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
@@ -368,14 +440,20 @@ def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
         config=CalculationConfig(
             mission=MissionConfig(launch_year=2027, lifetime_years=2),
             orbit=OrbitConfig.circular(altitude_km=2_000.0, inclination_deg=0.0),
-            methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB),
+            shielding=ShieldingConfig(thicknesses_g_cm2=(0.1,)),
+            methodology=MethodologyConfig(
+                profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+            ),
         ),
         erb_model=model,
     )
 
     assert pipeline_result.erb_model_result.model == "ae8_ap8_radbelt_model"
-    assert len(pipeline_result.spectra) == 6
-    assert tuple(product.kind for product in pipeline_result.products) == (
+    assert len(pipeline_result.on_orbit_products) == 6
+    assert len(pipeline_result.shielded_products) == 3
+    assert len(pipeline_result.products) == 9
+    assert len(pipeline_result.spectra) == 9
+    assert tuple(product.kind for product in pipeline_result.on_orbit_products) == (
         RadiationProductKind.MEAN_FLUX,
         RadiationProductKind.MAXIMUM_FLUX,
         RadiationProductKind.MISSION_FLUENCE,
@@ -383,4 +461,13 @@ def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
         RadiationProductKind.MAXIMUM_FLUX,
         RadiationProductKind.MISSION_FLUENCE,
     )
+    assert tuple(
+        product.spectrum.particle
+        for product in pipeline_result.shielded_products
+    ) == (Particle.PROTON, Particle.PROTON, Particle.PROTON)
+    assert len(pipeline_result.shielding_by_thickness) == 3
+    assert pipeline_result.calculation_result.component_status(
+        ERB_SHIELDING_COMPONENT
+    ) is ComponentStatus.COMPLETED
     assert pipeline_result.calculation_result.has_errors() is False
+

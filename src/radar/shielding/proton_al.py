@@ -233,8 +233,8 @@ def _validate_spectrum(spectrum: Spectrum1D, table: ProtonAlRangeEnergyTable) ->
         raise ValueError(msg)
 
     edges = log_bin_edges_from_centers(spectrum.x)
-    _ = table.range_at_energy(edges[0])
-    _ = table.range_at_energy(edges[-1])
+    _ = table.range_at_energy(max(edges[0], table.energy_mev[0]))
+    _ = table.range_at_energy(min(edges[-1], table.energy_mev[-1]))
 
 
 def shield_proton_spectrum_primary_through_al(
@@ -260,8 +260,17 @@ def shield_proton_spectrum_primary_through_al(
     shielded_values: list[float] = []
 
     for index, energy_center in enumerate(spectrum.x):
-        energy_lo = edges[index]
-        energy_hi = edges[index + 1]
+        if energy_center < table.energy_mev[0] or energy_center > table.energy_mev[-1]:
+            shielded_values.append(0.0)
+            continue
+
+        energy_lo = max(edges[index], table.energy_mev[0])
+        energy_hi = min(edges[index + 1], table.energy_mev[-1])
+
+        if energy_hi <= energy_lo:
+            shielded_values.append(0.0)
+            continue
+
         output_width = energy_hi - energy_lo
 
         range_lo = table.range_at_energy(energy_lo)

@@ -1,4 +1,4 @@
-﻿"""Nonelastic survival correction for primary protons in aluminium."""
+"""Nonelastic survival correction for primary protons in aluminium."""
 
 from __future__ import annotations
 
@@ -71,6 +71,12 @@ class Al27NonelasticCrossSectionTable:
 
     def sigma_at_energy(self, energy_mev: float) -> float:
         """Return cross section in barns at proton kinetic energy in MeV."""
+
+        if energy_mev < self.energy_mev[0]:
+            return 0.0
+
+        if energy_mev > self.energy_mev[-1]:
+            return self.sigma_barn[-1]
 
         return _interpolate_strict(
             x=energy_mev,

@@ -476,8 +476,18 @@ def calculate_secondary_proton_spectrum_through_al(
             residual_thickness = thickness_g_cm2 - depth
 
             for output_index, output_energy in enumerate(incident_spectrum.x):
-                output_lo = output_edges[output_index]
-                output_hi = output_edges[output_index + 1]
+                if (
+                    output_energy < stopping_table.energy_mev[0]
+                    or output_energy > stopping_table.energy_mev[-1]
+                ):
+                    continue
+
+                output_lo = max(output_edges[output_index], stopping_table.energy_mev[0])
+                output_hi = min(output_edges[output_index + 1], stopping_table.energy_mev[-1])
+
+                if output_hi <= output_lo:
+                    continue
+
                 output_width = output_hi - output_lo
 
                 birth_lo = _birth_energy_for_output(
