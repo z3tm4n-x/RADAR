@@ -23,6 +23,10 @@ from radar.erb.field import (
 )
 from radar.erb.igrf import IgrfCoefficients, parse_igrf_coefficients
 from radar.erb.model import (
+    AE8_AP8_ELECTRON_ENERGIES_MEV,
+    AE8_AP8_PROTON_ENERGIES_MEV,
+    AE8_AP8_RADBELT_REFERENCE,
+    Ae8Ap8ErbModel,
     OstErbModel,
     ErbIntegralSpectrum,
     ErbIntegralSpectrumApproximationFit,
@@ -46,6 +50,10 @@ from radar.erb.radbelt import RadbeltAscMap, parse_radbelt_asc_text
 from radar.erb.resources import ERB_IGRF14_RESOURCE_NAME, load_igrf14_coefficients
 
 __all__ = [
+    "AE8_AP8_ELECTRON_ENERGIES_MEV",
+    "AE8_AP8_PROTON_ENERGIES_MEV",
+    "AE8_AP8_RADBELT_REFERENCE",
+    "Ae8Ap8ErbModel",
     "ERB_IGRF14_RESOURCE_NAME",
     "OstErbApproximationFitQuality",
     "OstErbElectronApproximationCoefficients",

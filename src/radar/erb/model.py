@@ -19,6 +19,7 @@ from radar.core.types import (
     Particle,
     RadiationProductKind,
     RadiationSource,
+    SolarActivityLevel,
     SpectrumQuantity,
 )
 from radar.core.units import Unit
@@ -40,7 +41,8 @@ from radar.erb.ost_tables import (
     OstErbTableSet,
     load_ost_erb_appendix_a_tables,
 )
-from radar.erb.resources import load_igrf14_coefficients
+from radar.erb.radbelt import RADBELT_LOG_BIN_RATIO, RadbeltAscMap
+from radar.erb.resources import load_ae8_ap8_radbelt_maps, load_igrf14_coefficients
 from radar.solar_activity.model import (
     build_mission_solar_activity,
     mission_solar_activity_monthly_wolf_numbers,
@@ -50,6 +52,9 @@ from radar.solar_activity.ost import ost_wolf_number_cycle_table
 OST_ERB_APPENDIX_A_REFERENCE = "OST 134-1044-2007 Appendix A tables A.1.1/A.1.2/A.2.1/A.2.2"
 OST_ERB_APPENDIX_D_REFERENCE = "OST 134-1044-2007 Appendix D L-B coordinate calculation"
 OST_ERB_APPENDIX_E_REFERENCE = "OST 134-1044-2007 Appendix E orbit-averaged ERB spectra"
+AE8_AP8_RADBELT_REFERENCE = "NASA/NSSDC AE8/AP8 RADBELT"
+AE8_AP8_PROTON_ENERGIES_MEV = tuple(0.1 * 10.0 ** (index / 10.0) for index in range(38))
+AE8_AP8_ELECTRON_ENERGIES_MEV = tuple(0.05 * 10.0 ** (index / 10.0) for index in range(24))
 
 ERB_ALLOWED_PARTICLES = (
     Particle.PROTON,
@@ -390,6 +395,7 @@ class StaticErbModel:
         )
 
 OstErbPeakState = Literal["worst", "cycle", "maxofstates"]
+Ae8Ap8SolarMode = Literal["cosrad", "ost"]
 
 def _clamp_unit_interval(value: float) -> float:
     return min(max(value, 0.0), 1.0)
@@ -416,6 +422,47 @@ def _ost_erb_solar_max_fraction(
         return 0.0
 
     return _clamp_unit_interval((mean_wolf_number - minimum) / (maximum - minimum))
+
+
+def _ae8_ap8_solar_max_fraction(
+    *,
+    mission: MissionConfig,
+    solar_mode: Ae8Ap8SolarMode,
+    reference_start_year: int,
+) -> float:
+    if solar_mode == "ost":
+        return _ost_erb_solar_max_fraction(
+            mission=mission,
+            reference_start_year=reference_start_year,
+        )
+
+    if mission.solar_activity_level is SolarActivityLevel.MINIMUM:
+        return 0.0
+
+    if mission.solar_activity_level is SolarActivityLevel.MAXIMUM:
+        return 1.0
+
+    return 0.5
+
+
+def _field_line_coverage_metadata(
+    *,
+    prefix: str,
+    field_line_samples: tuple[ErbFieldLineSample, ...],
+) -> tuple[tuple[str, str], ...]:
+    total_samples = len(field_line_samples)
+    valid_samples = sum(1 for sample in field_line_samples if sample.valid)
+    invalid_samples = total_samples - valid_samples
+
+    return (
+        (f"{prefix}_total_samples", str(total_samples)),
+        (f"{prefix}_valid_samples", str(valid_samples)),
+        (f"{prefix}_invalid_samples", str(invalid_samples)),
+        (
+            f"{prefix}_valid_sample_fraction",
+            _sample_fraction(count=valid_samples, total=total_samples),
+        ),
+    )
 
 
 def _weighted_vector(
@@ -682,6 +729,307 @@ def _appendix_e_fit_quality_metadata(
         ),
         (f"{prefix}_appendix_e_fit_success", str(quality.success).lower()),
     )
+
+
+@dataclass(frozen=True)
+class Ae8Ap8ErbModel:
+    """AE8/AP8 RADBELT ERB source model using bundled NASA/NSSDC ASC maps."""
+
+    model: str = "ae8_ap8_radbelt_model"
+    document: str = AE8_AP8_RADBELT_REFERENCE
+    version: str = "ae8_ap8_radbelt_asc_v1"
+    solar_mode: Ae8Ap8SolarMode = "cosrad"
+    peak_state: OstErbPeakState = "worst"
+    anomaly_samples: int = 48
+    node_samples: int = 36
+    igrf_epoch: float = DEFAULT_IGRF_EPOCH
+    solar_reference_start_year: int | None = None
+    maps: dict[str, RadbeltAscMap] | None = None
+    igrf_coefficients: IgrfCoefficients | None = None
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        """Return source model metadata."""
+
+        return SourceModelMetadata(
+            source=RadiationSource.ERB,
+            model_family=SourceModelFamily.CUSTOM,
+            name=self.model,
+            document=self.document,
+            version=self.version,
+        )
+
+    def __post_init__(self) -> None:
+        if not self.model:
+            msg = "AE8/AP8 ERB model name must not be empty."
+            raise ValueError(msg)
+
+        if not self.document:
+            msg = "AE8/AP8 ERB model document must not be empty."
+            raise ValueError(msg)
+
+        if not self.version:
+            msg = "AE8/AP8 ERB model version must not be empty."
+            raise ValueError(msg)
+
+        if self.solar_mode not in ("cosrad", "ost"):
+            msg = "AE8/AP8 ERB solar_mode must be cosrad or ost."
+            raise ValueError(msg)
+
+        if self.peak_state not in ("worst", "cycle", "maxofstates"):
+            msg = "AE8/AP8 ERB peak_state must be worst, cycle, or maxofstates."
+            raise ValueError(msg)
+
+        if self.anomaly_samples < 1:
+            msg = "AE8/AP8 ERB anomaly sample count must be positive."
+            raise ValueError(msg)
+
+        if self.node_samples < 1:
+            msg = "AE8/AP8 ERB node sample count must be positive."
+            raise ValueError(msg)
+
+        if not math.isfinite(self.igrf_epoch):
+            msg = "AE8/AP8 ERB IGRF epoch must be finite."
+            raise ValueError(msg)
+
+        if self.solar_reference_start_year is not None and not isinstance(
+            self.solar_reference_start_year,
+            int,
+        ):
+            msg = "AE8/AP8 ERB solar reference start year must be an integer."
+            raise ValueError(msg)
+
+        if self.maps is not None:
+            expected_maps = {"AE8MAX", "AE8MIN", "AP8MAX", "AP8MIN"}
+            if set(self.maps) != expected_maps:
+                msg = "AE8/AP8 ERB maps must contain AE8MAX, AE8MIN, AP8MAX, and AP8MIN."
+                raise ValueError(msg)
+
+        _ = self.metadata
+
+    def _maps(self) -> dict[str, RadbeltAscMap]:
+        return self.maps or load_ae8_ap8_radbelt_maps()
+
+    def _igrf_coefficients(self) -> IgrfCoefficients:
+        return self.igrf_coefficients or load_igrf14_coefficients(epoch=self.igrf_epoch)
+
+    def _solar_reference_start_year(self, model_input: ErbModelInput) -> int:
+        if self.solar_reference_start_year is not None:
+            return self.solar_reference_start_year
+
+        return model_input.config.mission.launch_year
+
+    def _field_line_samples(
+        self,
+        model_input: ErbModelInput,
+    ) -> tuple[ErbFieldLineSample, ...]:
+        orbit = model_input.config.orbit
+        grid = sample_erb_orbit_grid(
+            perigee_km=orbit.perigee_altitude_km,
+            apogee_km=orbit.apogee_altitude_km,
+            inclination_deg=orbit.inclination_deg,
+            argument_of_perigee_deg=orbit.argument_of_perigee_deg,
+            anomaly_samples=self.anomaly_samples,
+            node_samples=self.node_samples,
+        )
+
+        return trace_l_shell_b_over_b0_for_orbit(
+            grid.samples,
+            self._igrf_coefficients(),
+        )
+
+    def _particle_products(
+        self,
+        *,
+        particle: Particle,
+        energies_mev: tuple[float, ...],
+        minimum_map: RadbeltAscMap,
+        maximum_map: RadbeltAscMap,
+        worst_map: RadbeltAscMap,
+        field_line_samples: tuple[ErbFieldLineSample, ...],
+        fraction_max: float,
+        mission_seconds: float,
+    ) -> tuple[tuple[SpectrumProduct, ...], tuple[ErbIntegralSpectrum, ...]]:
+        energy_count = len(energies_mev)
+        mean_accumulator = [0.0 for _ in range(energy_count)]
+        maximum_flux = tuple(0.0 for _ in range(energy_count))
+        valid_count = 0
+
+        for field_line_sample in field_line_samples:
+            if not field_line_sample.valid:
+                continue
+
+            minimum_flux = minimum_map.differential_flux_bins(
+                l_shell=field_line_sample.l_shell,
+                b_over_b0=field_line_sample.b_over_b0,
+                lower_energies_mev=energies_mev,
+            )
+            maximum_state_flux = maximum_map.differential_flux_bins(
+                l_shell=field_line_sample.l_shell,
+                b_over_b0=field_line_sample.b_over_b0,
+                lower_energies_mev=energies_mev,
+            )
+            cycle_flux = _weighted_vector(
+                minimum=minimum_flux,
+                maximum=maximum_state_flux,
+                fraction_max=fraction_max,
+            )
+
+            _add_to_vector(mean_accumulator, cycle_flux)
+
+            if self.peak_state == "cycle":
+                peak_flux = cycle_flux
+            elif self.peak_state == "worst":
+                peak_flux = worst_map.differential_flux_bins(
+                    l_shell=field_line_sample.l_shell,
+                    b_over_b0=field_line_sample.b_over_b0,
+                    lower_energies_mev=energies_mev,
+                )
+            else:
+                peak_flux = _max_vector(minimum_flux, maximum_state_flux)
+
+            maximum_flux = _max_vector(maximum_flux, peak_flux)
+            valid_count += 1
+
+        mean_flux = _divide_vector(mean_accumulator, valid_count)
+        fluence = _multiply_vector(mean_flux, mission_seconds)
+
+        particle_label = particle.value
+        model_prefix = f"{self.model}:{particle_label}"
+
+        mean_spectrum = _erb_spectrum(
+            energies_mev=energies_mev,
+            values=mean_flux,
+            quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+            y_unit=Unit.DIFFERENTIAL_FLUX,
+            particle=particle,
+            model=f"{model_prefix}:mean_flux",
+        )
+        maximum_spectrum = _erb_spectrum(
+            energies_mev=energies_mev,
+            values=maximum_flux,
+            quantity=SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
+            y_unit=Unit.DIFFERENTIAL_FLUX,
+            particle=particle,
+            model=f"{model_prefix}:maximum_flux",
+        )
+        fluence_spectrum = _erb_spectrum(
+            energies_mev=energies_mev,
+            values=fluence,
+            quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+            y_unit=Unit.DIFFERENTIAL_FLUENCE,
+            particle=particle,
+            model=f"{model_prefix}:mission_fluence",
+        )
+        mean_integral_spectrum = ErbIntegralSpectrum(
+            energies_mev=energies_mev,
+            integral_flux_gt_e=integrate_differential_flux_tail_power_law(
+                energies_mev=energies_mev,
+                differential_flux=mean_flux,
+            ),
+            particle=particle,
+            model=f"{model_prefix}:mean_integral_flux",
+            document=self.document,
+            label=f"AE8/AP8 RADBELT {particle_label} mean integral flux",
+        )
+
+        return (
+            (
+                _erb_product(
+                    kind=RadiationProductKind.MEAN_FLUX,
+                    spectrum=mean_spectrum,
+                    label=f"AE8/AP8 RADBELT {particle_label} mean flux",
+                ),
+                _erb_product(
+                    kind=RadiationProductKind.MAXIMUM_FLUX,
+                    spectrum=maximum_spectrum,
+                    label=f"AE8/AP8 RADBELT {particle_label} maximum flux",
+                ),
+                _erb_product(
+                    kind=RadiationProductKind.MISSION_FLUENCE,
+                    spectrum=fluence_spectrum,
+                    label=f"AE8/AP8 RADBELT {particle_label} mission fluence",
+                ),
+            ),
+            (mean_integral_spectrum,),
+        )
+
+    def calculate(self, model_input: ErbModelInput) -> ErbModelResult:
+        """Calculate AE8/AP8 RADBELT proton and electron ERB spectra."""
+
+        maps = self._maps()
+        field_line_samples = self._field_line_samples(model_input)
+
+        solar_reference_start_year = self._solar_reference_start_year(model_input)
+        fraction_max = _ae8_ap8_solar_max_fraction(
+            mission=model_input.config.mission,
+            solar_mode=self.solar_mode,
+            reference_start_year=solar_reference_start_year,
+        )
+        mission_seconds = model_input.config.mission.lifetime_years * ERB_SECONDS_PER_YEAR
+
+        proton_products, proton_integral_spectra = self._particle_products(
+            particle=Particle.PROTON,
+            energies_mev=AE8_AP8_PROTON_ENERGIES_MEV,
+            minimum_map=maps["AP8MIN"],
+            maximum_map=maps["AP8MAX"],
+            worst_map=maps["AP8MIN"],
+            field_line_samples=field_line_samples,
+            fraction_max=fraction_max,
+            mission_seconds=mission_seconds,
+        )
+        electron_products, electron_integral_spectra = self._particle_products(
+            particle=Particle.ELECTRON,
+            energies_mev=AE8_AP8_ELECTRON_ENERGIES_MEV,
+            minimum_map=maps["AE8MIN"],
+            maximum_map=maps["AE8MAX"],
+            worst_map=maps["AE8MAX"],
+            field_line_samples=field_line_samples,
+            fraction_max=fraction_max,
+            mission_seconds=mission_seconds,
+        )
+
+        products = (
+            *proton_products,
+            *electron_products,
+        )
+        integral_spectra = (
+            *proton_integral_spectra,
+            *electron_integral_spectra,
+        )
+        spectra = tuple(product.spectrum for product in products)
+        field_line_metadata = _field_line_coverage_metadata(
+            prefix="radbelt",
+            field_line_samples=field_line_samples,
+        )
+
+        return ErbModelResult(
+            spectra=spectra,
+            lifetime_years=model_input.lifetime_years,
+            kp=model_input.kp,
+            model=self.model,
+            document=self.document,
+            products=products,
+            integral_spectra=integral_spectra,
+            method_metadata=(
+                ("ae8_ap8_reference", AE8_AP8_RADBELT_REFERENCE),
+                ("radbelt_maps", "AP8MIN,AP8MAX,AE8MIN,AE8MAX"),
+                (
+                    "radbelt_differential_flux",
+                    "integral_bin_difference_over_energy_width",
+                ),
+                ("radbelt_energy_grid", "lower_bin_edges_10_per_decade"),
+                ("solar_mode", self.solar_mode),
+                ("solar_reference_start_year", str(solar_reference_start_year)),
+                ("solar_fraction_max", f"{fraction_max:.12g}"),
+                ("anomaly_samples", str(self.anomaly_samples)),
+                ("node_samples", str(self.node_samples)),
+                ("igrf_epoch", f"{self.igrf_epoch:g}"),
+                ("peak_state", self.peak_state),
+                ("radbelt_log_bin_ratio", f"{RADBELT_LOG_BIN_RATIO:.12g}"),
+                *field_line_metadata,
+            ),
+        )
 
 
 @dataclass(frozen=True)

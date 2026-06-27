@@ -780,3 +780,135 @@ def test_ost_erb_model_records_appendix_e_fit_metadata() -> None:
     )
     assert float(metadata["proton_appendix_e_fit_rms_relative_error"]) >= 0.0
     assert float(metadata["electron_appendix_e_fit_rms_relative_error"]) >= 0.0
+
+
+
+def test_ae8_ap8_erb_model_metadata_is_custom_radbelt() -> None:
+    from radar.core.profiles import SourceModelFamily
+    from radar.erb.model import AE8_AP8_RADBELT_REFERENCE, Ae8Ap8ErbModel
+
+    model = Ae8Ap8ErbModel()
+
+    assert model.metadata.source is RadiationSource.ERB
+    assert model.metadata.model_family is SourceModelFamily.CUSTOM
+    assert model.metadata.name == "ae8_ap8_radbelt_model"
+    assert model.metadata.document == AE8_AP8_RADBELT_REFERENCE
+
+
+def test_ae8_ap8_erb_model_calculates_radbelt_products() -> None:
+    from radar.core.types import RadiationProductKind
+    from radar.erb.model import (
+        AE8_AP8_ELECTRON_ENERGIES_MEV,
+        AE8_AP8_PROTON_ENERGIES_MEV,
+        Ae8Ap8ErbModel,
+    )
+
+    model = Ae8Ap8ErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    assert result.model == "ae8_ap8_radbelt_model"
+    assert result.document == model.document
+    assert result.lifetime_years == 2
+    assert len(result.spectra) == 6
+    assert tuple(product.kind for product in result.products) == (
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+    )
+    assert result.spectra[0].particle is Particle.PROTON
+    assert result.spectra[0].x == AE8_AP8_PROTON_ENERGIES_MEV
+    assert result.spectra[3].particle is Particle.ELECTRON
+    assert result.spectra[3].x == AE8_AP8_ELECTRON_ENERGIES_MEV
+    assert result.spectra[2].quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
+    assert result.spectra[2].y_unit is Unit.DIFFERENTIAL_FLUENCE
+    assert any(value > 0.0 for value in result.spectra[0].y)
+    assert any(value > 0.0 for value in result.spectra[3].y)
+    assert len(result.integral_spectra) == 2
+    assert result.integral_spectra[0].particle is Particle.PROTON
+    assert result.integral_spectra[1].particle is Particle.ELECTRON
+    assert len(result.integral_approximation_fits) == 0
+
+
+def test_ae8_ap8_erb_model_fluence_matches_mean_flux_times_mission_duration() -> None:
+    from radar.erb.constants import ERB_SECONDS_PER_YEAR
+    from radar.erb.model import Ae8Ap8ErbModel
+
+    lifetime_years = 2
+    model = Ae8Ap8ErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=lifetime_years),
+        )
+    )
+
+    mission_seconds = lifetime_years * ERB_SECONDS_PER_YEAR
+    proton_mean_flux = result.spectra[0]
+    proton_fluence = result.spectra[2]
+    electron_mean_flux = result.spectra[3]
+    electron_fluence = result.spectra[5]
+
+    assert proton_fluence.y == pytest.approx(
+        tuple(value * mission_seconds for value in proton_mean_flux.y)
+    )
+    assert electron_fluence.y == pytest.approx(
+        tuple(value * mission_seconds for value in electron_mean_flux.y)
+    )
+
+
+def test_ae8_ap8_erb_model_records_radbelt_method_metadata() -> None:
+    from radar.erb.model import Ae8Ap8ErbModel
+
+    model = Ae8Ap8ErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+        solar_reference_start_year=2024,
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    metadata = dict(result.method_metadata)
+
+    assert metadata["ae8_ap8_reference"] == "NASA/NSSDC AE8/AP8 RADBELT"
+    assert metadata["radbelt_maps"] == "AP8MIN,AP8MAX,AE8MIN,AE8MAX"
+    assert metadata["radbelt_differential_flux"] == "integral_bin_difference_over_energy_width"
+    assert metadata["radbelt_energy_grid"] == "lower_bin_edges_10_per_decade"
+    assert metadata["solar_mode"] == "cosrad"
+    assert metadata["solar_reference_start_year"] == "2024"
+    assert metadata["solar_fraction_max"] == "0.5"
+    assert metadata["anomaly_samples"] == "2"
+    assert metadata["node_samples"] == "2"
+    assert metadata["peak_state"] == "worst"
+    assert metadata["radbelt_total_samples"] == "4"
+    assert int(metadata["radbelt_valid_samples"]) > 0
+
+
+def test_ae8_ap8_erb_model_rejects_invalid_options() -> None:
+    from radar.erb.model import Ae8Ap8ErbModel
+
+    with pytest.raises(ValueError, match="solar_mode"):
+        Ae8Ap8ErbModel(solar_mode="bad")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="maps"):
+        Ae8Ap8ErbModel(maps={})

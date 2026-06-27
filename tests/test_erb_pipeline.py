@@ -322,3 +322,42 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
         RadiationProductKind.MISSION_FLUENCE,
     )
     assert pipeline_result.calculation_result.component_status(ERB_MODEL_COMPONENT) is ComponentStatus.COMPLETED
+
+
+
+def test_erb_pipeline_accepts_ae8_ap8_custom_model() -> None:
+    from radar.core.types import RadiationProductKind
+    from radar.erb.igrf import IgrfCoefficients
+    from radar.erb.model import Ae8Ap8ErbModel
+
+    model = Ae8Ap8ErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=IgrfCoefficients(
+            epoch=1985.0,
+            g={(1, 0): -31_165.3},
+            h={},
+            nmax=1,
+        ),
+    )
+
+    pipeline_result = calculate_erb_pipeline(
+        config=CalculationConfig(
+            mission=MissionConfig(launch_year=2027, lifetime_years=2),
+            orbit=OrbitConfig.circular(altitude_km=2_000.0, inclination_deg=0.0),
+            methodology=MethodologyConfig(profile=MethodologyProfile.CUSTOM),
+        ),
+        erb_model=model,
+    )
+
+    assert pipeline_result.erb_model_result.model == "ae8_ap8_radbelt_model"
+    assert len(pipeline_result.spectra) == 6
+    assert tuple(product.kind for product in pipeline_result.products) == (
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+    )
+    assert pipeline_result.calculation_result.has_errors() is False
