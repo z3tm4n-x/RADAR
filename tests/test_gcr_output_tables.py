@@ -1,4 +1,4 @@
-﻿from radar.core.products import SpectrumProduct
+from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
 from radar.core.types import (
     Particle,
@@ -315,3 +315,33 @@ def test_gcr_shielding_let_output_tables_do_not_create_dose_or_see_tables() -> N
     assert all(table.kind is not OutputTableKind.DOSE for table in tables)
     assert all(table.kind is not OutputTableKind.SINGLE_EVENT for table in tables)
     assert len(tables) == 8
+
+
+
+def test_gcr_on_orbit_output_tables_distinguish_integral_products() -> None:
+    differential = _product()
+    integral = SpectrumProduct(
+        kind=RadiationProductKind.MEAN_FLUX,
+        spectrum=_energy_spectrum(
+            particle=Particle.PROTON,
+            model=(
+                "gost_gcr_source_outside_magnetosphere:"
+                "H:total:mission_products:mean_integral_flux"
+                "+derived_from_gost_gcr_source_outside_magnetosphere:"
+                "H:total:mission_products:mean_flux"
+                "+ost_134_1044_2007_geomagnetic_penetration"
+            ),
+            quantity=SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+            y_unit=Unit.INTEGRAL_FLUX,
+        ),
+        label="GCR H mean integral flux",
+    )
+
+    tables = gcr_on_orbit_product_output_tables((differential, integral))
+
+    assert tuple(table.table_id for table in tables) == (
+        "gcr_h_mean_flux_on_orbit",
+        "gcr_h_mean_integral_flux_on_orbit",
+    )
+    assert ("product_kind", "mean_flux") in tables[1].metadata
+    assert ("spectrum_quantity", "mean_integral_flux") in tables[1].metadata

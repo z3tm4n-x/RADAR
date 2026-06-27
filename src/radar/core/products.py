@@ -1,4 +1,4 @@
-﻿"""Radiation product metadata and validation."""
+"""Radiation product metadata and validation."""
 
 from __future__ import annotations
 
@@ -38,18 +38,23 @@ PRODUCT_KIND_SPECTRUM_QUANTITIES: dict[
 ] = {
     RadiationProductKind.MISSION_FLUENCE: (
         SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+        SpectrumQuantity.INTEGRAL_FLUENCE,
     ),
     RadiationProductKind.ORBIT_AVERAGED_FLUX: (
         SpectrumQuantity.DIFFERENTIAL_FLUX,
+        SpectrumQuantity.INTEGRAL_FLUX,
     ),
     RadiationProductKind.MEAN_FLUX: (
         SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+        SpectrumQuantity.MEAN_INTEGRAL_FLUX,
     ),
     RadiationProductKind.MAXIMUM_FLUX: (
         SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
+        SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
     ),
     RadiationProductKind.PEAK_FLUX: (
         SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+        SpectrumQuantity.PEAK_INTEGRAL_FLUX,
     ),
     RadiationProductKind.MISSION_LET_FLUENCE: (
         SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE,
@@ -65,16 +70,19 @@ PRODUCT_KIND_SPECTRUM_QUANTITIES: dict[
     ),
 }
 
-PRODUCT_KIND_SPECTRUM_UNITS: dict[RadiationProductKind, Unit] = {
-    RadiationProductKind.MISSION_FLUENCE: Unit.DIFFERENTIAL_FLUENCE,
-    RadiationProductKind.ORBIT_AVERAGED_FLUX: Unit.DIFFERENTIAL_FLUX,
-    RadiationProductKind.MEAN_FLUX: Unit.DIFFERENTIAL_FLUX,
-    RadiationProductKind.MAXIMUM_FLUX: Unit.DIFFERENTIAL_FLUX,
-    RadiationProductKind.PEAK_FLUX: Unit.DIFFERENTIAL_FLUX,
-    RadiationProductKind.MISSION_LET_FLUENCE: Unit.DIFFERENTIAL_LET_FLUENCE,
-    RadiationProductKind.MEAN_LET_FLUX: Unit.DIFFERENTIAL_LET_FLUX,
-    RadiationProductKind.MAXIMUM_LET_FLUX: Unit.DIFFERENTIAL_LET_FLUX,
-    RadiationProductKind.PEAK_LET_FLUX: Unit.DIFFERENTIAL_LET_FLUX,
+SPECTRUM_QUANTITY_UNITS: dict[SpectrumQuantity, Unit] = {
+    SpectrumQuantity.DIFFERENTIAL_FLUENCE: Unit.DIFFERENTIAL_FLUENCE,
+    SpectrumQuantity.INTEGRAL_FLUENCE: Unit.INTEGRAL_FLUENCE,
+    SpectrumQuantity.DIFFERENTIAL_FLUX: Unit.DIFFERENTIAL_FLUX,
+    SpectrumQuantity.INTEGRAL_FLUX: Unit.INTEGRAL_FLUX,
+    SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX: Unit.DIFFERENTIAL_FLUX,
+    SpectrumQuantity.PEAK_INTEGRAL_FLUX: Unit.INTEGRAL_FLUX,
+    SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX: Unit.DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX: Unit.INTEGRAL_FLUX,
+    SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX: Unit.DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MEAN_INTEGRAL_FLUX: Unit.INTEGRAL_FLUX,
+    SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE: Unit.DIFFERENTIAL_LET_FLUENCE,
+    SpectrumQuantity.LET_DIFFERENTIAL_FLUX: Unit.DIFFERENTIAL_LET_FLUX,
 }
 
 
@@ -121,15 +129,15 @@ def allowed_spectrum_quantities_for_product_kind(
         raise ValueError(msg) from exc
 
 
-def expected_spectrum_unit_for_product_kind(
-    product_kind: RadiationProductKind,
+def expected_spectrum_unit_for_quantity(
+    quantity: SpectrumQuantity,
 ) -> Unit:
-    """Return required model spectrum y-unit for a radiation product kind."""
+    """Return required model spectrum y-unit for a spectrum quantity."""
 
     try:
-        return PRODUCT_KIND_SPECTRUM_UNITS[product_kind]
+        return SPECTRUM_QUANTITY_UNITS[quantity]
     except KeyError as exc:
-        msg = f"Unsupported radiation product kind: {product_kind}"
+        msg = f"Unsupported spectrum quantity: {quantity}"
         raise ValueError(msg) from exc
 
 
@@ -150,12 +158,12 @@ def validate_spectrum_matches_product_kind(
         )
         raise ValueError(msg)
 
-    expected_unit = expected_spectrum_unit_for_product_kind(product_kind)
+    expected_unit = expected_spectrum_unit_for_quantity(spectrum.quantity)
 
     if spectrum.y_unit is not expected_unit:
         msg = (
             f"Spectrum unit {spectrum.y_unit.value} does not match "
-            f"radiation product {product_kind.value}. "
+            f"spectrum quantity {spectrum.quantity.value}. "
             f"Expected unit: {expected_unit.value}."
         )
         raise ValueError(msg)

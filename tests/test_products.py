@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.core.products import (
     SpectrumProduct,
@@ -20,24 +20,41 @@ from radar.core.types import (
 from radar.core.units import Unit
 
 
-def _spectrum(quantity: SpectrumQuantity) -> Spectrum1D:
+def _spectrum(
+    quantity: SpectrumQuantity,
+    *,
+    y_unit: Unit | None = None,
+) -> Spectrum1D:
     if quantity in (
         SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE,
         SpectrumQuantity.LET_DIFFERENTIAL_FLUX,
     ):
         x_unit = Unit.LET
-        y_unit = (
-            Unit.DIFFERENTIAL_LET_FLUENCE
-            if quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE
-            else Unit.DIFFERENTIAL_LET_FLUX
-        )
     else:
         x_unit = Unit.MEV
-        y_unit = (
-            Unit.DIFFERENTIAL_FLUENCE
-            if quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
-            else Unit.DIFFERENTIAL_FLUX
-        )
+
+    if y_unit is None:
+        if quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE:
+            y_unit = Unit.DIFFERENTIAL_LET_FLUENCE
+        elif quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUX:
+            y_unit = Unit.DIFFERENTIAL_LET_FLUX
+        elif quantity in (
+            SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+        ):
+            y_unit = Unit.DIFFERENTIAL_FLUENCE
+        elif quantity in (
+            SpectrumQuantity.INTEGRAL_FLUENCE,
+        ):
+            y_unit = Unit.INTEGRAL_FLUENCE
+        elif quantity in (
+            SpectrumQuantity.INTEGRAL_FLUX,
+            SpectrumQuantity.PEAK_INTEGRAL_FLUX,
+            SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
+            SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+        ):
+            y_unit = Unit.INTEGRAL_FLUX
+        else:
+            y_unit = Unit.DIFFERENTIAL_FLUX
 
     return Spectrum1D(
         x=(1.0, 2.0, 3.0),
@@ -168,4 +185,36 @@ def test_product_rejects_mismatched_spectrum_quantity() -> None:
         SpectrumProduct(
             kind=RadiationProductKind.MISSION_FLUENCE,
             spectrum=spectrum,
+        )
+
+
+
+def test_spectrum_product_accepts_integral_energy_quantities() -> None:
+    mean_integral_flux = _spectrum(
+        quantity=SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+        y_unit=Unit.INTEGRAL_FLUX,
+    )
+    mission_integral_fluence = _spectrum(
+        quantity=SpectrumQuantity.INTEGRAL_FLUENCE,
+        y_unit=Unit.INTEGRAL_FLUENCE,
+    )
+
+    assert SpectrumProduct(
+        kind=RadiationProductKind.MEAN_FLUX,
+        spectrum=mean_integral_flux,
+    ).spectrum is mean_integral_flux
+    assert SpectrumProduct(
+        kind=RadiationProductKind.MISSION_FLUENCE,
+        spectrum=mission_integral_fluence,
+    ).spectrum is mission_integral_fluence
+
+
+def test_spectrum_product_rejects_integral_quantity_with_differential_unit() -> None:
+    with pytest.raises(ValueError, match="Expected unit"):
+        SpectrumProduct(
+            kind=RadiationProductKind.MEAN_FLUX,
+            spectrum=_spectrum(
+                quantity=SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+                y_unit=Unit.DIFFERENTIAL_FLUX,
+            ),
         )

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from math import isfinite
 
 from radar.core.products import SpectrumProduct
-from radar.core.types import Particle, RadiationProductKind
+from radar.core.types import Particle, RadiationProductKind, SpectrumQuantity
 from radar.gcr.shielding import (
     GcrHzeShieldingResult,
     GcrLetProductsResult,
@@ -22,6 +22,12 @@ GCR_SHIELDING_LET_PRODUCT_KIND_ORDER: tuple[RadiationProductKind, ...] = (
     RadiationProductKind.MEAN_FLUX,
     RadiationProductKind.MAXIMUM_FLUX,
     RadiationProductKind.MISSION_FLUENCE,
+)
+
+GCR_SHIELDING_LET_DIFFERENTIAL_QUANTITIES: tuple[SpectrumQuantity, ...] = (
+    SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
+    SpectrumQuantity.DIFFERENTIAL_FLUENCE,
 )
 
 _GCR_LET_KIND_BY_ENERGY_PRODUCT_KIND: dict[
@@ -109,7 +115,10 @@ def _shielded_product(
 
 
 def _is_supported_energy_product(product: SpectrumProduct) -> bool:
-    return product.kind in GCR_SHIELDING_LET_PRODUCT_KIND_ORDER
+    return (
+        product.kind in GCR_SHIELDING_LET_PRODUCT_KIND_ORDER
+        and product.spectrum.quantity in GCR_SHIELDING_LET_DIFFERENTIAL_QUANTITIES
+    )
 
 
 def calculate_gcr_shielding_let_products_for_thickness(

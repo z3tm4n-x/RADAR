@@ -1,4 +1,4 @@
-﻿"""GCR output table builders.
+"""GCR output table builders.
 
 Dose and single-event-effect output tables are intentionally not constructed
 here. They are deferred until dose/SEE physical models are available.
@@ -11,6 +11,7 @@ from math import isfinite
 
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
+from radar.core.types import SpectrumQuantity
 from radar.output_tables import OutputTable, spectrum_output_table
 
 from radar.gcr.shielding import (
@@ -180,6 +181,22 @@ def gcr_source_spectra_output_tables(
     return tuple(tables)
 
 
+GCR_INTEGRAL_ENERGY_QUANTITIES: tuple[SpectrumQuantity, ...] = (
+    SpectrumQuantity.INTEGRAL_FLUENCE,
+    SpectrumQuantity.INTEGRAL_FLUX,
+    SpectrumQuantity.PEAK_INTEGRAL_FLUX,
+    SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
+    SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+)
+
+
+def _on_orbit_product_table_token(product: SpectrumProduct) -> str:
+    if product.spectrum.quantity in GCR_INTEGRAL_ENERGY_QUANTITIES:
+        return product.spectrum.quantity.value
+
+    return product.kind.value
+
+
 def gcr_on_orbit_product_output_tables(
     products: Sequence[SpectrumProduct],
 ) -> tuple[OutputTable, ...]:
@@ -201,10 +218,11 @@ def gcr_on_orbit_product_output_tables(
             geomagnetic_penetration="applied",
             shielding="not_applied",
         )
+        product_token = _on_orbit_product_table_token(product)
         tables.append(
             spectrum_output_table(
                 table_id=(
-                    f"gcr_{symbol.lower()}_{product.kind.value}_on_orbit"
+                    f"gcr_{symbol.lower()}_{product_token}_on_orbit"
                 ),
                 title=(
                     f"ГКЛ. {symbol}. {product.kind.value}. "
@@ -216,6 +234,7 @@ def gcr_on_orbit_product_output_tables(
                     {
                         "component": GCR_TOTAL_COMPONENT,
                         "product_kind": product.kind.value,
+                        "spectrum_quantity": spectrum.quantity.value,
                         "symbol": symbol,
                     },
                 ),

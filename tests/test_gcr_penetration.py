@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
@@ -118,23 +118,42 @@ def test_apply_gcr_penetration_to_products_preserves_product_semantics() -> None
         penetration=penetration,
     )
 
-    assert len(transformed) == 2
+    assert len(transformed) == 4
 
     assert transformed[0].kind is RadiationProductKind.MEAN_FLUX
     assert transformed[0].label == proton.label
     assert transformed[0].spectrum.y == pytest.approx((1.0, 2.0))
+    assert transformed[0].spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
     assert transformed[0].spectrum.model == (
         "gost_gcr_source_outside_magnetosphere:H:total:mission_products:mean_flux"
         "+test_penetration"
     )
 
-    assert transformed[1].kind is RadiationProductKind.MAXIMUM_FLUX
-    assert transformed[1].label == helium.label
-    assert transformed[1].spectrum.y == pytest.approx((3.0, 4.0))
-    assert transformed[1].spectrum.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
-    assert transformed[1].spectrum.model == (
+    assert transformed[1].kind is RadiationProductKind.MEAN_FLUX
+    assert transformed[1].spectrum.quantity is SpectrumQuantity.MEAN_INTEGRAL_FLUX
+    assert transformed[1].spectrum.y_unit is Unit.INTEGRAL_FLUX
+    assert transformed[1].spectrum.x == transformed[0].spectrum.x
+    assert transformed[1].spectrum.model.startswith(
+        "gost_gcr_source_outside_magnetosphere:H:total:mission_products:mean_flux"
+        "+test_penetration+derived_from_"
+    )
+
+    assert transformed[2].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert transformed[2].label == helium.label
+    assert transformed[2].spectrum.y == pytest.approx((3.0, 4.0))
+    assert transformed[2].spectrum.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
+    assert transformed[2].spectrum.model == (
         "gost_gcr_source_outside_magnetosphere:He:total:mission_products:maximum_flux"
         "+test_penetration"
+    )
+
+    assert transformed[3].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert transformed[3].spectrum.quantity is SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX
+    assert transformed[3].spectrum.y_unit is Unit.INTEGRAL_FLUX
+    assert transformed[3].spectrum.x == transformed[2].spectrum.x
+    assert transformed[3].spectrum.model.startswith(
+        "gost_gcr_source_outside_magnetosphere:He:total:mission_products:maximum_flux"
+        "+test_penetration+derived_from_"
     )
 
 

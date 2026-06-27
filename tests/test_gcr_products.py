@@ -1,4 +1,4 @@
-﻿from math import inf, nan
+from math import inf, nan
 
 import pytest
 
@@ -57,8 +57,11 @@ def test_gcr_mission_products_calculate_mean_maximum_and_fluence() -> None:
     )
 
     assert result.mean_flux.spectrum.y == pytest.approx((70.0 / 30.0, 140.0 / 30.0))
+    assert result.mean_integral_flux.spectrum.y == pytest.approx((35.0, 0.0))
     assert result.maximum_flux.spectrum.y == pytest.approx((3.0, 6.0))
+    assert result.maximum_integral_flux.spectrum.y == pytest.approx((45.0, 0.0))
     assert result.mission_fluence.spectrum.y == pytest.approx((70.0, 140.0))
+    assert result.mission_integral_fluence.spectrum.y == pytest.approx((1050.0, 0.0))
 
 
 def test_gcr_mission_products_use_product_contract_quantities_and_units() -> None:
@@ -75,6 +78,10 @@ def test_gcr_mission_products_use_product_contract_quantities_and_units() -> Non
     assert result.mean_flux.spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
     assert result.mean_flux.spectrum.y_unit is Unit.DIFFERENTIAL_FLUX
 
+    assert result.mean_integral_flux.kind is RadiationProductKind.MEAN_FLUX
+    assert result.mean_integral_flux.spectrum.quantity is SpectrumQuantity.MEAN_INTEGRAL_FLUX
+    assert result.mean_integral_flux.spectrum.y_unit is Unit.INTEGRAL_FLUX
+
     assert result.maximum_flux.kind is RadiationProductKind.MAXIMUM_FLUX
     assert (
         result.maximum_flux.spectrum.quantity
@@ -82,9 +89,23 @@ def test_gcr_mission_products_use_product_contract_quantities_and_units() -> Non
     )
     assert result.maximum_flux.spectrum.y_unit is Unit.DIFFERENTIAL_FLUX
 
+    assert result.maximum_integral_flux.kind is RadiationProductKind.MAXIMUM_FLUX
+    assert (
+        result.maximum_integral_flux.spectrum.quantity
+        is SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX
+    )
+    assert result.maximum_integral_flux.spectrum.y_unit is Unit.INTEGRAL_FLUX
+
     assert result.mission_fluence.kind is RadiationProductKind.MISSION_FLUENCE
     assert result.mission_fluence.spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
     assert result.mission_fluence.spectrum.y_unit is Unit.DIFFERENTIAL_FLUENCE
+
+    assert result.mission_integral_fluence.kind is RadiationProductKind.MISSION_FLUENCE
+    assert (
+        result.mission_integral_fluence.spectrum.quantity
+        is SpectrumQuantity.INTEGRAL_FLUENCE
+    )
+    assert result.mission_integral_fluence.spectrum.y_unit is Unit.INTEGRAL_FLUENCE
 
 
 def test_gcr_mission_products_preserve_grid_particle_source_and_order() -> None:
@@ -106,8 +127,11 @@ def test_gcr_mission_products_preserve_grid_particle_source_and_order() -> None:
 
     assert result.products == (
         result.mean_flux,
+        result.mean_integral_flux,
         result.maximum_flux,
+        result.maximum_integral_flux,
         result.mission_fluence,
+        result.mission_integral_fluence,
     )
 
     for product in result.products:
@@ -134,7 +158,9 @@ def test_gcr_mission_products_accept_gev_per_nucleon_input_grid() -> None:
     )
 
     assert result.mean_flux.spectrum.x_unit is Unit.GEV_PER_NUCLEON
+    assert result.mean_integral_flux.spectrum.x_unit is Unit.GEV_PER_NUCLEON
     assert result.mission_fluence.spectrum.x_unit is Unit.GEV_PER_NUCLEON
+    assert result.mission_integral_fluence.spectrum.x_unit is Unit.GEV_PER_NUCLEON
 
 
 @pytest.mark.parametrize("bad_duration", [0.0, -1.0, inf, nan])
@@ -242,6 +268,61 @@ def test_gcr_mission_products_reject_invalid_result_product_kinds() -> None:
                 kind=RadiationProductKind.MAXIMUM_FLUX,
                 spectrum=valid.maximum_flux.spectrum,
             ),
+            mean_integral_flux=valid.mean_integral_flux,
             maximum_flux=valid.maximum_flux,
+            maximum_integral_flux=valid.maximum_integral_flux,
             mission_fluence=valid.mission_fluence,
+            mission_integral_fluence=valid.mission_integral_fluence,
         )
+
+
+
+def test_gcr_model_result_accepts_integral_energy_quantities() -> None:
+    integral_flux = _gcr_flux_spectrum(
+        y_unit=Unit.INTEGRAL_FLUX,
+        quantity=SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+    )
+    integral_fluence = _gcr_flux_spectrum(
+        y_unit=Unit.INTEGRAL_FLUENCE,
+        quantity=SpectrumQuantity.INTEGRAL_FLUENCE,
+    )
+
+    result = GcrMissionProducts(
+        mean_flux=SpectrumProduct(
+            kind=RadiationProductKind.MEAN_FLUX,
+            spectrum=_gcr_flux_spectrum(
+                quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+            ),
+        ),
+        mean_integral_flux=SpectrumProduct(
+            kind=RadiationProductKind.MEAN_FLUX,
+            spectrum=integral_flux,
+        ),
+        maximum_flux=SpectrumProduct(
+            kind=RadiationProductKind.MAXIMUM_FLUX,
+            spectrum=_gcr_flux_spectrum(
+                quantity=SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
+            ),
+        ),
+        maximum_integral_flux=SpectrumProduct(
+            kind=RadiationProductKind.MAXIMUM_FLUX,
+            spectrum=_gcr_flux_spectrum(
+                y_unit=Unit.INTEGRAL_FLUX,
+                quantity=SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
+            ),
+        ),
+        mission_fluence=SpectrumProduct(
+            kind=RadiationProductKind.MISSION_FLUENCE,
+            spectrum=_gcr_flux_spectrum(
+                y_unit=Unit.DIFFERENTIAL_FLUENCE,
+                quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+            ),
+        ),
+        mission_integral_fluence=SpectrumProduct(
+            kind=RadiationProductKind.MISSION_FLUENCE,
+            spectrum=integral_fluence,
+        ),
+    )
+
+    assert result.mean_integral_flux.spectrum is integral_flux
+    assert result.mission_integral_fluence.spectrum is integral_fluence

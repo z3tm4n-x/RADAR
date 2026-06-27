@@ -1,4 +1,4 @@
-﻿from radar.core.products import SpectrumProduct
+from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
 from radar.core.types import (
     Particle,
@@ -248,4 +248,32 @@ def test_gcr_pipeline_shielding_skips_hze_without_tables_but_keeps_protons() -> 
 
     assert len(result.shielded_products) == 1
     assert result.shielded_products[0].spectrum.particle is Particle.PROTON
+    assert result.let_products == ()
+
+
+
+def test_gcr_pipeline_shielding_ignores_integral_energy_products() -> None:
+    result = calculate_gcr_shielding_let_products_for_thickness(
+        products=(
+            _product(
+                particle=Particle.PROTON,
+                symbol="H",
+                kind=RadiationProductKind.MEAN_FLUX,
+                quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+                y_unit=Unit.DIFFERENTIAL_FLUX,
+            ),
+            _product(
+                particle=Particle.PROTON,
+                symbol="H",
+                kind=RadiationProductKind.MEAN_FLUX,
+                quantity=SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+                y_unit=Unit.INTEGRAL_FLUX,
+            ),
+        ),
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+    )
+
+    assert len(result.shielded_products) == 1
+    assert result.shielded_products[0].spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
     assert result.let_products == ()

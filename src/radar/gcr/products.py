@@ -1,4 +1,4 @@
-﻿"""GCR mission product aggregation policy."""
+"""GCR mission product aggregation policy."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Final
 
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
+from radar.core.spectrum_ops import integrate_differential_spectrum_tail_power_law
 from radar.core.types import (
     Particle,
     RadiationProductKind,
@@ -43,17 +44,30 @@ class GcrMissionProducts:
     """Mission products derived from time-binned GCR flux spectra."""
 
     mean_flux: SpectrumProduct
+    mean_integral_flux: SpectrumProduct
     maximum_flux: SpectrumProduct
+    maximum_integral_flux: SpectrumProduct
     mission_fluence: SpectrumProduct
+    mission_integral_fluence: SpectrumProduct
 
     @property
-    def products(self) -> tuple[SpectrumProduct, SpectrumProduct, SpectrumProduct]:
+    def products(self) -> tuple[
+        SpectrumProduct,
+        SpectrumProduct,
+        SpectrumProduct,
+        SpectrumProduct,
+        SpectrumProduct,
+        SpectrumProduct,
+    ]:
         """Return products in deterministic order."""
 
         return (
             self.mean_flux,
+            self.mean_integral_flux,
             self.maximum_flux,
+            self.maximum_integral_flux,
             self.mission_fluence,
+            self.mission_integral_fluence,
         )
 
     def __post_init__(self) -> None:
@@ -61,12 +75,24 @@ class GcrMissionProducts:
             msg = "GCR mean-flux product kind must be MEAN_FLUX."
             raise ValueError(msg)
 
+        if self.mean_integral_flux.kind is not RadiationProductKind.MEAN_FLUX:
+            msg = "GCR mean-integral-flux product kind must be MEAN_FLUX."
+            raise ValueError(msg)
+
         if self.maximum_flux.kind is not RadiationProductKind.MAXIMUM_FLUX:
             msg = "GCR maximum-flux product kind must be MAXIMUM_FLUX."
             raise ValueError(msg)
 
+        if self.maximum_integral_flux.kind is not RadiationProductKind.MAXIMUM_FLUX:
+            msg = "GCR maximum-integral-flux product kind must be MAXIMUM_FLUX."
+            raise ValueError(msg)
+
         if self.mission_fluence.kind is not RadiationProductKind.MISSION_FLUENCE:
             msg = "GCR mission-fluence product kind must be MISSION_FLUENCE."
+            raise ValueError(msg)
+
+        if self.mission_integral_fluence.kind is not RadiationProductKind.MISSION_FLUENCE:
+            msg = "GCR mission-integral-fluence product kind must be MISSION_FLUENCE."
             raise ValueError(msg)
 
 
@@ -175,6 +201,27 @@ def _product_spectrum(
     )
 
 
+def _integral_product_spectrum(
+    *,
+    reference: Spectrum1D,
+    differential_values: tuple[float, ...],
+    y_unit: Unit,
+    quantity: SpectrumQuantity,
+    model_component: str,
+) -> Spectrum1D:
+    return _product_spectrum(
+        reference=reference,
+        values=integrate_differential_spectrum_tail_power_law(
+            energies=reference.x,
+            differential_values=differential_values,
+            context="GCR",
+        ),
+        y_unit=y_unit,
+        quantity=quantity,
+        model_component=model_component,
+    )
+
+
 def calculate_gcr_mission_products(
     time_bins: tuple[GcrFluxTimeBin, ...],
 ) -> GcrMissionProducts:
@@ -190,26 +237,51 @@ def calculate_gcr_mission_products(
 
     reference = time_bins[0].spectrum
 
+    mean_flux_values = _time_weighted_mean_values(time_bins)
+    maximum_flux_values = _pointwise_maximum_values(time_bins)
+    mission_fluence_values = _time_integral_values(time_bins)
+
     mean_flux_spectrum = _product_spectrum(
         reference=reference,
-        values=_time_weighted_mean_values(time_bins),
+        values=mean_flux_values,
         y_unit=Unit.DIFFERENTIAL_FLUX,
         quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
         model_component="mean_flux",
     )
+    mean_integral_flux_spectrum = _integral_product_spectrum(
+        reference=reference,
+        differential_values=mean_flux_values,
+        y_unit=Unit.INTEGRAL_FLUX,
+        quantity=SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+        model_component="mean_integral_flux",
+    )
     maximum_flux_spectrum = _product_spectrum(
         reference=reference,
-        values=_pointwise_maximum_values(time_bins),
+        values=maximum_flux_values,
         y_unit=Unit.DIFFERENTIAL_FLUX,
         quantity=SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
         model_component="maximum_flux",
     )
+    maximum_integral_flux_spectrum = _integral_product_spectrum(
+        reference=reference,
+        differential_values=maximum_flux_values,
+        y_unit=Unit.INTEGRAL_FLUX,
+        quantity=SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
+        model_component="maximum_integral_flux",
+    )
     mission_fluence_spectrum = _product_spectrum(
         reference=reference,
-        values=_time_integral_values(time_bins),
+        values=mission_fluence_values,
         y_unit=Unit.DIFFERENTIAL_FLUENCE,
         quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
         model_component="mission_fluence",
+    )
+    mission_integral_fluence_spectrum = _integral_product_spectrum(
+        reference=reference,
+        differential_values=mission_fluence_values,
+        y_unit=Unit.INTEGRAL_FLUENCE,
+        quantity=SpectrumQuantity.INTEGRAL_FLUENCE,
+        model_component="mission_integral_fluence",
     )
 
     return GcrMissionProducts(
@@ -218,15 +290,30 @@ def calculate_gcr_mission_products(
             spectrum=mean_flux_spectrum,
             label=f"GCR {reference.particle.value} mean flux",
         ),
+        mean_integral_flux=SpectrumProduct(
+            kind=RadiationProductKind.MEAN_FLUX,
+            spectrum=mean_integral_flux_spectrum,
+            label=f"GCR {reference.particle.value} mean integral flux",
+        ),
         maximum_flux=SpectrumProduct(
             kind=RadiationProductKind.MAXIMUM_FLUX,
             spectrum=maximum_flux_spectrum,
             label=f"GCR {reference.particle.value} maximum flux",
         ),
+        maximum_integral_flux=SpectrumProduct(
+            kind=RadiationProductKind.MAXIMUM_FLUX,
+            spectrum=maximum_integral_flux_spectrum,
+            label=f"GCR {reference.particle.value} maximum integral flux",
+        ),
         mission_fluence=SpectrumProduct(
             kind=RadiationProductKind.MISSION_FLUENCE,
             spectrum=mission_fluence_spectrum,
             label=f"GCR {reference.particle.value} mission fluence",
+        ),
+        mission_integral_fluence=SpectrumProduct(
+            kind=RadiationProductKind.MISSION_FLUENCE,
+            spectrum=mission_integral_fluence_spectrum,
+            label=f"GCR {reference.particle.value} mission integral fluence",
         ),
     )
 

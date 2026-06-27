@@ -315,11 +315,11 @@ def test_gcr_pipeline_accepts_gost_gcr_model_for_gost_profile() -> None:
     assert pipeline_result.calculation_result.has_errors() is False
     assert pipeline_result.gcr_model_result.model == "gost_gcr_model"
 
-    assert len(pipeline_result.source_products) == 6
-    assert len(pipeline_result.on_orbit_products) == 6
+    assert len(pipeline_result.source_products) == 12
+    assert len(pipeline_result.on_orbit_products) == 12
     assert len(pipeline_result.shielded_products) == 6
     assert len(pipeline_result.let_products) == 3
-    assert len(pipeline_result.products) == 15
+    assert len(pipeline_result.products) == 21
     assert pipeline_result.products == (
         *pipeline_result.on_orbit_products,
         *pipeline_result.shielded_products,
@@ -369,11 +369,13 @@ def test_gcr_pipeline_accepts_gost_gcr_model_for_gost_profile() -> None:
         table.table_id
         for table in pipeline_result.calculation_result.output_tables
     }
-    assert len(output_table_ids) == 23
+    assert len(output_table_ids) == 29
     assert "gcr_gost_h_total_source_outside_magnetosphere" in output_table_ids
     assert "gcr_gost_fe_total_source_outside_magnetosphere" in output_table_ids
     assert "gcr_h_mean_flux_on_orbit" in output_table_ids
+    assert "gcr_h_mean_integral_flux_on_orbit" in output_table_ids
     assert "gcr_fe_mission_fluence_on_orbit" in output_table_ids
+    assert "gcr_fe_integral_fluence_on_orbit" in output_table_ids
     assert (
         "gcr_t0_01_mean_flux_gcr_combined_let_behind_al"
         in output_table_ids

@@ -54,9 +54,13 @@ GCR_ALLOWED_X_UNITS = (
 
 GCR_ALLOWED_QUANTITIES = (
     SpectrumQuantity.DIFFERENTIAL_FLUX,
+    SpectrumQuantity.INTEGRAL_FLUX,
     SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MEAN_INTEGRAL_FLUX,
     SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
+    SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
     SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+    SpectrumQuantity.INTEGRAL_FLUENCE,
 )
 
 
@@ -92,9 +96,23 @@ def validate_gcr_energy_spectrum(spectrum: Spectrum1D) -> None:
             msg = "GCR differential flux spectrum values must use differential flux units."
             raise ValueError(msg)
 
+    if spectrum.quantity in (
+        SpectrumQuantity.INTEGRAL_FLUX,
+        SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+        SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
+    ):
+        if spectrum.y_unit is not Unit.INTEGRAL_FLUX:
+            msg = "GCR integral flux spectrum values must use integral flux units."
+            raise ValueError(msg)
+
     if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE:
         if spectrum.y_unit is not Unit.DIFFERENTIAL_FLUENCE:
             msg = "GCR differential fluence spectrum values must use differential fluence units."
+            raise ValueError(msg)
+
+    if spectrum.quantity is SpectrumQuantity.INTEGRAL_FLUENCE:
+        if spectrum.y_unit is not Unit.INTEGRAL_FLUENCE:
+            msg = "GCR integral fluence spectrum values must use integral fluence units."
             raise ValueError(msg)
 
     if any(energy <= 0.0 for energy in spectrum.x):
@@ -103,19 +121,31 @@ def validate_gcr_energy_spectrum(spectrum: Spectrum1D) -> None:
 
 
 def _default_gcr_product_kind(spectrum: Spectrum1D) -> RadiationProductKind:
-    if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE:
+    if spectrum.quantity in (
+        SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+        SpectrumQuantity.INTEGRAL_FLUENCE,
+    ):
         return RadiationProductKind.MISSION_FLUENCE
 
-    if spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX:
+    if spectrum.quantity in (
+        SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+        SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+    ):
         return RadiationProductKind.MEAN_FLUX
 
-    if spectrum.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX:
+    if spectrum.quantity in (
+        SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
+        SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
+    ):
         return RadiationProductKind.MAXIMUM_FLUX
 
-    if spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUX:
+    if spectrum.quantity in (
+        SpectrumQuantity.DIFFERENTIAL_FLUX,
+        SpectrumQuantity.INTEGRAL_FLUX,
+    ):
         msg = (
-            "GCR differential flux cannot be converted to a radiation product "
-            "without specifying mean or maximum flux."
+            "GCR differential or integral flux cannot be converted to a radiation "
+            "product without specifying mean or maximum flux."
         )
         raise ValueError(msg)
 

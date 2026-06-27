@@ -91,6 +91,27 @@ def test_validate_gcr_energy_spectrum_accepts_fluence_quantity() -> None:
     validate_gcr_energy_spectrum(spectrum)
 
 
+def test_validate_gcr_energy_spectrum_accepts_integral_quantities() -> None:
+    validate_gcr_energy_spectrum(
+        _gcr_proton_flux_spectrum(
+            quantity=SpectrumQuantity.MEAN_INTEGRAL_FLUX,
+            y_unit=Unit.INTEGRAL_FLUX,
+        )
+    )
+    validate_gcr_energy_spectrum(
+        _gcr_proton_flux_spectrum(
+            quantity=SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX,
+            y_unit=Unit.INTEGRAL_FLUX,
+        )
+    )
+    validate_gcr_energy_spectrum(
+        _gcr_proton_flux_spectrum(
+            quantity=SpectrumQuantity.INTEGRAL_FLUENCE,
+            y_unit=Unit.INTEGRAL_FLUENCE,
+        )
+    )
+
+
 def test_validate_gcr_energy_spectrum_rejects_electrons() -> None:
     with pytest.raises(ValueError, match="electrons"):
         validate_gcr_energy_spectrum(
@@ -350,7 +371,7 @@ def test_gost_gcr_model_calculates_outside_magnetosphere_products() -> None:
     assert result.model == "gost_test"
     assert result.document == "gost_document"
     assert result.lifetime_years == 2
-    assert len(result.products) == 6
+    assert len(result.products) == 12
     assert result.spectra == tuple(product.spectrum for product in result.products)
 
     proton_source = source_spectra.ion("H").total
@@ -358,17 +379,29 @@ def test_gost_gcr_model_calculates_outside_magnetosphere_products() -> None:
 
     assert result.products[0].kind is RadiationProductKind.MEAN_FLUX
     assert result.products[0].spectrum.particle is Particle.PROTON
+    assert result.products[0].spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
     assert result.products[0].spectrum.y == pytest.approx(proton_source.y)
 
-    assert result.products[1].kind is RadiationProductKind.MAXIMUM_FLUX
-    assert result.products[1].spectrum.y == pytest.approx(proton_source.y)
+    assert result.products[1].kind is RadiationProductKind.MEAN_FLUX
+    assert result.products[1].spectrum.quantity is SpectrumQuantity.MEAN_INTEGRAL_FLUX
 
-    assert result.products[2].kind is RadiationProductKind.MISSION_FLUENCE
-    assert result.products[2].spectrum.y == pytest.approx(
+    assert result.products[2].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert result.products[2].spectrum.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
+    assert result.products[2].spectrum.y == pytest.approx(proton_source.y)
+
+    assert result.products[3].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert result.products[3].spectrum.quantity is SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX
+
+    assert result.products[4].kind is RadiationProductKind.MISSION_FLUENCE
+    assert result.products[4].spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
+    assert result.products[4].spectrum.y == pytest.approx(
         tuple(value * duration for value in proton_source.y)
     )
 
-    assert result.products[3].spectrum.particle is Particle.HZE
+    assert result.products[5].kind is RadiationProductKind.MISSION_FLUENCE
+    assert result.products[5].spectrum.quantity is SpectrumQuantity.INTEGRAL_FLUENCE
+
+    assert result.products[6].spectrum.particle is Particle.HZE
 
 
 def test_ost_gcr_model_calculates_outside_magnetosphere_products() -> None:
@@ -395,22 +428,34 @@ def test_ost_gcr_model_calculates_outside_magnetosphere_products() -> None:
 
     assert result.model == "ost_test"
     assert result.document == "ost_document"
-    assert len(result.products) == 3
+    assert len(result.products) == 6
 
     source_total = source_spectra.ion("O").total
     duration = 3.0 * GCR_MODEL_SECONDS_PER_YEAR
 
     assert result.products[0].kind is RadiationProductKind.MEAN_FLUX
     assert result.products[0].spectrum.particle is Particle.HZE
+    assert result.products[0].spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
     assert result.products[0].spectrum.y == pytest.approx(source_total.y)
 
-    assert result.products[1].kind is RadiationProductKind.MAXIMUM_FLUX
-    assert result.products[1].spectrum.y == pytest.approx(source_total.y)
+    assert result.products[1].kind is RadiationProductKind.MEAN_FLUX
+    assert result.products[1].spectrum.quantity is SpectrumQuantity.MEAN_INTEGRAL_FLUX
 
-    assert result.products[2].kind is RadiationProductKind.MISSION_FLUENCE
-    assert result.products[2].spectrum.y == pytest.approx(
+    assert result.products[2].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert result.products[2].spectrum.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
+    assert result.products[2].spectrum.y == pytest.approx(source_total.y)
+
+    assert result.products[3].kind is RadiationProductKind.MAXIMUM_FLUX
+    assert result.products[3].spectrum.quantity is SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX
+
+    assert result.products[4].kind is RadiationProductKind.MISSION_FLUENCE
+    assert result.products[4].spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
+    assert result.products[4].spectrum.y == pytest.approx(
         tuple(value * duration for value in source_total.y)
     )
+
+    assert result.products[5].kind is RadiationProductKind.MISSION_FLUENCE
+    assert result.products[5].spectrum.quantity is SpectrumQuantity.INTEGRAL_FLUENCE
 
 
 def test_normative_gcr_models_reject_bad_source_spectrum_configuration() -> None:

@@ -23,7 +23,7 @@ from radar.core.products import (
     default_dose_unit_for_product_kind,
     dose_quantity_for_product_kind,
     radiation_quantity_mode_for_product_kind,
-    expected_spectrum_unit_for_product_kind,
+    expected_spectrum_unit_for_quantity,
     validate_spectrum_matches_product_kind,
 )
 from radar.core.profiles import (
@@ -143,7 +143,7 @@ __all__ = [
     "check_spectra_compatible",
     "daily_display_unit_for_product_kind",
     "default_dose_unit_for_product_kind",
-    "expected_spectrum_unit_for_product_kind",
+    "expected_spectrum_unit_for_quantity",
     "default_dose_unit_for_radiation_quantity_mode",
     "dose_quantity_for_product_kind",
     "dose_quantity_for_radiation_quantity_mode",
