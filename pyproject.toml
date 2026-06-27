@@ -37,7 +37,7 @@ where = ["src"]
 
 
 [tool.setuptools.package-data]
-"radar.data.normative" = ["*.json", "*/*.json", "*/*.csv", "*/*.txt"]
+"radar.data.normative" = ["*.json", "*/*.json", "*/*.csv", "*/*.txt", "*/*.asc"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
