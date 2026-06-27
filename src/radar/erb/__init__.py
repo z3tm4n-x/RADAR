@@ -1,12 +1,17 @@
 """Earth radiation belt models."""
 
 from radar.erb.appendix_e import (
+    OstErbApproximationFitQuality,
     OstErbElectronApproximationCoefficients,
     OstErbElectronDifferentialApproximationCoefficients,
     OstErbElectronIntegralApproximation,
+    OstErbElectronIntegralApproximationFit,
     OstErbProtonApproximationCoefficients,
     OstErbProtonDifferentialApproximationCoefficients,
     OstErbProtonIntegralApproximation,
+    OstErbProtonIntegralApproximationFit,
+    fit_ost_erb_electron_integral_approximation,
+    fit_ost_erb_proton_integral_approximation,
     integrate_differential_flux_tail_power_law,
 )
 from radar.erb.field import (
@@ -41,12 +46,17 @@ from radar.erb.resources import ERB_IGRF14_RESOURCE_NAME, load_igrf14_coefficien
 
 __all__ = [
     "ERB_IGRF14_RESOURCE_NAME",
+    "OstErbApproximationFitQuality",
     "OstErbElectronApproximationCoefficients",
     "OstErbElectronDifferentialApproximationCoefficients",
     "OstErbElectronIntegralApproximation",
+    "OstErbElectronIntegralApproximationFit",
     "OstErbProtonApproximationCoefficients",
     "OstErbProtonDifferentialApproximationCoefficients",
     "OstErbProtonIntegralApproximation",
+    "OstErbProtonIntegralApproximationFit",
+    "fit_ost_erb_electron_integral_approximation",
+    "fit_ost_erb_proton_integral_approximation",
     "integrate_differential_flux_tail_power_law",
     "ErbFieldLineSample",
     "ErbOrbitGrid",

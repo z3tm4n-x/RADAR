@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from math import exp, isfinite, log
+from math import exp, isfinite, log, sqrt
+from typing import Any
 
 
 def _validate_energy_flux_grid(
@@ -313,12 +314,304 @@ class OstErbElectronIntegralApproximation:
         )
 
 
+FitResidualFunction = Callable[[tuple[float, ...]], tuple[float, ...]]
+
+
+@dataclass(frozen=True)
+class OstErbApproximationFitQuality:
+    """Quality metrics for the Appendix E.8 relative-error fit."""
+
+    objective: float
+    rms_relative_error: float
+    max_abs_relative_error: float
+    sample_count: int
+    success: bool
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.objective) or self.objective < 0.0:
+            msg = "Appendix E fit objective must be finite and non-negative."
+            raise ValueError(msg)
+
+        if not isfinite(self.rms_relative_error) or self.rms_relative_error < 0.0:
+            msg = "Appendix E fit RMS relative error must be finite and non-negative."
+            raise ValueError(msg)
+
+        if not isfinite(self.max_abs_relative_error) or self.max_abs_relative_error < 0.0:
+            msg = "Appendix E fit max relative error must be finite and non-negative."
+            raise ValueError(msg)
+
+        if self.sample_count < 1:
+            msg = "Appendix E fit sample count must be positive."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class OstErbProtonIntegralApproximationFit:
+    """Result of an Appendix E.8 proton integral approximation fit."""
+
+    approximation: OstErbProtonIntegralApproximation
+    quality: OstErbApproximationFitQuality
+
+
+@dataclass(frozen=True)
+class OstErbElectronIntegralApproximationFit:
+    """Result of an Appendix E.8 electron integral approximation fit."""
+
+    approximation: OstErbElectronIntegralApproximation
+    quality: OstErbApproximationFitQuality
+
+
+def _validate_integral_fit_grid(
+    *,
+    energies_mev: Sequence[float],
+    integral_flux_gt_e: Sequence[float],
+) -> None:
+    if len(energies_mev) < 2:
+        msg = "Appendix E fit requires at least two energy points."
+        raise ValueError(msg)
+
+    if len(energies_mev) != len(integral_flux_gt_e):
+        msg = "Appendix E fit energy and integral flux grids must have the same length."
+        raise ValueError(msg)
+
+    if any(not isfinite(energy) or energy <= 0.0 for energy in energies_mev):
+        msg = "Appendix E fit energy grid values must be finite and positive."
+        raise ValueError(msg)
+
+    if tuple(sorted(energies_mev)) != tuple(energies_mev):
+        msg = "Appendix E fit energy grid must be sorted."
+        raise ValueError(msg)
+
+    if len(set(energies_mev)) != len(energies_mev):
+        msg = "Appendix E fit energy grid values must be unique."
+        raise ValueError(msg)
+
+    if any(not isfinite(value) or value <= 0.0 for value in integral_flux_gt_e):
+        msg = "Appendix E fit integral flux values must be finite and positive."
+        raise ValueError(msg)
+
+
+def _relative_residuals(
+    *,
+    approximation: Callable[[float], float],
+    energies_mev: tuple[float, ...],
+    integral_flux_gt_e: tuple[float, ...],
+) -> tuple[float, ...]:
+    return tuple(
+        1.0 - approximation(energy) / target
+        for energy, target in zip(energies_mev, integral_flux_gt_e, strict=True)
+    )
+
+
+def _fit_quality(
+    *,
+    residuals: tuple[float, ...],
+    success: bool,
+) -> OstErbApproximationFitQuality:
+    objective = sum(residual * residual for residual in residuals)
+    sample_count = len(residuals)
+
+    return OstErbApproximationFitQuality(
+        objective=objective,
+        rms_relative_error=sqrt(objective / sample_count),
+        max_abs_relative_error=max(abs(residual) for residual in residuals),
+        sample_count=sample_count,
+        success=success,
+    )
+
+
+def _least_squares(*args: Any, **kwargs: Any) -> Any:
+    from scipy.optimize import least_squares  # type: ignore[import-untyped]
+
+    return least_squares(*args, **kwargs)
+
+
+def _run_bounded_relative_least_squares(
+    *,
+    initial_guesses: tuple[tuple[float, ...], ...],
+    lower_bounds: tuple[float, ...],
+    upper_bounds: tuple[float, ...],
+    residual_function: FitResidualFunction,
+) -> tuple[tuple[float, ...], bool]:
+    best_parameters = initial_guesses[0]
+    best_objective = float("inf")
+    best_success = False
+
+    for initial_guess in initial_guesses:
+        def scipy_residuals(parameters: Any) -> tuple[float, ...]:
+            return residual_function(tuple(float(value) for value in parameters))
+
+        result = _least_squares(
+            scipy_residuals,
+            x0=initial_guess,
+            bounds=(lower_bounds, upper_bounds),
+            max_nfev=20_000,
+        )
+        parameters = tuple(float(value) for value in result.x)
+        residuals = residual_function(parameters)
+        objective = sum(residual * residual for residual in residuals)
+
+        if objective < best_objective:
+            best_parameters = parameters
+            best_objective = objective
+            best_success = bool(result.success)
+
+    return best_parameters, best_success
+
+
+def fit_ost_erb_proton_integral_approximation(
+    *,
+    energies_mev: Sequence[float],
+    integral_flux_gt_e: Sequence[float],
+) -> OstErbProtonIntegralApproximationFit:
+    """Fit the OST Appendix E.7 proton integral approximation by E.8."""
+
+    _validate_integral_fit_grid(
+        energies_mev=energies_mev,
+        integral_flux_gt_e=integral_flux_gt_e,
+    )
+    energies = tuple(float(energy) for energy in energies_mev)
+    targets = tuple(float(value) for value in integral_flux_gt_e)
+    scale = max(targets)
+    energy_min = min(energies)
+    energy_max = max(energies)
+    energy_span = max(energy_max - energy_min, 1.0)
+
+    def residual_function(parameters: tuple[float, ...]) -> tuple[float, ...]:
+        approximation = OstErbProtonIntegralApproximation(
+            coefficients=OstErbProtonApproximationCoefficients(
+                a1=parameters[0],
+                a2=parameters[1],
+                a3=parameters[2],
+                b1=parameters[3],
+                b2=parameters[4],
+            )
+        )
+
+        return _relative_residuals(
+            approximation=approximation.integral_flux_gt_e,
+            energies_mev=energies,
+            integral_flux_gt_e=targets,
+        )
+
+    initial_guesses = (
+        (scale * (energy_min + 1.0) ** 2.0, 2.0, 1.0, scale * 0.1, 1.0 / energy_span),
+        (scale * (energy_min + 1.0), 1.0, energy_min, scale * 0.5, 1.0 / energy_max),
+        (scale * (energy_min + 1.0) ** 3.0, 3.0, 0.0, scale * 0.01, 2.0 / energy_span),
+    )
+    parameters, success = _run_bounded_relative_least_squares(
+        initial_guesses=initial_guesses,
+        lower_bounds=(0.0, 1.0e-12, 0.0, 0.0, 1.0e-12),
+        upper_bounds=(float("inf"), 20.0, float("inf"), float("inf"), 100.0),
+        residual_function=residual_function,
+    )
+    approximation = OstErbProtonIntegralApproximation(
+        coefficients=OstErbProtonApproximationCoefficients(
+            a1=parameters[0],
+            a2=parameters[1],
+            a3=parameters[2],
+            b1=parameters[3],
+            b2=parameters[4],
+        )
+    )
+    residuals = _relative_residuals(
+        approximation=approximation.integral_flux_gt_e,
+        energies_mev=energies,
+        integral_flux_gt_e=targets,
+    )
+
+    return OstErbProtonIntegralApproximationFit(
+        approximation=approximation,
+        quality=_fit_quality(residuals=residuals, success=success),
+    )
+
+
+def fit_ost_erb_electron_integral_approximation(
+    *,
+    energies_mev: Sequence[float],
+    integral_flux_gt_e: Sequence[float],
+) -> OstErbElectronIntegralApproximationFit:
+    """Fit the OST Appendix E.11 electron integral approximation by E.8."""
+
+    _validate_integral_fit_grid(
+        energies_mev=energies_mev,
+        integral_flux_gt_e=integral_flux_gt_e,
+    )
+    energies = tuple(float(energy) for energy in energies_mev)
+    targets = tuple(float(value) for value in integral_flux_gt_e)
+    scale = max(targets)
+    energy_max = max(energies)
+    energy_span = max(energy_max - min(energies), 1.0)
+
+    def residual_function(parameters: tuple[float, ...]) -> tuple[float, ...]:
+        approximation = OstErbElectronIntegralApproximation(
+            coefficients=OstErbElectronApproximationCoefficients(
+                a1=parameters[0],
+                a2=parameters[1],
+                b1=parameters[2],
+                b2=parameters[3],
+                c1=parameters[4],
+                c2=parameters[5],
+            )
+        )
+
+        return _relative_residuals(
+            approximation=approximation.integral_flux_gt_e,
+            energies_mev=energies,
+            integral_flux_gt_e=targets,
+        )
+
+    initial_guesses = (
+        (
+            scale * 0.34,
+            1.0 / energy_span,
+            scale * 0.33,
+            1.0 / max(energy_max * energy_max, 1.0),
+            scale * 0.33,
+            2.0 / energy_span,
+        ),
+        (scale, 1.0 / energy_span, 0.0, 1.0, 0.0, 1.0 / energy_span),
+        (scale * 0.5, 2.0 / energy_span, scale * 0.5, 1.0 / energy_span**2, 0.0, 1.0),
+    )
+    parameters, success = _run_bounded_relative_least_squares(
+        initial_guesses=initial_guesses,
+        lower_bounds=(0.0, 1.0e-12, 0.0, 1.0e-12, 0.0, 1.0e-12),
+        upper_bounds=(float("inf"), 100.0, float("inf"), 100.0, float("inf"), 100.0),
+        residual_function=residual_function,
+    )
+    approximation = OstErbElectronIntegralApproximation(
+        coefficients=OstErbElectronApproximationCoefficients(
+            a1=parameters[0],
+            a2=parameters[1],
+            b1=parameters[2],
+            b2=parameters[3],
+            c1=parameters[4],
+            c2=parameters[5],
+        )
+    )
+    residuals = _relative_residuals(
+        approximation=approximation.integral_flux_gt_e,
+        energies_mev=energies,
+        integral_flux_gt_e=targets,
+    )
+
+    return OstErbElectronIntegralApproximationFit(
+        approximation=approximation,
+        quality=_fit_quality(residuals=residuals, success=success),
+    )
+
+
 __all__ = [
+    "OstErbApproximationFitQuality",
     "OstErbElectronApproximationCoefficients",
     "OstErbElectronDifferentialApproximationCoefficients",
     "OstErbElectronIntegralApproximation",
+    "OstErbElectronIntegralApproximationFit",
     "OstErbProtonApproximationCoefficients",
     "OstErbProtonDifferentialApproximationCoefficients",
     "OstErbProtonIntegralApproximation",
+    "OstErbProtonIntegralApproximationFit",
+    "fit_ost_erb_electron_integral_approximation",
+    "fit_ost_erb_proton_integral_approximation",
     "integrate_differential_flux_tail_power_law",
 ]
