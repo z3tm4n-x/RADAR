@@ -22,7 +22,14 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
-from radar.erb.appendix_e import integrate_differential_flux_tail_power_law
+from radar.erb.appendix_e import (
+    OstErbApproximationFitQuality,
+    OstErbElectronIntegralApproximation,
+    OstErbProtonIntegralApproximation,
+    fit_ost_erb_electron_integral_approximation,
+    fit_ost_erb_proton_integral_approximation,
+    integrate_differential_flux_tail_power_law,
+)
 from radar.erb.constants import DEFAULT_IGRF_EPOCH, ERB_SECONDS_PER_YEAR
 from radar.erb.field import ErbFieldLineSample, trace_l_shell_b_over_b0_for_orbit
 from radar.erb.igrf import IgrfCoefficients
@@ -189,6 +196,45 @@ class ErbIntegralSpectrum:
 
 
 @dataclass(frozen=True)
+class ErbIntegralSpectrumApproximationFit:
+    """Appendix E.8 fit attached to an ERB integral spectrum."""
+
+    particle: Particle
+    model: str
+    document: str
+    approximation: OstErbProtonIntegralApproximation | OstErbElectronIntegralApproximation
+    quality: OstErbApproximationFitQuality
+    label: str = ""
+
+    def __post_init__(self) -> None:
+        if self.particle not in ERB_ALLOWED_PARTICLES:
+            msg = "ERB integral approximation fit must describe protons or electrons."
+            raise ValueError(msg)
+
+        if self.particle is Particle.PROTON and not isinstance(
+            self.approximation,
+            OstErbProtonIntegralApproximation,
+        ):
+            msg = "ERB proton integral approximation fit must use a proton approximation."
+            raise ValueError(msg)
+
+        if self.particle is Particle.ELECTRON and not isinstance(
+            self.approximation,
+            OstErbElectronIntegralApproximation,
+        ):
+            msg = "ERB electron integral approximation fit must use an electron approximation."
+            raise ValueError(msg)
+
+        if not self.model:
+            msg = "ERB integral approximation fit model name must not be empty."
+            raise ValueError(msg)
+
+        if not self.document:
+            msg = "ERB integral approximation fit document must not be empty."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
 class ErbModelResult:
     """Result returned by an ERB model."""
 
@@ -199,6 +245,7 @@ class ErbModelResult:
     document: str
     products: tuple[SpectrumProduct, ...] = ()
     integral_spectra: tuple[ErbIntegralSpectrum, ...] = ()
+    integral_approximation_fits: tuple[ErbIntegralSpectrumApproximationFit, ...] = ()
     method_metadata: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
@@ -225,9 +272,20 @@ class ErbModelResult:
             msg = "ERB model product spectra must match result spectra."
             raise ValueError(msg)
 
+        integral_particles = {spectrum.particle for spectrum in self.integral_spectra}
+
         for integral_spectrum in self.integral_spectra:
             if integral_spectrum.document != self.document:
                 msg = "ERB integral spectrum document must match result document."
+                raise ValueError(msg)
+
+        for approximation_fit in self.integral_approximation_fits:
+            if approximation_fit.document != self.document:
+                msg = "ERB integral approximation fit document must match result document."
+                raise ValueError(msg)
+
+            if approximation_fit.particle not in integral_particles:
+                msg = "ERB integral approximation fit particle must match an integral spectrum."
                 raise ValueError(msg)
 
         for key, value in self.method_metadata:
@@ -515,6 +573,117 @@ def _erb_product(
     )
 
 
+def _positive_integral_fit_grid(
+    integral_spectrum: ErbIntegralSpectrum,
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    positive_pairs = tuple(
+        (energy, value)
+        for energy, value in zip(
+            integral_spectrum.energies_mev,
+            integral_spectrum.integral_flux_gt_e,
+            strict=True,
+        )
+        if value > 0.0
+    )
+
+    return (
+        tuple(energy for energy, _ in positive_pairs),
+        tuple(value for _, value in positive_pairs),
+    )
+
+
+def _particle_integral_approximation_fits(
+    *,
+    particle: Particle,
+    integral_spectrum: ErbIntegralSpectrum,
+    model: str,
+    document: str,
+    label: str,
+) -> tuple[ErbIntegralSpectrumApproximationFit, ...]:
+    energies_mev, integral_flux_gt_e = _positive_integral_fit_grid(integral_spectrum)
+
+    if len(energies_mev) < 2:
+        return ()
+
+    if particle is Particle.PROTON:
+        proton_fit = fit_ost_erb_proton_integral_approximation(
+            energies_mev=energies_mev,
+            integral_flux_gt_e=integral_flux_gt_e,
+        )
+
+        return (
+            ErbIntegralSpectrumApproximationFit(
+                particle=particle,
+                model=model,
+                document=document,
+                approximation=proton_fit.approximation,
+                quality=proton_fit.quality,
+                label=label,
+            ),
+        )
+
+    if particle is Particle.ELECTRON:
+        electron_fit = fit_ost_erb_electron_integral_approximation(
+            energies_mev=energies_mev,
+            integral_flux_gt_e=integral_flux_gt_e,
+        )
+
+        return (
+            ErbIntegralSpectrumApproximationFit(
+                particle=particle,
+                model=model,
+                document=document,
+                approximation=electron_fit.approximation,
+                quality=electron_fit.quality,
+                label=label,
+            ),
+        )
+
+    msg = "ERB integral approximation fit particle must be proton or electron."
+    raise ValueError(msg)
+
+
+def _appendix_e_fit_quality_metadata(
+    *,
+    prefix: str,
+    integral_spectrum: ErbIntegralSpectrum,
+    approximation_fits: tuple[ErbIntegralSpectrumApproximationFit, ...],
+) -> tuple[tuple[str, str], ...]:
+    positive_sample_count = sum(
+        1
+        for value in integral_spectrum.integral_flux_gt_e
+        if value > 0.0
+    )
+
+    if not approximation_fits:
+        return (
+            (
+                f"{prefix}_appendix_e_fit_status",
+                "skipped_insufficient_positive_integral_flux_values",
+            ),
+            (f"{prefix}_appendix_e_fit_positive_samples", str(positive_sample_count)),
+        )
+
+    quality = approximation_fits[0].quality
+    status = "success" if quality.success else "solver_reported_failure"
+
+    return (
+        (f"{prefix}_appendix_e_fit_status", status),
+        (f"{prefix}_appendix_e_fit_positive_samples", str(positive_sample_count)),
+        (f"{prefix}_appendix_e_fit_sample_count", str(quality.sample_count)),
+        (f"{prefix}_appendix_e_fit_objective", f"{quality.objective:.12g}"),
+        (
+            f"{prefix}_appendix_e_fit_rms_relative_error",
+            f"{quality.rms_relative_error:.12g}",
+        ),
+        (
+            f"{prefix}_appendix_e_fit_max_abs_relative_error",
+            f"{quality.max_abs_relative_error:.12g}",
+        ),
+        (f"{prefix}_appendix_e_fit_success", str(quality.success).lower()),
+    )
+
+
 @dataclass(frozen=True)
 class OstErbModel:
     """Normative OST 134-1044-2007 Appendix A/D/E ERB source model."""
@@ -622,7 +791,11 @@ class OstErbModel:
         field_line_samples: tuple[ErbFieldLineSample, ...],
         fraction_max: float,
         mission_seconds: float,
-    ) -> tuple[tuple[SpectrumProduct, ...], tuple[ErbIntegralSpectrum, ...]]:
+    ) -> tuple[
+        tuple[SpectrumProduct, ...],
+        tuple[ErbIntegralSpectrum, ...],
+        tuple[ErbIntegralSpectrumApproximationFit, ...],
+    ]:
         energy_count = len(minimum_table.energies_mev)
         mean_accumulator = [0.0 for _ in range(energy_count)]
         maximum_flux = tuple(0.0 for _ in range(energy_count))
@@ -705,6 +878,13 @@ class OstErbModel:
             document=self.document,
             label=f"OST ERB {particle_label} mean integral flux",
         )
+        integral_approximation_fits = _particle_integral_approximation_fits(
+            particle=particle,
+            integral_spectrum=mean_integral_spectrum,
+            model=f"{model_prefix}:mean_integral_flux_fit",
+            document=self.document,
+            label=f"OST ERB {particle_label} mean integral flux approximation fit",
+        )
 
         return (
             (
@@ -725,6 +905,7 @@ class OstErbModel:
                 ),
             ),
             (mean_integral_spectrum,),
+            integral_approximation_fits,
         )
 
     def calculate(self, model_input: ErbModelInput) -> ErbModelResult:
@@ -740,7 +921,11 @@ class OstErbModel:
         )
         mission_seconds = model_input.config.mission.lifetime_years * ERB_SECONDS_PER_YEAR
 
-        proton_products, proton_integral_spectra = self._particle_products(
+        (
+            proton_products,
+            proton_integral_spectra,
+            proton_integral_approximation_fits,
+        ) = self._particle_products(
             particle=Particle.PROTON,
             minimum_table=tables.proton_min,
             maximum_table=tables.proton_max,
@@ -749,7 +934,11 @@ class OstErbModel:
             fraction_max=fraction_max,
             mission_seconds=mission_seconds,
         )
-        electron_products, electron_integral_spectra = self._particle_products(
+        (
+            electron_products,
+            electron_integral_spectra,
+            electron_integral_approximation_fits,
+        ) = self._particle_products(
             particle=Particle.ELECTRON,
             minimum_table=tables.electron_min,
             maximum_table=tables.electron_max,
@@ -767,6 +956,10 @@ class OstErbModel:
             *proton_integral_spectra,
             *electron_integral_spectra,
         )
+        integral_approximation_fits = (
+            *proton_integral_approximation_fits,
+            *electron_integral_approximation_fits,
+        )
         spectra = tuple(product.spectrum for product in products)
         proton_coverage_metadata = _table_coverage_metadata(
             prefix="proton",
@@ -778,6 +971,16 @@ class OstErbModel:
             table=tables.electron_min,
             field_line_samples=field_line_samples,
         )
+        proton_fit_metadata = _appendix_e_fit_quality_metadata(
+            prefix="proton",
+            integral_spectrum=proton_integral_spectra[0],
+            approximation_fits=proton_integral_approximation_fits,
+        )
+        electron_fit_metadata = _appendix_e_fit_quality_metadata(
+            prefix="electron",
+            integral_spectrum=electron_integral_spectra[0],
+            approximation_fits=electron_integral_approximation_fits,
+        )
 
         return ErbModelResult(
             spectra=spectra,
@@ -787,12 +990,17 @@ class OstErbModel:
             document=self.document,
             products=products,
             integral_spectra=integral_spectra,
+            integral_approximation_fits=integral_approximation_fits,
             method_metadata=(
                 ("ost_appendices", "A,D,E"),
                 ("appendix_a_reference", OST_ERB_APPENDIX_A_REFERENCE),
                 ("appendix_d_reference", OST_ERB_APPENDIX_D_REFERENCE),
                 ("appendix_e_reference", OST_ERB_APPENDIX_E_REFERENCE),
                 ("appendix_e_integral_spectrum", "tail_power_law_numeric_quadrature"),
+                (
+                    "appendix_e_approximation_fit_objective",
+                    "sum_squared_relative_integral_flux_residuals",
+                ),
                 ("appendix_e_interpolation", "three_point_lagrange_with_log_positive_flux_values"),
                 ("appendix_e_averaging", "equal_weight_mean_anomaly_samples"),
                 (
@@ -808,5 +1016,7 @@ class OstErbModel:
                 ("peak_state", self.peak_state),
                 *proton_coverage_metadata,
                 *electron_coverage_metadata,
+                *proton_fit_metadata,
+                *electron_fit_metadata,
             ),
         )

@@ -445,7 +445,7 @@ def _run_bounded_relative_least_squares(
             scipy_residuals,
             x0=initial_guess,
             bounds=(lower_bounds, upper_bounds),
-            max_nfev=20_000,
+            max_nfev=1_000,
         )
         parameters = tuple(float(value) for value in result.x)
         residuals = residual_function(parameters)

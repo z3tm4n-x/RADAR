@@ -645,3 +645,138 @@ def test_ost_erb_model_records_appendix_e_integral_metadata() -> None:
     metadata = dict(result.method_metadata)
 
     assert metadata["appendix_e_integral_spectrum"] == "tail_power_law_numeric_quadrature"
+
+def test_erb_model_result_rejects_integral_approximation_fit_with_wrong_document() -> None:
+    from radar.erb.appendix_e import (
+        OstErbApproximationFitQuality,
+        OstErbProtonApproximationCoefficients,
+        OstErbProtonIntegralApproximation,
+    )
+    from radar.erb.model import ErbIntegralSpectrum, ErbIntegralSpectrumApproximationFit
+
+    spectrum = _erb_proton_flux_spectrum()
+    integral_spectrum = ErbIntegralSpectrum(
+        energies_mev=spectrum.x,
+        integral_flux_gt_e=(3.0, 2.0, 1.0),
+        particle=Particle.PROTON,
+        model="test",
+        document="test_document",
+    )
+    approximation_fit = ErbIntegralSpectrumApproximationFit(
+        particle=Particle.PROTON,
+        model="test",
+        document="other_document",
+        approximation=OstErbProtonIntegralApproximation(
+            coefficients=OstErbProtonApproximationCoefficients(
+                a1=1.0,
+                a2=2.0,
+                a3=0.0,
+                b1=1.0,
+                b2=1.0,
+            )
+        ),
+        quality=OstErbApproximationFitQuality(
+            objective=0.0,
+            rms_relative_error=0.0,
+            max_abs_relative_error=0.0,
+            sample_count=3,
+            success=True,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="document"):
+        ErbModelResult(
+            spectra=(spectrum,),
+            lifetime_years=5,
+            kp=3,
+            model="test",
+            document="test_document",
+            integral_spectra=(integral_spectrum,),
+            integral_approximation_fits=(approximation_fit,),
+        )
+
+
+def test_ost_erb_model_returns_appendix_e_approximation_fits() -> None:
+    from radar.erb.appendix_e import (
+        OstErbElectronIntegralApproximation,
+        OstErbProtonIntegralApproximation,
+    )
+
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    assert len(result.integral_approximation_fits) == 2
+
+    proton_fit = result.integral_approximation_fits[0]
+    electron_fit = result.integral_approximation_fits[1]
+
+    assert proton_fit.particle is Particle.PROTON
+    assert electron_fit.particle is Particle.ELECTRON
+    assert isinstance(proton_fit.approximation, OstErbProtonIntegralApproximation)
+    assert isinstance(electron_fit.approximation, OstErbElectronIntegralApproximation)
+    assert proton_fit.document == result.document
+    assert electron_fit.document == result.document
+
+    proton_positive_samples = sum(
+        1
+        for value in result.integral_spectra[0].integral_flux_gt_e
+        if value > 0.0
+    )
+    electron_positive_samples = sum(
+        1
+        for value in result.integral_spectra[1].integral_flux_gt_e
+        if value > 0.0
+    )
+
+    assert proton_fit.quality.sample_count == proton_positive_samples
+    assert electron_fit.quality.sample_count == electron_positive_samples
+    assert proton_fit.quality.rms_relative_error >= 0.0
+    assert electron_fit.quality.rms_relative_error >= 0.0
+
+
+def test_ost_erb_model_records_appendix_e_fit_metadata() -> None:
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    metadata = dict(result.method_metadata)
+    proton_fit = result.integral_approximation_fits[0]
+    electron_fit = result.integral_approximation_fits[1]
+
+    assert (
+        metadata["appendix_e_approximation_fit_objective"]
+        == "sum_squared_relative_integral_flux_residuals"
+    )
+    assert metadata["proton_appendix_e_fit_status"] in {
+        "success",
+        "solver_reported_failure",
+    }
+    assert metadata["electron_appendix_e_fit_status"] in {
+        "success",
+        "solver_reported_failure",
+    }
+    assert metadata["proton_appendix_e_fit_sample_count"] == str(
+        proton_fit.quality.sample_count
+    )
+    assert metadata["electron_appendix_e_fit_sample_count"] == str(
+        electron_fit.quality.sample_count
+    )
+    assert float(metadata["proton_appendix_e_fit_rms_relative_error"]) >= 0.0
+    assert float(metadata["electron_appendix_e_fit_rms_relative_error"]) >= 0.0
