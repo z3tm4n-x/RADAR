@@ -6,6 +6,13 @@ from radar.pipelines.erb import (
     ErbPipelineResult,
     calculate_erb_pipeline,
 )
+from radar.pipelines.execution import (
+    PipelineSourceModels,
+    build_pipeline_source_models,
+    calculate_erb_pipeline_for_config,
+    calculate_gcr_pipeline_for_config,
+    calculate_sep_pipeline_for_config,
+)
 from radar.pipelines.gcr import (
     GCR_MODEL_COMPONENT,
     GCR_PIPELINE_COMPONENT,
@@ -44,10 +51,15 @@ __all__ = [
     "SEP_SHIELDING_COMPONENT",
     "ErbPipelineResult",
     "GcrPipelineResult",
+    "PipelineSourceModels",
     "SepPipelineResult",
     "SepProtonPipelineResult",
+    "build_pipeline_source_models",
     "calculate_erb_pipeline",
+    "calculate_erb_pipeline_for_config",
     "calculate_gcr_pipeline",
+    "calculate_gcr_pipeline_for_config",
     "calculate_sep_pipeline",
+    "calculate_sep_pipeline_for_config",
     "calculate_sep_proton_pipeline",
 ]
