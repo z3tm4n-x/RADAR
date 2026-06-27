@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from math import isfinite, log
+from dataclasses import dataclass
+from math import exp, isfinite, log
 
 
 def _validate_energy_flux_grid(
@@ -133,6 +134,191 @@ def integrate_differential_flux_tail_power_law(
     return tuple(integral_flux)
 
 
+def _validate_positive_energy(energy_mev: float) -> None:
+    if not isfinite(energy_mev) or energy_mev <= 0.0:
+        msg = "Appendix E approximation energy must be finite and positive."
+        raise ValueError(msg)
+
+
+def _validate_non_negative_coefficient(
+    *,
+    name: str,
+    value: float,
+) -> None:
+    if not isfinite(value) or value < 0.0:
+        msg = f"Appendix E approximation coefficient {name} must be finite and non-negative."
+        raise ValueError(msg)
+
+
+def _validate_positive_coefficient(
+    *,
+    name: str,
+    value: float,
+) -> None:
+    if not isfinite(value) or value <= 0.0:
+        msg = f"Appendix E approximation coefficient {name} must be finite and positive."
+        raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class OstErbProtonApproximationCoefficients:
+    """OST Appendix E.7 proton integral approximation coefficients."""
+
+    a1: float
+    a2: float
+    a3: float
+    b1: float
+    b2: float
+
+    def __post_init__(self) -> None:
+        _validate_non_negative_coefficient(name="a1", value=self.a1)
+        _validate_positive_coefficient(name="a2", value=self.a2)
+        _validate_non_negative_coefficient(name="a3", value=self.a3)
+        _validate_non_negative_coefficient(name="b1", value=self.b1)
+        _validate_positive_coefficient(name="b2", value=self.b2)
+
+
+@dataclass(frozen=True)
+class OstErbProtonDifferentialApproximationCoefficients:
+    """OST Appendix E.9 proton differential approximation coefficients."""
+
+    a1: float
+    a2: float
+    a3: float
+    b1: float
+    b2: float
+
+    def __post_init__(self) -> None:
+        _validate_non_negative_coefficient(name="a1", value=self.a1)
+        _validate_positive_coefficient(name="a2", value=self.a2)
+        _validate_non_negative_coefficient(name="a3", value=self.a3)
+        _validate_non_negative_coefficient(name="b1", value=self.b1)
+        _validate_positive_coefficient(name="b2", value=self.b2)
+
+
+@dataclass(frozen=True)
+class OstErbProtonIntegralApproximation:
+    """OST Appendix E.7/E.9/E.10 proton ERB approximation."""
+
+    coefficients: OstErbProtonApproximationCoefficients
+
+    @property
+    def differential_coefficients(self) -> OstErbProtonDifferentialApproximationCoefficients:
+        coefficients = self.coefficients
+
+        return OstErbProtonDifferentialApproximationCoefficients(
+            a1=coefficients.a1 * coefficients.a2,
+            a2=coefficients.a2 + 1.0,
+            a3=coefficients.a3,
+            b1=coefficients.b1 * coefficients.b2,
+            b2=coefficients.b2,
+        )
+
+    def integral_flux_gt_e(self, energy_mev: float) -> float:
+        _validate_positive_energy(energy_mev)
+        coefficients = self.coefficients
+
+        return float(
+            coefficients.a1 / (coefficients.a3 + energy_mev) ** coefficients.a2
+            + coefficients.b1 * exp(-coefficients.b2 * energy_mev)
+        )
+
+    def differential_flux(self, energy_mev: float) -> float:
+        _validate_positive_energy(energy_mev)
+        coefficients = self.differential_coefficients
+
+        return float(
+            coefficients.a1 / (coefficients.a3 + energy_mev) ** coefficients.a2
+            + coefficients.b1 * exp(-coefficients.b2 * energy_mev)
+        )
+
+
+@dataclass(frozen=True)
+class OstErbElectronApproximationCoefficients:
+    """OST Appendix E.11 electron integral approximation coefficients."""
+
+    a1: float
+    a2: float
+    b1: float
+    b2: float
+    c1: float
+    c2: float
+
+    def __post_init__(self) -> None:
+        _validate_non_negative_coefficient(name="a1", value=self.a1)
+        _validate_positive_coefficient(name="a2", value=self.a2)
+        _validate_non_negative_coefficient(name="b1", value=self.b1)
+        _validate_positive_coefficient(name="b2", value=self.b2)
+        _validate_non_negative_coefficient(name="c1", value=self.c1)
+        _validate_positive_coefficient(name="c2", value=self.c2)
+
+
+@dataclass(frozen=True)
+class OstErbElectronDifferentialApproximationCoefficients:
+    """OST Appendix E.12 electron differential approximation coefficients."""
+
+    a1: float
+    a2: float
+    b1: float
+    b2: float
+    c1: float
+    c2: float
+
+    def __post_init__(self) -> None:
+        _validate_non_negative_coefficient(name="a1", value=self.a1)
+        _validate_positive_coefficient(name="a2", value=self.a2)
+        _validate_non_negative_coefficient(name="b1", value=self.b1)
+        _validate_positive_coefficient(name="b2", value=self.b2)
+        _validate_non_negative_coefficient(name="c1", value=self.c1)
+        _validate_positive_coefficient(name="c2", value=self.c2)
+
+
+@dataclass(frozen=True)
+class OstErbElectronIntegralApproximation:
+    """OST Appendix E.11/E.12/E.13 electron ERB approximation."""
+
+    coefficients: OstErbElectronApproximationCoefficients
+
+    @property
+    def differential_coefficients(self) -> OstErbElectronDifferentialApproximationCoefficients:
+        coefficients = self.coefficients
+
+        return OstErbElectronDifferentialApproximationCoefficients(
+            a1=coefficients.a1 * coefficients.a2,
+            a2=coefficients.a2,
+            b1=coefficients.b1 * coefficients.b2,
+            b2=coefficients.b2,
+            c1=coefficients.c1 * coefficients.c2,
+            c2=coefficients.c2,
+        )
+
+    def integral_flux_gt_e(self, energy_mev: float) -> float:
+        _validate_positive_energy(energy_mev)
+        coefficients = self.coefficients
+
+        return float(
+            coefficients.a1 * exp(-coefficients.a2 * energy_mev)
+            + coefficients.b1 * exp(-coefficients.b2 * energy_mev**2)
+            + coefficients.c1 * exp(-coefficients.c2 * energy_mev)
+        )
+
+    def differential_flux(self, energy_mev: float) -> float:
+        _validate_positive_energy(energy_mev)
+        coefficients = self.differential_coefficients
+
+        return float(
+            coefficients.a1 * exp(-coefficients.a2 * energy_mev)
+            + coefficients.b1 * exp(-coefficients.b2 * energy_mev**2)
+            + coefficients.c1 * exp(-coefficients.c2 * energy_mev)
+        )
+
+
 __all__ = [
+    "OstErbElectronApproximationCoefficients",
+    "OstErbElectronDifferentialApproximationCoefficients",
+    "OstErbElectronIntegralApproximation",
+    "OstErbProtonApproximationCoefficients",
+    "OstErbProtonDifferentialApproximationCoefficients",
+    "OstErbProtonIntegralApproximation",
     "integrate_differential_flux_tail_power_law",
 ]
