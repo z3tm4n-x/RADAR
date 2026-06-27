@@ -27,6 +27,8 @@ from radar.core.types import (
 )
 from radar.core.units import Unit
 from radar.pipelines.sep import (
+    SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+    SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
     SEP_LET_COMPONENT,
     SEP_LET_MODEL,
     SEP_LET_MODEL_VERSION,
@@ -282,9 +284,32 @@ def test_sep_pipeline_accepts_ost_sep_model_and_integrates_shielding_let() -> No
     )
 
     result = pipeline_result.calculation_result
+    assert (
+        result.component_status(SEP_GEOMAGNETIC_PENETRATION_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
     assert result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.COMPLETED
     assert result.component_status(SEP_LET_COMPONENT) is ComponentStatus.COMPLETED
     assert result.component_status(SEP_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
+
+    for source_product, on_orbit_product in zip(
+        pipeline_result.source_products,
+        pipeline_result.on_orbit_products,
+        strict=True,
+    ):
+        assert on_orbit_product.kind is source_product.kind
+        assert on_orbit_product.spectrum.model.startswith(
+            f"{source_product.spectrum.model}+"
+        )
+        assert on_orbit_product.spectrum.x == source_product.spectrum.x
+        assert all(
+            on_orbit_value <= source_value
+            for source_value, on_orbit_value in zip(
+                source_product.spectrum.y,
+                on_orbit_product.spectrum.y,
+                strict=True,
+            )
+        )
 
     output_table_ids = {
         table.table_id
@@ -306,6 +331,8 @@ def test_sep_pipeline_accepts_ost_sep_model_and_integrates_shielding_let() -> No
         info.name: info
         for info in result.model_info
     }
+    penetration_info = model_info_by_name["ost_134_1044_2007_geomagnetic_penetration"]
+    assert penetration_info.version == SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION
     assert model_info_by_name[SEP_SHIELDING_MODEL].version == SEP_SHIELDING_MODEL_VERSION
     assert model_info_by_name[SEP_LET_MODEL].version == SEP_LET_MODEL_VERSION
 

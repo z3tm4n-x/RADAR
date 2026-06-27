@@ -1,4 +1,5 @@
 from radar.pipelines import (
+    SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
     SEP_LET_COMPONENT,
     SEP_MODEL_COMPONENT,
     SEP_OUTPUT_TABLES_COMPONENT,
@@ -15,6 +16,7 @@ from radar.pipelines import (
 def test_pipelines_package_exports_full_sep_pipeline() -> None:
     assert SEP_PIPELINE_COMPONENT == "sep_pipeline"
     assert SEP_MODEL_COMPONENT == "sep_model"
+    assert SEP_GEOMAGNETIC_PENETRATION_COMPONENT == "sep_geomagnetic_penetration"
     assert SEP_SHIELDING_COMPONENT == "sep_shielding"
     assert SEP_LET_COMPONENT == "sep_let"
     assert SEP_OUTPUT_TABLES_COMPONENT == "sep_output_tables"

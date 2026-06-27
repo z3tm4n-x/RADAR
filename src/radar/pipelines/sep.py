@@ -26,6 +26,12 @@ from radar.sep.output_tables import (
     sep_on_orbit_product_output_tables,
     sep_shielding_let_output_tables,
 )
+from radar.pipelines.sep_source_products import (
+    SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+    SEP_GEOMAGNETIC_PENETRATION_DOCUMENT,
+    SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
+    apply_ost_geomagnetic_penetration_to_sep_products,
+)
 from radar.sep.pipeline_shielding import (
     SEP_SHIELDING_LET_PRODUCT_KIND_ORDER,
     SepShieldingLetPipelineProducts,
@@ -143,6 +149,20 @@ def _sep_pipeline_output_tables(
     return tuple(tables)
 
 
+def _same_spectrum_domain_and_semantics(
+    spectrum: Spectrum1D,
+    model_spectrum: Spectrum1D,
+) -> bool:
+    return (
+        spectrum.x == model_spectrum.x
+        and spectrum.x_unit is model_spectrum.x_unit
+        and spectrum.y_unit is model_spectrum.y_unit
+        and spectrum.quantity is model_spectrum.quantity
+        and spectrum.particle is model_spectrum.particle
+        and spectrum.source is model_spectrum.source
+    )
+
+
 def _validate_pipeline_spectra_derived_from_model_result(
     *,
     spectra: tuple[Spectrum1D, ...],
@@ -152,7 +172,20 @@ def _validate_pipeline_spectra_derived_from_model_result(
         msg = "SEP pipeline spectra must match or derive from SEP model result spectra."
         raise ValueError(msg)
 
-    if spectra[: len(model_spectra)] != model_spectra:
+    for spectrum, model_spectrum in zip(
+        spectra[: len(model_spectra)],
+        model_spectra,
+        strict=True,
+    ):
+        if spectrum == model_spectrum:
+            continue
+
+        if (
+            _same_spectrum_domain_and_semantics(spectrum, model_spectrum)
+            and spectrum.model.startswith(f"{model_spectrum.model}+")
+        ):
+            continue
+
         msg = "SEP pipeline spectra must match or derive from SEP model result spectra."
         raise ValueError(msg)
 
@@ -168,6 +201,43 @@ def _validate_pipeline_spectra_derived_from_model_result(
             continue
 
         msg = "SEP pipeline spectra must match or derive from SEP model result spectra."
+        raise ValueError(msg)
+
+
+def _validate_pipeline_products_derived_from_model_products(
+    *,
+    products: tuple[SpectrumProduct, ...],
+    model_products: tuple[SpectrumProduct, ...],
+) -> None:
+    if products == model_products:
+        return
+
+    if len(products) != len(model_products):
+        msg = "SEP pipeline on-orbit products must match or derive from SEP model products."
+        raise ValueError(msg)
+
+    for product, model_product in zip(products, model_products, strict=True):
+        if product.kind is not model_product.kind:
+            msg = "SEP pipeline on-orbit products must preserve product kind."
+            raise ValueError(msg)
+
+        if not _same_spectrum_domain_and_semantics(
+            product.spectrum,
+            model_product.spectrum,
+        ):
+            msg = (
+                "SEP pipeline on-orbit products must preserve spectrum domain "
+                "and semantics from SEP model products."
+            )
+            raise ValueError(msg)
+
+        if product.spectrum.model.startswith(f"{model_product.spectrum.model}+"):
+            continue
+
+        msg = (
+            "SEP pipeline on-orbit derived spectra must identify their source model "
+            "in the spectrum model string."
+        )
         raise ValueError(msg)
 
 
@@ -200,9 +270,10 @@ class SepPipelineResult:
         on_orbit_products = self.on_orbit_products or self.sep_model_result.products
         products = self.products or on_orbit_products
 
-        if on_orbit_products != self.sep_model_result.products:
-            msg = "SEP pipeline on-orbit products must match SEP model result products."
-            raise ValueError(msg)
+        _validate_pipeline_products_derived_from_model_products(
+            products=on_orbit_products,
+            model_products=self.sep_model_result.products,
+        )
 
         if not products:
             msg = "SEP pipeline result must contain at least one radiation product."
@@ -284,13 +355,61 @@ def calculate_sep_pipeline(
         },
     )
 
-    on_orbit_products = sep_model_result.products
-    products = on_orbit_products
+    source_products = sep_model_result.products
+    products = source_products
+    on_orbit_products = source_products
     shielding_let_by_thickness: tuple[SepShieldingLetPipelineProducts, ...] = ()
     shielded_products: tuple[SpectrumProduct, ...] = ()
     let_products: tuple[SpectrumProduct, ...] = ()
 
     if profile_uses_ost_134_1044_2007(config.methodology.profile):
+        calculation_result = calculation_result.set_component_status(
+            component=SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+            status=ComponentStatus.NOT_STARTED,
+        )
+        calculation_result = calculation_result.add_log_entry(
+            level=LogLevel.INFO,
+            stage=SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+            message="SEP geomagnetic penetration started.",
+            details={
+                "kp": str(config.kp),
+                "products": str(len(products)),
+            },
+        )
+
+        penetration_output = apply_ost_geomagnetic_penetration_to_sep_products(
+            config=config,
+            products=products,
+        )
+        products = penetration_output.products
+        on_orbit_products = products
+
+        calculation_result = calculation_result.set_model_info(
+            ModelInfo(
+                name=penetration_output.penetration.model,
+                version=SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
+                status="calculated",
+                source=SEP_GEOMAGNETIC_PENETRATION_DOCUMENT,
+            )
+        )
+        calculation_result = calculation_result.set_component_status(
+            component=SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+            status=ComponentStatus.COMPLETED,
+        )
+        calculation_result = calculation_result.add_log_entry(
+            level=LogLevel.INFO,
+            stage=SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+            message="SEP geomagnetic penetration completed.",
+            details={
+                "products": str(len(products)),
+                "penetration_model": penetration_output.penetration.model,
+                "penetration_version": SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
+                "rigidity_grid_points": str(
+                    len(penetration_output.rigidity_grid.values_gv)
+                ),
+            },
+        )
+
         proton_products = tuple(
             product
             for product in on_orbit_products
@@ -437,6 +556,8 @@ def calculate_sep_pipeline(
 
 
 __all__ = [
+    "SEP_GEOMAGNETIC_PENETRATION_COMPONENT",
+    "SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION",
     "SEP_LET_COMPONENT",
     "SEP_LET_MODEL",
     "SEP_LET_MODEL_VERSION",

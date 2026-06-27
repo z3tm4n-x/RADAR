@@ -242,6 +242,19 @@ def _apply_ost_geomagnetic_penetration_to_products(
     )
 
 
+def apply_ost_geomagnetic_penetration_to_sep_products(
+    *,
+    config: CalculationConfig,
+    products: tuple[SpectrumProduct, ...],
+) -> SepGeomagneticPenetrationOutput:
+    """Apply OST geomagnetic penetration to SEP proton and HZE products."""
+
+    return _apply_ost_geomagnetic_penetration_to_products(
+        config=config,
+        products=products,
+    )
+
+
 @dataclass(frozen=True)
 class SepSourceProductsPipelineResult:
     """Result of SEP source-products calculation."""
