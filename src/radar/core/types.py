@@ -1,4 +1,4 @@
-﻿"""Common enumerations for the RADAR calculation core."""
+"""Common enumerations for the RADAR calculation core."""
 
 from enum import StrEnum
 
@@ -45,10 +45,15 @@ class SpectrumQuantity(StrEnum):
     """Supported spectrum quantity types."""
 
     DIFFERENTIAL_FLUENCE = "differential_fluence"
+    INTEGRAL_FLUENCE = "integral_fluence"
     DIFFERENTIAL_FLUX = "differential_flux"
+    INTEGRAL_FLUX = "integral_flux"
     PEAK_DIFFERENTIAL_FLUX = "peak_differential_flux"
+    PEAK_INTEGRAL_FLUX = "peak_integral_flux"
     MAXIMUM_DIFFERENTIAL_FLUX = "maximum_differential_flux"
+    MAXIMUM_INTEGRAL_FLUX = "maximum_integral_flux"
     MEAN_DIFFERENTIAL_FLUX = "mean_differential_flux"
+    MEAN_INTEGRAL_FLUX = "mean_integral_flux"
     LET_DIFFERENTIAL_FLUENCE = "let_differential_fluence"
     LET_DIFFERENTIAL_FLUX = "let_differential_flux"
 

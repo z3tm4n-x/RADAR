@@ -1,4 +1,4 @@
-﻿"""Units used by the RADAR calculation core."""
+"""Units used by the RADAR calculation core."""
 
 from enum import StrEnum
 
@@ -19,8 +19,11 @@ class Unit(StrEnum):
     THICKNESS = "g/cm^2"
 
     DIFFERENTIAL_FLUENCE = "cm^-2 MeV^-1"
+    INTEGRAL_FLUENCE = "cm^-2"
     DIFFERENTIAL_FLUX = "cm^-2 s^-1 MeV^-1"
+    INTEGRAL_FLUX = "cm^-2 s^-1"
     DIFFERENTIAL_FLUENCE_PER_DAY = "cm^-2 day^-1 MeV^-1"
+    INTEGRAL_FLUENCE_PER_DAY = "cm^-2 day^-1"
 
     DIFFERENTIAL_LET_FLUENCE = "cm^-2 (MeV*cm^2/mg)^-1"
     DIFFERENTIAL_LET_FLUX = "cm^-2 s^-1 (MeV*cm^2/mg)^-1"

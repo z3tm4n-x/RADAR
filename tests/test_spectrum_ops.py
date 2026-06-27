@@ -1,9 +1,14 @@
-﻿import math
+import math
 
 import pytest
 
 from radar.core.spectra import Spectrum1D
-from radar.core.spectrum_ops import add_spectra, check_spectra_compatible, scale_spectrum
+from radar.core.spectrum_ops import (
+    add_spectra,
+    check_spectra_compatible,
+    integrate_differential_spectrum_tail_power_law,
+    scale_spectrum,
+)
 from radar.core.types import Particle, RadiationSource, SpectrumQuantity
 from radar.core.units import Unit
 
@@ -152,3 +157,55 @@ def test_check_spectra_compatible_accepts_compatible_spectra() -> None:
     right = _proton_spectrum(y=(5.0, 6.0, 7.0))
 
     check_spectra_compatible(left=left, right=right)
+
+
+
+def test_integral_energy_quantity_and_units_are_available() -> None:
+    assert SpectrumQuantity.INTEGRAL_FLUENCE.value == "integral_fluence"
+    assert SpectrumQuantity.INTEGRAL_FLUX.value == "integral_flux"
+    assert SpectrumQuantity.PEAK_INTEGRAL_FLUX.value == "peak_integral_flux"
+    assert SpectrumQuantity.MAXIMUM_INTEGRAL_FLUX.value == "maximum_integral_flux"
+    assert SpectrumQuantity.MEAN_INTEGRAL_FLUX.value == "mean_integral_flux"
+    assert Unit.INTEGRAL_FLUENCE.value == "cm^-2"
+    assert Unit.INTEGRAL_FLUX.value == "cm^-2 s^-1"
+
+
+def test_integrate_differential_spectrum_integrates_constant_values_without_tail() -> None:
+    integral_values = integrate_differential_spectrum_tail_power_law(
+        energies=(1.0, 2.0, 3.0),
+        differential_values=(10.0, 10.0, 10.0),
+    )
+
+    assert integral_values == pytest.approx((20.0, 10.0, 0.0))
+
+
+def test_integrate_differential_spectrum_integrates_power_law_with_finite_tail() -> None:
+    integral_values = integrate_differential_spectrum_tail_power_law(
+        energies=(1.0, 2.0, 4.0),
+        differential_values=(8.0, 2.0, 0.5),
+    )
+
+    assert integral_values == pytest.approx((8.0, 4.0, 2.0))
+
+
+@pytest.mark.parametrize(
+    ("energies", "differential_values", "message"),
+    (
+        ((), (), "must not be empty"),
+        ((1.0, 2.0), (1.0,), "same length"),
+        ((1.0, 0.0), (1.0, 1.0), "positive"),
+        ((2.0, 1.0), (1.0, 1.0), "sorted"),
+        ((1.0, 1.0), (1.0, 1.0), "unique"),
+        ((1.0, 2.0), (1.0, -1.0), "non-negative"),
+    ),
+)
+def test_integrate_differential_spectrum_validates_inputs(
+    energies: tuple[float, ...],
+    differential_values: tuple[float, ...],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        integrate_differential_spectrum_tail_power_law(
+            energies=energies,
+            differential_values=differential_values,
+        )
