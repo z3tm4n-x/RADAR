@@ -1,5 +1,6 @@
 """Earth radiation belt models."""
 
+from radar.erb.appendix_e import integrate_differential_flux_tail_power_law
 from radar.erb.field import (
     ErbFieldLineSample,
     MagneticFieldVector,
@@ -31,6 +32,7 @@ from radar.erb.resources import ERB_IGRF14_RESOURCE_NAME, load_igrf14_coefficien
 
 __all__ = [
     "ERB_IGRF14_RESOURCE_NAME",
+    "integrate_differential_flux_tail_power_law",
     "ErbFieldLineSample",
     "ErbOrbitGrid",
     "ErbOrbitSample",
