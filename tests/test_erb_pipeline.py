@@ -287,15 +287,38 @@ def test_erb_pipeline_rejects_model_family_mismatched_profile() -> None:
             erb_model=_erb_model(),
         )
 
-def test_erb_pipeline_accepts_ost_erb_stub_metadata_before_calculation() -> None:
+def test_erb_pipeline_accepts_ost_erb_model() -> None:
+    from radar.core.types import RadiationProductKind
+    from radar.erb.igrf import IgrfCoefficients
     from radar.erb.model import OstErbModel
 
-    mission = MissionConfig(launch_year=2027, lifetime_years=7)
-    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+    mission = MissionConfig(launch_year=2027, lifetime_years=2)
+    orbit = OrbitConfig.circular(altitude_km=2_000.0, inclination_deg=0.0)
     config = CalculationConfig(mission=mission, orbit=orbit)
 
-    with pytest.raises(NotImplementedError, match="OST ERB"):
-        calculate_erb_pipeline(
-            config=config,
-            erb_model=OstErbModel(),
-        )
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=IgrfCoefficients(
+            epoch=1985.0,
+            g={(1, 0): -31_165.3},
+            h={},
+            nmax=1,
+        ),
+    )
+
+    pipeline_result = calculate_erb_pipeline(
+        config=config,
+        erb_model=model,
+    )
+
+    assert len(pipeline_result.spectra) == 6
+    assert tuple(product.kind for product in pipeline_result.products) == (
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+    )
+    assert pipeline_result.calculation_result.component_status(ERB_MODEL_COMPONENT) is ComponentStatus.COMPLETED

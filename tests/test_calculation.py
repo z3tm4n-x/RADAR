@@ -52,7 +52,7 @@ def test_execute_calculation_records_model_information() -> None:
     assert model_versions == {
         "ost_sep_model": "not_implemented",
         "ost_gcr_model": "source_spectra_outside_magnetosphere_v1",
-        "ost_erb_model": "not_implemented",
+        "ost_erb_model": "ost_appendix_a_v1",
     }
     assert all(
         model.status == "численная часть не реализована"
