@@ -22,6 +22,7 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
+from radar.erb.appendix_e import integrate_differential_flux_tail_power_law
 from radar.erb.constants import DEFAULT_IGRF_EPOCH, ERB_SECONDS_PER_YEAR
 from radar.erb.field import ErbFieldLineSample, trace_l_shell_b_over_b0_for_orbit
 from radar.erb.igrf import IgrfCoefficients
@@ -136,6 +137,58 @@ class ErbModelInput:
 
 
 @dataclass(frozen=True)
+class ErbIntegralSpectrum:
+    """Appendix E.4 integral ERB flux spectrum ?(>E)."""
+
+    energies_mev: tuple[float, ...]
+    integral_flux_gt_e: tuple[float, ...]
+    particle: Particle
+    model: str
+    document: str
+    label: str = ""
+
+    def __post_init__(self) -> None:
+        if self.particle not in ERB_ALLOWED_PARTICLES:
+            msg = "ERB integral spectrum must describe protons or electrons."
+            raise ValueError(msg)
+
+        if not self.energies_mev:
+            msg = "ERB integral spectrum energy grid must not be empty."
+            raise ValueError(msg)
+
+        if len(self.energies_mev) != len(self.integral_flux_gt_e):
+            msg = "ERB integral spectrum energy and flux grids must have equal length."
+            raise ValueError(msg)
+
+        if any(not math.isfinite(energy) or energy <= 0.0 for energy in self.energies_mev):
+            msg = "ERB integral spectrum energy grid values must be finite and positive."
+            raise ValueError(msg)
+
+        if tuple(sorted(self.energies_mev)) != self.energies_mev:
+            msg = "ERB integral spectrum energy grid must be sorted."
+            raise ValueError(msg)
+
+        if len(set(self.energies_mev)) != len(self.energies_mev):
+            msg = "ERB integral spectrum energy grid values must be unique."
+            raise ValueError(msg)
+
+        if any(
+            not math.isfinite(value) or value < 0.0
+            for value in self.integral_flux_gt_e
+        ):
+            msg = "ERB integral spectrum flux values must be finite and non-negative."
+            raise ValueError(msg)
+
+        if not self.model:
+            msg = "ERB integral spectrum model name must not be empty."
+            raise ValueError(msg)
+
+        if not self.document:
+            msg = "ERB integral spectrum document must not be empty."
+            raise ValueError(msg)
+
+
+@dataclass(frozen=True)
 class ErbModelResult:
     """Result returned by an ERB model."""
 
@@ -145,6 +198,7 @@ class ErbModelResult:
     model: str
     document: str
     products: tuple[SpectrumProduct, ...] = ()
+    integral_spectra: tuple[ErbIntegralSpectrum, ...] = ()
     method_metadata: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
@@ -170,6 +224,11 @@ class ErbModelResult:
         if tuple(product.spectrum for product in products) != self.spectra:
             msg = "ERB model product spectra must match result spectra."
             raise ValueError(msg)
+
+        for integral_spectrum in self.integral_spectra:
+            if integral_spectrum.document != self.document:
+                msg = "ERB integral spectrum document must match result document."
+                raise ValueError(msg)
 
         for key, value in self.method_metadata:
             if not key:
@@ -563,7 +622,7 @@ class OstErbModel:
         field_line_samples: tuple[ErbFieldLineSample, ...],
         fraction_max: float,
         mission_seconds: float,
-    ) -> tuple[SpectrumProduct, ...]:
+    ) -> tuple[tuple[SpectrumProduct, ...], tuple[ErbIntegralSpectrum, ...]]:
         energy_count = len(minimum_table.energies_mev)
         mean_accumulator = [0.0 for _ in range(energy_count)]
         maximum_flux = tuple(0.0 for _ in range(energy_count))
@@ -635,23 +694,37 @@ class OstErbModel:
             particle=particle,
             model=f"{model_prefix}:mission_fluence",
         )
+        mean_integral_spectrum = ErbIntegralSpectrum(
+            energies_mev=minimum_table.energies_mev,
+            integral_flux_gt_e=integrate_differential_flux_tail_power_law(
+                energies_mev=minimum_table.energies_mev,
+                differential_flux=mean_flux,
+            ),
+            particle=particle,
+            model=f"{model_prefix}:mean_integral_flux",
+            document=self.document,
+            label=f"OST ERB {particle_label} mean integral flux",
+        )
 
         return (
-            _erb_product(
+            (
+                _erb_product(
                 kind=RadiationProductKind.MEAN_FLUX,
                 spectrum=mean_spectrum,
                 label=f"OST ERB {particle_label} mean flux",
             ),
-            _erb_product(
-                kind=RadiationProductKind.MAXIMUM_FLUX,
-                spectrum=maximum_spectrum,
-                label=f"OST ERB {particle_label} maximum flux",
+                _erb_product(
+                    kind=RadiationProductKind.MAXIMUM_FLUX,
+                    spectrum=maximum_spectrum,
+                    label=f"OST ERB {particle_label} maximum flux",
+                ),
+                _erb_product(
+                    kind=RadiationProductKind.MISSION_FLUENCE,
+                    spectrum=fluence_spectrum,
+                    label=f"OST ERB {particle_label} mission fluence",
+                ),
             ),
-            _erb_product(
-                kind=RadiationProductKind.MISSION_FLUENCE,
-                spectrum=fluence_spectrum,
-                label=f"OST ERB {particle_label} mission fluence",
-            ),
+            (mean_integral_spectrum,),
         )
 
     def calculate(self, model_input: ErbModelInput) -> ErbModelResult:
@@ -667,25 +740,32 @@ class OstErbModel:
         )
         mission_seconds = model_input.config.mission.lifetime_years * ERB_SECONDS_PER_YEAR
 
+        proton_products, proton_integral_spectra = self._particle_products(
+            particle=Particle.PROTON,
+            minimum_table=tables.proton_min,
+            maximum_table=tables.proton_max,
+            worst_table=tables.proton_min,
+            field_line_samples=field_line_samples,
+            fraction_max=fraction_max,
+            mission_seconds=mission_seconds,
+        )
+        electron_products, electron_integral_spectra = self._particle_products(
+            particle=Particle.ELECTRON,
+            minimum_table=tables.electron_min,
+            maximum_table=tables.electron_max,
+            worst_table=tables.electron_max,
+            field_line_samples=field_line_samples,
+            fraction_max=fraction_max,
+            mission_seconds=mission_seconds,
+        )
+
         products = (
-            *self._particle_products(
-                particle=Particle.PROTON,
-                minimum_table=tables.proton_min,
-                maximum_table=tables.proton_max,
-                worst_table=tables.proton_min,
-                field_line_samples=field_line_samples,
-                fraction_max=fraction_max,
-                mission_seconds=mission_seconds,
-            ),
-            *self._particle_products(
-                particle=Particle.ELECTRON,
-                minimum_table=tables.electron_min,
-                maximum_table=tables.electron_max,
-                worst_table=tables.electron_max,
-                field_line_samples=field_line_samples,
-                fraction_max=fraction_max,
-                mission_seconds=mission_seconds,
-            ),
+            *proton_products,
+            *electron_products,
+        )
+        integral_spectra = (
+            *proton_integral_spectra,
+            *electron_integral_spectra,
         )
         spectra = tuple(product.spectrum for product in products)
         proton_coverage_metadata = _table_coverage_metadata(
@@ -706,11 +786,13 @@ class OstErbModel:
             model=self.model,
             document=self.document,
             products=products,
+            integral_spectra=integral_spectra,
             method_metadata=(
                 ("ost_appendices", "A,D,E"),
                 ("appendix_a_reference", OST_ERB_APPENDIX_A_REFERENCE),
                 ("appendix_d_reference", OST_ERB_APPENDIX_D_REFERENCE),
                 ("appendix_e_reference", OST_ERB_APPENDIX_E_REFERENCE),
+                ("appendix_e_integral_spectrum", "tail_power_law_numeric_quadrature"),
                 ("appendix_e_interpolation", "three_point_lagrange_with_log_positive_flux_values"),
                 ("appendix_e_averaging", "equal_weight_mean_anomaly_samples"),
                 (

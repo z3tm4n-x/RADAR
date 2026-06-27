@@ -11,6 +11,7 @@ from radar.erb.field import (
 from radar.erb.igrf import IgrfCoefficients, parse_igrf_coefficients
 from radar.erb.model import (
     OstErbModel,
+    ErbIntegralSpectrum,
     ErbModelInput,
     ErbModelProtocol,
     ErbModelResult,
@@ -36,6 +37,7 @@ __all__ = [
     "ErbFieldLineSample",
     "ErbOrbitGrid",
     "ErbOrbitSample",
+    "ErbIntegralSpectrum",
     "IgrfCoefficients",
     "MagneticFieldVector",
     "OST_ERB_ELECTRON_ENERGIES_MEV",

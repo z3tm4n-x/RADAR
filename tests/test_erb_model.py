@@ -521,3 +521,127 @@ def test_ost_erb_model_fluence_matches_mean_flux_times_mission_duration() -> Non
     assert electron_fluence.y == pytest.approx(
         tuple(value * mission_seconds for value in electron_mean_flux.y)
     )
+
+def test_erb_integral_spectrum_validates_inputs() -> None:
+    from radar.erb.model import ErbIntegralSpectrum
+
+    with pytest.raises(ValueError, match="protons or electrons"):
+        ErbIntegralSpectrum(
+            energies_mev=(1.0,),
+            integral_flux_gt_e=(1.0,),
+            particle=Particle.HZE,
+            model="test",
+            document="test",
+        )
+
+    with pytest.raises(ValueError, match="equal length"):
+        ErbIntegralSpectrum(
+            energies_mev=(1.0, 2.0),
+            integral_flux_gt_e=(1.0,),
+            particle=Particle.PROTON,
+            model="test",
+            document="test",
+        )
+
+    with pytest.raises(ValueError, match="sorted"):
+        ErbIntegralSpectrum(
+            energies_mev=(2.0, 1.0),
+            integral_flux_gt_e=(1.0, 1.0),
+            particle=Particle.PROTON,
+            model="test",
+            document="test",
+        )
+
+    with pytest.raises(ValueError, match="non-negative"):
+        ErbIntegralSpectrum(
+            energies_mev=(1.0, 2.0),
+            integral_flux_gt_e=(1.0, -1.0),
+            particle=Particle.PROTON,
+            model="test",
+            document="test",
+        )
+
+
+def test_erb_model_result_rejects_integral_spectrum_with_wrong_document() -> None:
+    from radar.erb.model import ErbIntegralSpectrum
+
+    spectrum = _erb_proton_flux_spectrum()
+    integral_spectrum = ErbIntegralSpectrum(
+        energies_mev=spectrum.x,
+        integral_flux_gt_e=(3.0, 2.0, 1.0),
+        particle=Particle.PROTON,
+        model="test",
+        document="other_document",
+    )
+
+    with pytest.raises(ValueError, match="document"):
+        ErbModelResult(
+            spectra=(spectrum,),
+            lifetime_years=5,
+            kp=3,
+            model="test",
+            document="test_document",
+            integral_spectra=(integral_spectrum,),
+        )
+
+
+def test_ost_erb_model_returns_appendix_e_integral_spectra() -> None:
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    assert len(result.integral_spectra) == 2
+
+    proton_integral = result.integral_spectra[0]
+    electron_integral = result.integral_spectra[1]
+
+    assert proton_integral.particle is Particle.PROTON
+    assert electron_integral.particle is Particle.ELECTRON
+    assert proton_integral.energies_mev == result.spectra[0].x
+    assert electron_integral.energies_mev == result.spectra[3].x
+    assert proton_integral.document == result.document
+    assert electron_integral.document == result.document
+    assert any(value > 0.0 for value in proton_integral.integral_flux_gt_e)
+    assert any(value > 0.0 for value in electron_integral.integral_flux_gt_e)
+    assert all(
+        left >= right
+        for left, right in zip(
+            proton_integral.integral_flux_gt_e,
+            proton_integral.integral_flux_gt_e[1:],
+            strict=False,
+        )
+    )
+    assert all(
+        left >= right
+        for left, right in zip(
+            electron_integral.integral_flux_gt_e,
+            electron_integral.integral_flux_gt_e[1:],
+            strict=False,
+        )
+    )
+
+
+def test_ost_erb_model_records_appendix_e_integral_metadata() -> None:
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    metadata = dict(result.method_metadata)
+
+    assert metadata["appendix_e_integral_spectrum"] == "tail_power_law_numeric_quadrature"
