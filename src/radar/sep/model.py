@@ -450,6 +450,7 @@ class OstSepModel:
     document: str = OST_134_1044_2007_DOCUMENT
     version: str = "not_implemented"
     coefficient_model: str = OST_SEP_PROTON_COEFFICIENT_MODEL
+    event_count_policy: SepEventCountPolicy = SepEventCountPolicy.OST_134_1044_2007
 
     @property
     def metadata(self) -> SourceModelMetadata:
@@ -649,7 +650,7 @@ class OstSepModel:
 
         if not self.energy_grid_mev or not self.monthly_smoothed_wolf_numbers:
             msg = (
-                "OST SEP model is not implemented without configured energy grid "
+                "SEP proton source model is not implemented without configured energy grid "
                 "and monthly Wolf number series."
             )
             raise NotImplementedError(msg)
@@ -661,7 +662,7 @@ class OstSepModel:
 
         event_count = calculate_sep_expected_events(
             monthly_smoothed_wolf_numbers=self.monthly_smoothed_wolf_numbers,
-            policy=SepEventCountPolicy.OST_134_1044_2007,
+            policy=self.event_count_policy,
         )
         records = self._coefficient_records()
 
@@ -729,22 +730,22 @@ class OstSepModel:
         mission_fluence_product = _sep_source_product(
             kind=RadiationProductKind.MISSION_FLUENCE,
             spectrum=mission_fluence_spectrum,
-            label="SEP proton mission fluence by OST 134-1044-2007 Appendix B",
+            label=f"SEP proton mission fluence by {self.document}",
         )
         peak_flux_product = _sep_source_product(
             kind=RadiationProductKind.PEAK_FLUX,
             spectrum=peak_flux_spectrum,
             label=(
-                "SEP proton omnidirectional peak flux by OST 134-1044-2007 "
-                "Appendix B; derived as 4π times directional per-steradian peak flux"
+                "SEP proton omnidirectional peak flux by "
+                f"{self.document}; derived as 4π times directional per-steradian peak flux"
             ),
         )
         mean_flux_product = _sep_source_product(
             kind=RadiationProductKind.MEAN_FLUX,
             spectrum=mean_flux_spectrum,
             label=(
-                "SEP proton mean flux derived from OST 134-1044-2007 "
-                "Appendix B mission fluence divided by mission duration"
+                "SEP proton mean flux derived from "
+                f"{self.document} mission fluence divided by mission duration"
             ),
         )
 
@@ -764,16 +765,21 @@ class OstSepModel:
 
 
 @dataclass(frozen=True)
-class GostSepModel:
-    """Placeholder for normative GOST SEP model.
+class GostSepModel(OstSepModel):
+    """GOST R 25645.165-2025 SEP proton source model using Wolf numbers 1.0.
 
-    The class declares metadata and profile compatibility only.
-    Numerical GOST SEP equations are not implemented yet.
+    The current production path intentionally uses the same proton spectral
+    coefficient tables and interpolation machinery as the OST SEP source model.
+    The normative GOST difference implemented here is the expected SEP event
+    count policy: W1.0 Wolf numbers with coefficient 0.0130 instead of the OST
+    0.0135 coefficient. The W2.0 event-count policy is kept at the lower-level
+    event-count API, but this source model does not select it by default.
     """
 
     model: str = "gost_sep_model"
     document: str = GOST_SEP_DOCUMENT
     version: str = "not_implemented"
+    event_count_policy: SepEventCountPolicy = SepEventCountPolicy.GOST_R_25645_165_2025_W1_0
 
     @property
     def metadata(self) -> SourceModelMetadata:
@@ -786,11 +792,3 @@ class GostSepModel:
             document=self.document,
             version=self.version,
         )
-
-    def __post_init__(self) -> None:
-        _ = self.metadata
-
-    def calculate(self, model_input: SepModelInput) -> SepModelResult:
-        """Raise until the normative GOST SEP model is implemented."""
-
-        raise NotImplementedError("GOST SEP model is not implemented yet.")

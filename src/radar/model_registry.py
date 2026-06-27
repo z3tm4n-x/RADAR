@@ -232,7 +232,7 @@ def _ost_sep_kwargs_from_config(
     *,
     sep_energy_grid_mev: tuple[float, ...],
 ) -> dict[str, Any]:
-    """Return constructor kwargs for configured OST SEP proton source model."""
+    """Return constructor kwargs for configured OST/GOST SEP proton source models."""
 
     solar_activity = build_mission_solar_activity(
         mission=config.mission,
@@ -256,8 +256,8 @@ def source_model_instances_for_config(
 ) -> tuple[Any, Any, Any]:
     """Return SEP, GCR and ERB model instances configured from calculation input.
 
-    Only the OST SEP proton source model is configurable at this layer for now.
-    Other selected models are instantiated with their default constructor.
+    OST and GOST SEP proton source models share the same production energy
+    grid and W1.0 monthly Wolf number configuration at this layer.
     """
 
     sep_kwargs: dict[str, Any] | None = None
@@ -265,7 +265,7 @@ def source_model_instances_for_config(
     if (
         sep_energy_grid_mev is not None
         and config.source_model_selection.sep_model_family
-        is SourceModelFamily.OST_134_1044_2007
+        in (SourceModelFamily.OST_134_1044_2007, SourceModelFamily.GOST_SEP)
     ):
         sep_kwargs = _ost_sep_kwargs_from_config(
             config,

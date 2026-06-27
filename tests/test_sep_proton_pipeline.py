@@ -276,7 +276,7 @@ def test_sep_proton_pipeline_rejects_model_family_mismatched_profile() -> None:
             penetration=_penetration(),
         )
 
-def test_sep_proton_pipeline_accepts_gost_sep_stub_metadata_before_calculation() -> None:
+def test_sep_proton_pipeline_accepts_gost_sep_metadata_before_configuration() -> None:
     from radar.core.profiles import MethodologyProfile
     from radar.core.project import MethodologyConfig
     from radar.sep.model import GostSepModel
@@ -289,7 +289,7 @@ def test_sep_proton_pipeline_accepts_gost_sep_stub_metadata_before_calculation()
         methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP),
     )
 
-    with pytest.raises(NotImplementedError, match="GOST SEP"):
+    with pytest.raises(NotImplementedError, match="configured energy grid"):
         calculate_sep_proton_pipeline(
             config=config,
             sep_model=GostSepModel(),

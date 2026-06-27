@@ -446,7 +446,9 @@ def test_source_model_instances_for_config_rejects_empty_sep_grid() -> None:
         )
 
 
-def test_source_model_instances_for_config_does_not_configure_gost_sep_model() -> None:
+def test_source_model_instances_for_config_configures_gost_sep_w1_model() -> None:
+    from radar.sep.event_count import SepEventCountPolicy
+
     config = _calculation_config_for_model_builder(
         profile=MethodologyProfile.OST_WITH_GOST_SEP,
     )
@@ -457,5 +459,9 @@ def test_source_model_instances_for_config_does_not_configure_gost_sep_model() -
     )
 
     assert isinstance(sep_model, GostSepModel)
+    assert sep_model.energy_grid_mev == (10.0, 20.0)
+    assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
+    assert sep_model.event_count_policy is SepEventCountPolicy.GOST_R_25645_165_2025_W1_0
+    assert sep_model.version == "protons_only_v1"
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)

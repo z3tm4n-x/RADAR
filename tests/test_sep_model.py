@@ -15,6 +15,7 @@ from radar.core.units import Unit
 from radar.sep.model import (
     SepModelInput,
     SepModelProtocol,
+    GostSepModel,
     OstSepModel,
     SepModelResult,
     StaticSepModel,
@@ -595,6 +596,34 @@ def test_ost_sep_model_calculates_proton_source_products() -> None:
 
     assert result.model == "ost_sep_model"
     assert result.document == "OST 134-1044-2007"
+
+
+def test_gost_sep_model_calculates_proton_source_products_with_w1_policy() -> None:
+    from radar.core.profiles import GOST_SEP_DOCUMENT
+    from radar.sep.event_count import SepEventCountPolicy
+
+    model = GostSepModel(
+        energy_grid_mev=(10.0,),
+        version="protons_only_v1",
+        monthly_smoothed_wolf_numbers=(2.0 / (60.0 * 0.0130),) * 60,
+        coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+    )
+
+    result = model.calculate(
+        SepModelInput(
+            mission=_mission_with_probability(lifetime_years=5, probability=0.5),
+        )
+    )
+
+    products_by_kind = {product.kind: product for product in result.products}
+
+    assert model.event_count_policy is SepEventCountPolicy.GOST_R_25645_165_2025_W1_0
+    assert result.model == "gost_sep_model"
+    assert result.document == GOST_SEP_DOCUMENT
+    assert result.spectrum.y == pytest.approx((10.0,))
+    assert products_by_kind[RadiationProductKind.PEAK_FLUX].spectrum.y == pytest.approx(
+        (4.0 * math.pi,)
+    )
 
 
 def test_ost_sep_model_uses_real_coefficient_tables() -> None:
