@@ -21,10 +21,25 @@ from radar.erb.model import (
     ErbModelResult,
     validate_erb_energy_spectrum,
 )
+from radar.erb.output_tables import erb_product_output_tables
+from radar.output_tables import OutputTable
 
 ERB_PIPELINE_COMPONENT = "erb_pipeline"
 ERB_MODEL_COMPONENT = "erb_model"
+ERB_OUTPUT_TABLES_COMPONENT = "erb_output_tables"
 UNVERSIONED_MODEL = "unversioned"
+
+
+def _set_output_tables(
+    calculation_result: CalculationResult,
+    tables: tuple[OutputTable, ...],
+) -> CalculationResult:
+    result = calculation_result
+
+    for table in tables:
+        result = result.set_output_table(table)
+
+    return result
 
 
 @dataclass(frozen=True)
@@ -122,6 +137,37 @@ def calculate_erb_pipeline(
             "lifetime_years": str(erb_model_result.lifetime_years),
             "kp": str(erb_model_result.kp),
             "spectrum_count": str(len(erb_model_result.spectra)),
+        },
+    )
+
+    output_tables = erb_product_output_tables(erb_model_result.products)
+
+    calculation_result = calculation_result.set_component_status(
+        component=ERB_OUTPUT_TABLES_COMPONENT,
+        status=ComponentStatus.NOT_STARTED,
+    )
+    calculation_result = calculation_result.add_log_entry(
+        level=LogLevel.INFO,
+        stage=ERB_OUTPUT_TABLES_COMPONENT,
+        message="ERB output tables started.",
+        details={
+            "table_count": str(len(output_tables)),
+        },
+    )
+    calculation_result = _set_output_tables(
+        calculation_result=calculation_result,
+        tables=output_tables,
+    )
+    calculation_result = calculation_result.set_component_status(
+        component=ERB_OUTPUT_TABLES_COMPONENT,
+        status=ComponentStatus.COMPLETED,
+    )
+    calculation_result = calculation_result.add_log_entry(
+        level=LogLevel.INFO,
+        stage=ERB_OUTPUT_TABLES_COMPONENT,
+        message="ERB output tables completed.",
+        details={
+            "table_count": str(len(output_tables)),
         },
     )
 

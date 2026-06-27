@@ -14,6 +14,7 @@ from radar.core.units import Unit
 from radar.erb.model import StaticErbModel
 from radar.pipelines.erb import (
     ERB_MODEL_COMPONENT,
+    ERB_OUTPUT_TABLES_COMPONENT,
     ERB_PIPELINE_COMPONENT,
     ErbPipelineResult,
     calculate_erb_pipeline,
@@ -97,6 +98,7 @@ def test_erb_pipeline_records_component_statuses() -> None:
 
     assert result.component_status(ERB_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
     assert result.component_status(ERB_MODEL_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(ERB_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
     assert result.has_errors() is False
 
 
@@ -108,10 +110,12 @@ def test_erb_pipeline_records_log_entries() -> None:
 
     log_entries = pipeline_result.calculation_result.log.entries
 
-    assert len(log_entries) == 3
+    assert len(log_entries) == 5
     assert log_entries[0].stage == ERB_PIPELINE_COMPONENT
     assert log_entries[1].stage == ERB_MODEL_COMPONENT
-    assert log_entries[2].stage == ERB_PIPELINE_COMPONENT
+    assert log_entries[2].stage == ERB_OUTPUT_TABLES_COMPONENT
+    assert log_entries[3].stage == ERB_OUTPUT_TABLES_COMPONENT
+    assert log_entries[4].stage == ERB_PIPELINE_COMPONENT
     assert log_entries[1].details == (
         ("document", "test_document"),
         ("kp", "3"),
@@ -134,6 +138,25 @@ def test_erb_pipeline_records_model_info() -> None:
     assert model_info[0].version == "unversioned"
     assert model_info[0].status == "calculated"
     assert model_info[0].source == "test_document"
+
+
+def test_erb_pipeline_records_output_tables() -> None:
+    pipeline_result = calculate_erb_pipeline(
+        config=_config(),
+        erb_model=_erb_model(),
+    )
+
+    tables = pipeline_result.calculation_result.output_tables
+
+    assert len(tables) == 2
+    assert tuple(table.table_id for table in tables) == (
+        "erb_proton_orbit_averaged_flux_differential_flux_on_orbit",
+        "erb_electron_mean_flux_mean_differential_flux_on_orbit",
+    )
+    assert dict(tables[0].metadata)["source"] == "erb"
+    assert dict(tables[0].metadata)["shielding"] == "not_applied"
+    assert dict(tables[0].metadata)["dose_status"] == "not_calculated"
+    assert dict(tables[1].metadata)["particle"] == "electron"
 
 
 def test_erb_pipeline_result_validates_spectra() -> None:
