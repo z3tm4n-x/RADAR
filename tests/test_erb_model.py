@@ -408,3 +408,116 @@ def test_normative_ost_erb_model_calculates_products() -> None:
     assert result.spectra[2].y_unit is Unit.DIFFERENTIAL_FLUENCE
     assert any(value > 0.0 for value in result.spectra[0].y)
     assert any(value > 0.0 for value in result.spectra[3].y)
+
+def test_ost_erb_model_records_appendix_e_method_metadata() -> None:
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    metadata = dict(result.method_metadata)
+
+    assert metadata["ost_appendices"] == "A,D,E"
+    assert "Appendix A" in metadata["appendix_a_reference"]
+    assert "Appendix D" in metadata["appendix_d_reference"]
+    assert "Appendix E" in metadata["appendix_e_reference"]
+    assert metadata["appendix_e_interpolation"] == "three_point_lagrange_with_log_positive_flux_values"
+    assert metadata["appendix_e_averaging"] == "equal_weight_mean_anomaly_samples"
+    assert (
+        metadata["appendix_e_time_weighting_status"]
+        == "approximated_by_uniform_mean_anomaly_sampling"
+    )
+    assert metadata["solar_reference_start_year"] == "2027"
+    assert metadata["anomaly_samples"] == "2"
+    assert metadata["node_samples"] == "2"
+    assert metadata["peak_state"] == "worst"
+
+
+def test_ost_erb_model_allows_explicit_solar_reference_start_year() -> None:
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+        solar_reference_start_year=2024,
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    metadata = dict(result.method_metadata)
+
+    assert metadata["solar_reference_start_year"] == "2024"
+
+def test_ost_erb_model_records_orbit_table_coverage_diagnostics() -> None:
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    metadata = dict(result.method_metadata)
+
+    assert metadata["proton_total_samples"] == "4"
+    assert metadata["electron_total_samples"] == "4"
+    assert int(metadata["proton_valid_samples"]) > 0
+    assert int(metadata["electron_valid_samples"]) > 0
+    assert (
+        int(metadata["proton_valid_samples"])
+        + int(metadata["proton_invalid_samples"])
+        == 4
+    )
+    assert (
+        int(metadata["electron_valid_samples"])
+        + int(metadata["electron_invalid_samples"])
+        == 4
+    )
+    assert float(metadata["proton_valid_sample_fraction"]) > 0.0
+    assert float(metadata["electron_valid_sample_fraction"]) > 0.0
+    assert float(metadata["proton_table_l_min"]) > 0.0
+    assert float(metadata["electron_table_l_min"]) > 0.0
+
+
+def test_ost_erb_model_fluence_matches_mean_flux_times_mission_duration() -> None:
+    from radar.erb.constants import ERB_SECONDS_PER_YEAR
+
+    lifetime_years = 2
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
+
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=lifetime_years),
+        )
+    )
+
+    mission_seconds = lifetime_years * ERB_SECONDS_PER_YEAR
+    proton_mean_flux = result.spectra[0]
+    proton_fluence = result.spectra[2]
+    electron_mean_flux = result.spectra[3]
+    electron_fluence = result.spectra[5]
+
+    assert proton_fluence.y == pytest.approx(
+        tuple(value * mission_seconds for value in proton_mean_flux.y)
+    )
+    assert electron_fluence.y == pytest.approx(
+        tuple(value * mission_seconds for value in electron_mean_flux.y)
+    )

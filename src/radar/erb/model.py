@@ -39,6 +39,10 @@ from radar.solar_activity.model import (
 )
 from radar.solar_activity.ost import ost_wolf_number_cycle_table
 
+OST_ERB_APPENDIX_A_REFERENCE = "OST 134-1044-2007 Appendix A tables A.1.1/A.1.2/A.2.1/A.2.2"
+OST_ERB_APPENDIX_D_REFERENCE = "OST 134-1044-2007 Appendix D L-B coordinate calculation"
+OST_ERB_APPENDIX_E_REFERENCE = "OST 134-1044-2007 Appendix E orbit-averaged ERB spectra"
+
 ERB_ALLOWED_PARTICLES = (
     Particle.PROTON,
     Particle.ELECTRON,
@@ -141,6 +145,7 @@ class ErbModelResult:
     model: str
     document: str
     products: tuple[SpectrumProduct, ...] = ()
+    method_metadata: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.spectra:
@@ -165,6 +170,15 @@ class ErbModelResult:
         if tuple(product.spectrum for product in products) != self.spectra:
             msg = "ERB model product spectra must match result spectra."
             raise ValueError(msg)
+
+        for key, value in self.method_metadata:
+            if not key:
+                msg = "ERB model result method metadata key must not be empty."
+                raise ValueError(msg)
+
+            if not value:
+                msg = "ERB model result method metadata value must not be empty."
+                raise ValueError(msg)
 
         object.__setattr__(self, "products", products)
 
@@ -331,6 +345,83 @@ def _multiply_vector(
     return tuple(value * factor for value in values)
 
 
+def _sample_fraction(
+    *,
+    count: int,
+    total: int,
+) -> str:
+    if total < 1:
+        return "0"
+
+    return f"{count / total:.12g}"
+
+
+def _table_coverage_metadata(
+    *,
+    prefix: str,
+    table: OstErbFluxTable,
+    field_line_samples: tuple[ErbFieldLineSample, ...],
+) -> tuple[tuple[str, str], ...]:
+    total_samples = len(field_line_samples)
+    valid_samples = sum(1 for sample in field_line_samples if sample.valid)
+    invalid_samples = total_samples - valid_samples
+    l_below_table = 0
+    l_above_table = 0
+    bb0_above_nearest_shell = 0
+
+    for sample in field_line_samples:
+        if not sample.valid:
+            continue
+
+        if sample.l_shell < table.l_grid[0]:
+            l_below_table += 1
+            continue
+
+        if sample.l_shell > table.l_grid[-1]:
+            l_above_table += 1
+            continue
+
+        nearest_shell = min(
+            table.shells,
+            key=lambda shell: abs(shell.l_shell - sample.l_shell),
+        )
+
+        if sample.b_over_b0 > nearest_shell.b_over_b0[-1] * (1.0 + 1.0e-12):
+            bb0_above_nearest_shell += 1
+
+    valid_divisor = max(valid_samples, 1)
+
+    return (
+        (f"{prefix}_total_samples", str(total_samples)),
+        (f"{prefix}_valid_samples", str(valid_samples)),
+        (f"{prefix}_invalid_samples", str(invalid_samples)),
+        (f"{prefix}_l_below_table_samples", str(l_below_table)),
+        (f"{prefix}_l_above_table_samples", str(l_above_table)),
+        (
+            f"{prefix}_bb0_above_nearest_shell_samples",
+            str(bb0_above_nearest_shell),
+        ),
+        (
+            f"{prefix}_valid_sample_fraction",
+            _sample_fraction(count=valid_samples, total=total_samples),
+        ),
+        (
+            f"{prefix}_l_below_table_fraction",
+            _sample_fraction(count=l_below_table, total=valid_divisor),
+        ),
+        (
+            f"{prefix}_l_above_table_fraction",
+            _sample_fraction(count=l_above_table, total=valid_divisor),
+        ),
+        (
+            f"{prefix}_bb0_above_nearest_shell_fraction",
+            _sample_fraction(count=bb0_above_nearest_shell, total=valid_divisor),
+        ),
+        (f"{prefix}_table_l_min", f"{table.l_grid[0]:.12g}"),
+        (f"{prefix}_table_l_max", f"{table.l_grid[-1]:.12g}"),
+    )
+
+
 def _erb_spectrum(
     *,
     energies_mev: tuple[float, ...],
@@ -367,7 +458,7 @@ def _erb_product(
 
 @dataclass(frozen=True)
 class OstErbModel:
-    """Normative OST 134-1044-2007 Appendix A ERB source model."""
+    """Normative OST 134-1044-2007 Appendix A/D/E ERB source model."""
 
     model: str = "ost_erb_model"
     document: str = OST_134_1044_2007_DOCUMENT
@@ -377,7 +468,7 @@ class OstErbModel:
     anomaly_samples: int = 48
     node_samples: int = 36
     igrf_epoch: float = DEFAULT_IGRF_EPOCH
-    solar_reference_start_year: int = 2024
+    solar_reference_start_year: int | None = None
     tables: OstErbTableSet | None = None
     igrf_coefficients: IgrfCoefficients | None = None
 
@@ -422,7 +513,10 @@ class OstErbModel:
             msg = "OST ERB IGRF epoch must be finite."
             raise ValueError(msg)
 
-        if not isinstance(self.solar_reference_start_year, int):
+        if self.solar_reference_start_year is not None and not isinstance(
+            self.solar_reference_start_year,
+            int,
+        ):
             msg = "OST ERB solar reference start year must be an integer."
             raise ValueError(msg)
 
@@ -433,6 +527,12 @@ class OstErbModel:
 
     def _igrf_coefficients(self) -> IgrfCoefficients:
         return self.igrf_coefficients or load_igrf14_coefficients(epoch=self.igrf_epoch)
+
+    def _solar_reference_start_year(self, model_input: ErbModelInput) -> int:
+        if self.solar_reference_start_year is not None:
+            return self.solar_reference_start_year
+
+        return model_input.config.mission.launch_year
 
     def _field_line_samples(
         self,
@@ -560,9 +660,10 @@ class OstErbModel:
         tables = self._tables()
         field_line_samples = self._field_line_samples(model_input)
 
+        solar_reference_start_year = self._solar_reference_start_year(model_input)
         fraction_max = _ost_erb_solar_max_fraction(
             mission=model_input.config.mission,
-            reference_start_year=self.solar_reference_start_year,
+            reference_start_year=solar_reference_start_year,
         )
         mission_seconds = model_input.config.mission.lifetime_years * ERB_SECONDS_PER_YEAR
 
@@ -587,6 +688,16 @@ class OstErbModel:
             ),
         )
         spectra = tuple(product.spectrum for product in products)
+        proton_coverage_metadata = _table_coverage_metadata(
+            prefix="proton",
+            table=tables.proton_min,
+            field_line_samples=field_line_samples,
+        )
+        electron_coverage_metadata = _table_coverage_metadata(
+            prefix="electron",
+            table=tables.electron_min,
+            field_line_samples=field_line_samples,
+        )
 
         return ErbModelResult(
             spectra=spectra,
@@ -595,4 +706,25 @@ class OstErbModel:
             model=self.model,
             document=self.document,
             products=products,
+            method_metadata=(
+                ("ost_appendices", "A,D,E"),
+                ("appendix_a_reference", OST_ERB_APPENDIX_A_REFERENCE),
+                ("appendix_d_reference", OST_ERB_APPENDIX_D_REFERENCE),
+                ("appendix_e_reference", OST_ERB_APPENDIX_E_REFERENCE),
+                ("appendix_e_interpolation", "three_point_lagrange_with_log_positive_flux_values"),
+                ("appendix_e_averaging", "equal_weight_mean_anomaly_samples"),
+                (
+                    "appendix_e_time_weighting_status",
+                    "approximated_by_uniform_mean_anomaly_sampling",
+                ),
+                ("solar_reference_start_year", str(solar_reference_start_year)),
+                ("solar_fraction_max", f"{fraction_max:.12g}"),
+                ("anomaly_samples", str(self.anomaly_samples)),
+                ("node_samples", str(self.node_samples)),
+                ("igrf_epoch", f"{self.igrf_epoch:g}"),
+                ("interpolation", self.interpolation.value),
+                ("peak_state", self.peak_state),
+                *proton_coverage_metadata,
+                *electron_coverage_metadata,
+            ),
         )
