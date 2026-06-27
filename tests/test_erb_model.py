@@ -11,10 +11,12 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
+from radar.erb.igrf import IgrfCoefficients
 from radar.erb.model import (
     ErbModelInput,
     ErbModelProtocol,
     ErbModelResult,
+    OstErbModel,
     StaticErbModel,
     validate_erb_energy_spectrum,
 )
@@ -28,6 +30,25 @@ def _config(lifetime_years: int = 7, kp: int = 3) -> CalculationConfig:
     orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
 
     return CalculationConfig(mission=mission, orbit=orbit, kp=kp)
+
+
+def _leo_ost_config(lifetime_years: int = 2) -> CalculationConfig:
+    mission = MissionConfig(
+        launch_year=2027,
+        lifetime_years=lifetime_years,
+    )
+    orbit = OrbitConfig.circular(altitude_km=2_000.0, inclination_deg=0.0)
+
+    return CalculationConfig(mission=mission, orbit=orbit, kp=3)
+
+
+def _dipole_coefficients() -> IgrfCoefficients:
+    return IgrfCoefficients(
+        epoch=1985.0,
+        g={(1, 0): -31_165.3},
+        h={},
+        nmax=1,
+    )
 
 
 def _erb_flux_spectrum(
@@ -113,14 +134,13 @@ def test_validate_erb_energy_spectrum_rejects_non_erb_source() -> None:
         )
 
 
-def test_validate_erb_energy_spectrum_rejects_fluence_quantity() -> None:
-    with pytest.raises(ValueError, match="differential flux"):
-        validate_erb_energy_spectrum(
-            _erb_flux_spectrum(
-                quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
-                y_unit=Unit.DIFFERENTIAL_FLUENCE,
-            )
+def test_validate_erb_energy_spectrum_accepts_fluence_quantity() -> None:
+    validate_erb_energy_spectrum(
+        _erb_flux_spectrum(
+            quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+            y_unit=Unit.DIFFERENTIAL_FLUENCE,
         )
+    )
 
 
 def test_validate_erb_energy_spectrum_rejects_non_mev_grid() -> None:
@@ -272,6 +292,25 @@ def test_erb_model_result_maps_maximum_and_mean_products() -> None:
     )
 
 
+def test_erb_model_result_maps_fluence_product() -> None:
+    from radar.core.types import RadiationProductKind
+
+    fluence_spectrum = _erb_flux_spectrum(
+        quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+        y_unit=Unit.DIFFERENTIAL_FLUENCE,
+    )
+
+    result = ErbModelResult(
+        spectra=(fluence_spectrum,),
+        lifetime_years=5,
+        kp=3,
+        model="test",
+        document="test",
+    )
+
+    assert result.products[0].kind is RadiationProductKind.MISSION_FLUENCE
+
+
 def test_erb_model_result_rejects_mismatched_products() -> None:
     from radar.core.products import SpectrumProduct
     from radar.core.types import RadiationProductKind
@@ -337,13 +376,35 @@ def test_normative_erb_model_stub_metadata() -> None:
     assert model.metadata.document == OST_134_1044_2007_DOCUMENT
 
 
-def test_normative_erb_model_stub_raises_not_implemented() -> None:
-    from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
-    from radar.erb.model import ErbModelInput, OstErbModel
+def test_normative_ost_erb_model_calculates_products() -> None:
+    from radar.core.types import RadiationProductKind
 
-    mission = MissionConfig(launch_year=2027, lifetime_years=5)
-    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
-    model_input = ErbModelInput(config=CalculationConfig(mission=mission, orbit=orbit))
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=_dipole_coefficients(),
+    )
 
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        OstErbModel().calculate(model_input)
+    result = model.calculate(
+        ErbModelInput(
+            config=_leo_ost_config(lifetime_years=2),
+        )
+    )
+
+    assert result.model == "ost_erb_model"
+    assert result.lifetime_years == 2
+    assert len(result.spectra) == 6
+    assert tuple(product.kind for product in result.products) == (
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+        RadiationProductKind.MEAN_FLUX,
+        RadiationProductKind.MAXIMUM_FLUX,
+        RadiationProductKind.MISSION_FLUENCE,
+    )
+    assert result.spectra[0].particle is Particle.PROTON
+    assert result.spectra[3].particle is Particle.ELECTRON
+    assert result.spectra[2].quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
+    assert result.spectra[2].y_unit is Unit.DIFFERENTIAL_FLUENCE
+    assert any(value > 0.0 for value in result.spectra[0].y)
+    assert any(value > 0.0 for value in result.spectra[3].y)

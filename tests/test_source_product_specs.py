@@ -82,6 +82,12 @@ def test_erb_product_specs_include_proton_electron_and_no_heavy_ion_products() -
         product_kind=RadiationProductKind.MAXIMUM_FLUX,
         purpose=RadiationProductPurpose.SINGLE_EVENT_EFFECT,
     )
+    assert has_source_radiation_product_spec(
+        source=RadiationSource.ERB,
+        particle=Particle.ELECTRON,
+        product_kind=RadiationProductKind.MAXIMUM_FLUX,
+        purpose=RadiationProductPurpose.OUTPUT_CHARACTERISTIC,
+    )
     assert not source_radiation_product_specs_for_source_and_particle(
         RadiationSource.ERB,
         Particle.HZE,

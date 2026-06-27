@@ -27,8 +27,10 @@ from radar.erb.ost_tables import (
     load_ost_erb_appendix_a_tables,
 )
 from radar.erb.radbelt import RadbeltAscMap, parse_radbelt_asc_text
+from radar.erb.resources import ERB_IGRF14_RESOURCE_NAME, load_igrf14_coefficients
 
 __all__ = [
+    "ERB_IGRF14_RESOURCE_NAME",
     "ErbFieldLineSample",
     "ErbOrbitGrid",
     "ErbOrbitSample",
@@ -48,6 +50,7 @@ __all__ = [
     "StaticErbModel",
     "magnetic_field_at_orbit_sample",
     "magnetic_field_vector_km",
+    "load_igrf14_coefficients",
     "load_ost_erb_appendix_a_tables",
     "parse_igrf_coefficients",
     "parse_radbelt_asc_text",

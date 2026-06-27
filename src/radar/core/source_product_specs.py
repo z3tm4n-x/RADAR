@@ -315,6 +315,19 @@ SOURCE_RADIATION_PRODUCT_SPECS: tuple[SourceRadiationProductSpec, ...] = (
         normative_status=RadiationProductNormativeStatus.OST_MINIMUM,
         title="Флюенс электронов ЕРПЗ за САС",
     ),
+    SourceRadiationProductSpec(
+        source=RadiationSource.ERB,
+        particle=Particle.ELECTRON,
+        product_kind=RadiationProductKind.MAXIMUM_FLUX,
+        location=RadiationProductLocation.BEFORE_SHIELDING,
+        purposes=(
+            RadiationProductPurpose.INTERMEDIATE,
+            RadiationProductPurpose.OUTPUT_CHARACTERISTIC,
+        ),
+        normative_status=RadiationProductNormativeStatus.INTERMEDIATE,
+        title="Максимальный поток электронов ЕРПЗ",
+        note="Выходная характеристика модели ЕРПЗ; дозовый тракт использует флюенс электронов.",
+    ),
 )
 
 
