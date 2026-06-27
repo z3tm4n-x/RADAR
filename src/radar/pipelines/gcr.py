@@ -14,7 +14,7 @@ from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
 from radar.core.source_products import validate_products_match_spectra_and_source
-from radar.core.types import RadiationSource
+from radar.core.types import Particle, RadiationSource, SpectrumQuantity
 from radar.gcr.model import (
     GcrModelInput,
     GcrModelProtocol,
@@ -22,13 +22,26 @@ from radar.gcr.model import (
     validate_gcr_energy_spectrum,
 )
 from radar.gcr.penetration import apply_ost_geomagnetic_penetration_to_gcr_products
+from radar.gcr.pipeline_shielding import (
+    GcrShieldingLetPipelineProducts,
+    calculate_gcr_shielding_let_products,
+)
+from radar.shielding.resources import load_normative_shielding_tables
 
 GCR_PIPELINE_COMPONENT = "gcr_pipeline"
 GCR_MODEL_COMPONENT = "gcr_model"
 GCR_GEOMAGNETIC_PENETRATION_COMPONENT = "gcr_geomagnetic_penetration"
+GCR_SHIELDING_COMPONENT = "gcr_shielding"
+GCR_LET_COMPONENT = "gcr_let"
 UNVERSIONED_MODEL = "unversioned"
 GCR_GEOMAGNETIC_PENETRATION_MODEL_VERSION = "appendix_zh_mlt_average_v1"
 GCR_GEOMAGNETIC_PENETRATION_DOCUMENT = "OST 134-1044-2007 Appendix Zh"
+GCR_SHIELDING_MODEL = "gcr_al_shielding"
+GCR_SHIELDING_MODEL_VERSION = "al_spherical_csda_secondary_v1"
+GCR_SHIELDING_DOCUMENT = "RADAR shielding normative tables"
+GCR_LET_MODEL = "gcr_si_let"
+GCR_LET_MODEL_VERSION = "si_let_histogram_v1"
+GCR_LET_DOCUMENT = "RADAR silicon LET normative tables"
 
 
 def _same_spectrum_domain_and_semantics(
@@ -43,6 +56,27 @@ def _same_spectrum_domain_and_semantics(
         and spectrum.particle is model_spectrum.particle
         and spectrum.source is model_spectrum.source
     )
+
+
+_GCR_LET_QUANTITIES = (
+    SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE,
+    SpectrumQuantity.LET_DIFFERENTIAL_FLUX,
+)
+
+
+def _validate_gcr_pipeline_spectrum(spectrum: Spectrum1D) -> None:
+    if spectrum.quantity in _GCR_LET_QUANTITIES:
+        if spectrum.source is not RadiationSource.GCR:
+            msg = "GCR pipeline LET spectrum source must be GCR."
+            raise ValueError(msg)
+
+        if spectrum.particle not in (Particle.PROTON, Particle.HZE):
+            msg = "GCR pipeline LET spectrum must describe protons or HZE particles."
+            raise ValueError(msg)
+
+        return
+
+    validate_gcr_energy_spectrum(spectrum)
 
 
 def _validate_pipeline_spectra_derived_from_model_result(
@@ -116,6 +150,10 @@ class GcrPipelineResult:
     gcr_model_result: GcrModelResult
     spectra: tuple[Spectrum1D, ...]
     products: tuple[SpectrumProduct, ...] = ()
+    on_orbit_products: tuple[SpectrumProduct, ...] = ()
+    shielding_let_by_thickness: tuple[GcrShieldingLetPipelineProducts, ...] = ()
+    shielded_products: tuple[SpectrumProduct, ...] = ()
+    let_products: tuple[SpectrumProduct, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.spectra:
@@ -123,14 +161,10 @@ class GcrPipelineResult:
             raise ValueError(msg)
 
         for spectrum in self.spectra:
-            validate_gcr_energy_spectrum(spectrum)
-
-        _validate_pipeline_spectra_derived_from_model_result(
-            spectra=self.spectra,
-            model_spectra=self.gcr_model_result.spectra,
-        )
+            _validate_gcr_pipeline_spectrum(spectrum)
 
         products = self.products or self.gcr_model_result.products
+        on_orbit_products = self.on_orbit_products or self.gcr_model_result.products
 
         if not products:
             msg = "GCR pipeline result must contain at least one radiation product."
@@ -144,11 +178,12 @@ class GcrPipelineResult:
         )
 
         _validate_pipeline_products_derived_from_model_products(
-            products=products,
+            products=on_orbit_products,
             model_products=self.gcr_model_result.products,
         )
 
         object.__setattr__(self, "products", products)
+        object.__setattr__(self, "on_orbit_products", on_orbit_products)
 
     @property
     def source_products(self) -> tuple[SpectrumProduct, ...]:
@@ -262,6 +297,85 @@ def calculate_gcr_pipeline(
             },
         )
 
+    on_orbit_products = products
+    shielding_let_by_thickness: tuple[GcrShieldingLetPipelineProducts, ...] = ()
+    shielded_products: tuple[SpectrumProduct, ...] = ()
+    let_products: tuple[SpectrumProduct, ...] = ()
+
+    if profile_uses_ost_134_1044_2007(config.methodology.profile):
+        calculation_result = calculation_result.set_component_status(
+            component=GCR_SHIELDING_COMPONENT,
+            status=ComponentStatus.NOT_STARTED,
+        )
+        calculation_result = calculation_result.set_component_status(
+            component=GCR_LET_COMPONENT,
+            status=ComponentStatus.NOT_STARTED,
+        )
+        calculation_result = calculation_result.add_log_entry(
+            level=LogLevel.INFO,
+            stage=GCR_SHIELDING_COMPONENT,
+            message="GCR shielding and LET calculation started.",
+            details={
+                "thicknesses_g_cm2": ",".join(
+                    f"{value:g}" for value in config.shielding.thicknesses_g_cm2
+                ),
+                "input_products": str(len(on_orbit_products)),
+            },
+        )
+
+        tables = load_normative_shielding_tables()
+        shielding_let_by_thickness = calculate_gcr_shielding_let_products(
+            products=on_orbit_products,
+            tables=tables,
+            thicknesses_g_cm2=config.shielding.thicknesses_g_cm2,
+        )
+        shielded_products = tuple(
+            product
+            for result in shielding_let_by_thickness
+            for product in result.shielded_products
+        )
+        let_products = tuple(
+            product
+            for result in shielding_let_by_thickness
+            for product in result.let_products
+        )
+        products = (*on_orbit_products, *shielded_products, *let_products)
+
+        calculation_result = calculation_result.set_model_info(
+            ModelInfo(
+                name=GCR_SHIELDING_MODEL,
+                version=GCR_SHIELDING_MODEL_VERSION,
+                status="calculated",
+                source=GCR_SHIELDING_DOCUMENT,
+            )
+        )
+        calculation_result = calculation_result.set_model_info(
+            ModelInfo(
+                name=GCR_LET_MODEL,
+                version=GCR_LET_MODEL_VERSION,
+                status="calculated",
+                source=GCR_LET_DOCUMENT,
+            )
+        )
+        calculation_result = calculation_result.set_component_status(
+            component=GCR_SHIELDING_COMPONENT,
+            status=ComponentStatus.COMPLETED,
+        )
+        calculation_result = calculation_result.set_component_status(
+            component=GCR_LET_COMPONENT,
+            status=ComponentStatus.COMPLETED,
+        )
+        calculation_result = calculation_result.add_log_entry(
+            level=LogLevel.INFO,
+            stage=GCR_SHIELDING_COMPONENT,
+            message="GCR shielding and LET calculation completed.",
+            details={
+                "shielded_products": str(len(shielded_products)),
+                "let_products": str(len(let_products)),
+                "thickness_count": str(len(shielding_let_by_thickness)),
+            },
+        )
+
 
     calculation_result = calculation_result.set_component_status(
         component=GCR_PIPELINE_COMPONENT,
@@ -281,4 +395,8 @@ def calculate_gcr_pipeline(
         gcr_model_result=gcr_model_result,
         spectra=spectra,
         products=products,
+        on_orbit_products=on_orbit_products,
+        shielding_let_by_thickness=shielding_let_by_thickness,
+        shielded_products=shielded_products,
+        let_products=let_products,
     )

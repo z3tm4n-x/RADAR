@@ -6,6 +6,7 @@ from radar.core.project import (
     MethodologyConfig,
     MissionConfig,
     OrbitConfig,
+    ShieldingConfig,
 )
 from radar.core.result import ComponentStatus
 from radar.core.spectra import Spectrum1D
@@ -15,8 +16,10 @@ from radar.gcr.model import StaticGcrModel
 from radar.pipelines.gcr import (
     GCR_GEOMAGNETIC_PENETRATION_COMPONENT,
     GCR_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
+    GCR_LET_COMPONENT,
     GCR_MODEL_COMPONENT,
     GCR_PIPELINE_COMPONENT,
+    GCR_SHIELDING_COMPONENT,
     GcrPipelineResult,
     calculate_gcr_pipeline,
 )
@@ -233,7 +236,7 @@ def test_gcr_pipeline_result_rejects_spectra_not_from_model_result() -> None:
         model=spectrum.model,
     )
 
-    with pytest.raises(ValueError, match="model result spectra"):
+    with pytest.raises(ValueError, match="product spectra"):
         GcrPipelineResult(
             calculation_result=valid_result.calculation_result,
             gcr_model_result=valid_result.gcr_model_result,
@@ -296,28 +299,41 @@ def test_gcr_pipeline_accepts_gost_gcr_model_for_gost_profile() -> None:
     config = CalculationConfig(
         mission=mission,
         orbit=orbit,
+        shielding=ShieldingConfig(thicknesses_g_cm2=(0.01,)),
         methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_GCR),
     )
 
     pipeline_result = calculate_gcr_pipeline(
         config=config,
         gcr_model=GostGcrModel(
-            energy_grid_mev_per_nucleon=(10.0,),
-            symbols=("H",),
+            energy_grid_mev_per_nucleon=(10.0, 30.0, 100.0),
+            symbols=("H", "Fe"),
         ),
     )
 
     assert pipeline_result.calculation_result.has_errors() is False
     assert pipeline_result.gcr_model_result.model == "gost_gcr_model"
-    assert len(pipeline_result.source_products) == 3
-    assert len(pipeline_result.products) == 3
-    assert pipeline_result.products[0].kind is RadiationProductKind.MEAN_FLUX
-    assert pipeline_result.products[1].kind is RadiationProductKind.MAXIMUM_FLUX
-    assert pipeline_result.products[2].kind is RadiationProductKind.MISSION_FLUENCE
+
+    assert len(pipeline_result.source_products) == 6
+    assert len(pipeline_result.on_orbit_products) == 6
+    assert len(pipeline_result.shielded_products) == 6
+    assert len(pipeline_result.let_products) == 3
+    assert len(pipeline_result.products) == 15
+    assert pipeline_result.products == (
+        *pipeline_result.on_orbit_products,
+        *pipeline_result.shielded_products,
+        *pipeline_result.let_products,
+    )
+
+    assert tuple(product.kind for product in pipeline_result.let_products) == (
+        RadiationProductKind.MEAN_LET_FLUX,
+        RadiationProductKind.MAXIMUM_LET_FLUX,
+        RadiationProductKind.MISSION_LET_FLUENCE,
+    )
 
     for source_product, penetrated_product in zip(
         pipeline_result.source_products,
-        pipeline_result.products,
+        pipeline_result.on_orbit_products,
         strict=True,
     ):
         assert penetrated_product.kind is source_product.kind
@@ -337,6 +353,12 @@ def test_gcr_pipeline_accepts_gost_gcr_model_for_gost_profile() -> None:
     assert pipeline_result.calculation_result.component_status(
         GCR_GEOMAGNETIC_PENETRATION_COMPONENT
     ) is ComponentStatus.COMPLETED
+    assert pipeline_result.calculation_result.component_status(
+        GCR_SHIELDING_COMPONENT
+    ) is ComponentStatus.COMPLETED
+    assert pipeline_result.calculation_result.component_status(
+        GCR_LET_COMPONENT
+    ) is ComponentStatus.COMPLETED
 
     model_info_by_name = {
         info.name: info
@@ -346,4 +368,8 @@ def test_gcr_pipeline_accepts_gost_gcr_model_for_gost_profile() -> None:
         "ost_134_1044_2007_geomagnetic_penetration"
     ]
     assert penetration_info.version == GCR_GEOMAGNETIC_PENETRATION_MODEL_VERSION
+    assert model_info_by_name["gcr_al_shielding"].version == (
+        "al_spherical_csda_secondary_v1"
+    )
+    assert model_info_by_name["gcr_si_let"].version == "si_let_histogram_v1"
 
