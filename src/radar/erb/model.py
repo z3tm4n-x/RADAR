@@ -145,7 +145,7 @@ class ErbModelInput:
 
 @dataclass(frozen=True)
 class ErbIntegralSpectrum:
-    """Appendix E.4 integral ERB flux spectrum ?(>E)."""
+    """Appendix E.4 integral ERB flux spectrum Phi(>E)."""
 
     energies_mev: tuple[float, ...]
     integral_flux_gt_e: tuple[float, ...]
@@ -889,10 +889,10 @@ class OstErbModel:
         return (
             (
                 _erb_product(
-                kind=RadiationProductKind.MEAN_FLUX,
-                spectrum=mean_spectrum,
-                label=f"OST ERB {particle_label} mean flux",
-            ),
+                    kind=RadiationProductKind.MEAN_FLUX,
+                    spectrum=mean_spectrum,
+                    label=f"OST ERB {particle_label} mean flux",
+                ),
                 _erb_product(
                     kind=RadiationProductKind.MAXIMUM_FLUX,
                     spectrum=maximum_spectrum,
