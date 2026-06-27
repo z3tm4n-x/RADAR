@@ -626,6 +626,78 @@ def test_gost_sep_model_calculates_proton_source_products_with_w1_policy() -> No
     )
 
 
+
+def test_gost_sep_w1_matches_ost_sep_when_expected_event_count_is_equal() -> None:
+    from radar.sep.event_count import calculate_sep_expected_events
+
+    lifetime_years = 5
+    months = 12 * lifetime_years
+    target_expected_events = 2.0
+    energy_grid = (10.0,)
+    probability = 0.5
+    coefficient_records = _simple_ost_sep_proton_coefficient_records()
+
+    ost_monthly_wolf_numbers = (target_expected_events / (months * 0.0135),) * months
+    gost_monthly_wolf_numbers = (target_expected_events / (months * 0.0130),) * months
+
+    ost_model = OstSepModel(
+        energy_grid_mev=energy_grid,
+        version="protons_only_v1",
+        monthly_smoothed_wolf_numbers=ost_monthly_wolf_numbers,
+        coefficient_records=coefficient_records,
+    )
+    gost_model = GostSepModel(
+        energy_grid_mev=energy_grid,
+        version="protons_only_v1",
+        monthly_smoothed_wolf_numbers=gost_monthly_wolf_numbers,
+        coefficient_records=coefficient_records,
+    )
+
+    ost_event_count = calculate_sep_expected_events(
+        monthly_smoothed_wolf_numbers=ost_model.monthly_smoothed_wolf_numbers,
+        policy=ost_model.event_count_policy,
+    )
+    gost_event_count = calculate_sep_expected_events(
+        monthly_smoothed_wolf_numbers=gost_model.monthly_smoothed_wolf_numbers,
+        policy=gost_model.event_count_policy,
+    )
+
+    assert ost_event_count.coefficient == pytest.approx(0.0135)
+    assert gost_event_count.coefficient == pytest.approx(0.0130)
+    assert ost_event_count.expected_events == pytest.approx(target_expected_events)
+    assert gost_event_count.expected_events == pytest.approx(target_expected_events)
+
+    model_input = SepModelInput(
+        mission=_mission_with_probability(
+            lifetime_years=lifetime_years,
+            probability=probability,
+        ),
+    )
+
+    ost_result = ost_model.calculate(model_input)
+    gost_result = gost_model.calculate(model_input)
+
+    assert ost_result.model == "ost_sep_model"
+    assert gost_result.model == "gost_sep_model"
+    assert ost_result.document != gost_result.document
+    assert ost_model.event_count_policy is not gost_model.event_count_policy
+
+    ost_products_by_kind = {product.kind: product for product in ost_result.products}
+    gost_products_by_kind = {product.kind: product for product in gost_result.products}
+
+    assert set(ost_products_by_kind) == set(gost_products_by_kind)
+
+    for kind, ost_product in ost_products_by_kind.items():
+        gost_product = gost_products_by_kind[kind]
+        assert gost_product.spectrum.x == ost_product.spectrum.x
+        assert gost_product.spectrum.y == pytest.approx(ost_product.spectrum.y)
+        assert gost_product.spectrum.quantity is ost_product.spectrum.quantity
+        assert gost_product.spectrum.particle is ost_product.spectrum.particle
+        assert gost_product.spectrum.source is ost_product.spectrum.source
+        assert gost_product.spectrum.x_unit is ost_product.spectrum.x_unit
+        assert gost_product.spectrum.y_unit is ost_product.spectrum.y_unit
+
+
 def test_ost_sep_model_uses_real_coefficient_tables() -> None:
     model = OstSepModel(
         energy_grid_mev=(10.0, 20.0),
