@@ -1,17 +1,18 @@
-﻿"""GCR pipeline assembly for shielding and LET products."""
+"""GCR pipeline assembly for shielding and LET products."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import isfinite
 
 from radar.core.products import SpectrumProduct
 from radar.core.types import Particle, RadiationProductKind
 from radar.gcr.shielding import (
     GcrHzeShieldingResult,
+    GcrLetProductsResult,
     GcrProtonShieldingResult,
-    calculate_gcr_combined_let_product,
     calculate_gcr_hze_shielding_spectrum,
+    calculate_gcr_let_products,
     calculate_gcr_proton_shielding_spectrum,
     gcr_hze_charge_number_from_product,
 )
@@ -42,6 +43,10 @@ class GcrShieldingLetPipelineProducts:
     hze_by_kind: dict[RadiationProductKind, dict[int, GcrHzeShieldingResult]]
     shielded_products: tuple[SpectrumProduct, ...]
     let_products: tuple[SpectrumProduct, ...]
+    let_results_by_kind: dict[
+        RadiationProductKind,
+        GcrLetProductsResult,
+    ] = field(default_factory=dict)
 
     @property
     def products(self) -> tuple[SpectrumProduct, ...]:
@@ -175,6 +180,7 @@ def calculate_gcr_shielding_let_products_for_thickness(
         raise ValueError(msg)
 
     let_products: list[SpectrumProduct] = []
+    let_results_by_kind: dict[RadiationProductKind, GcrLetProductsResult] = {}
 
     for product_kind in GCR_SHIELDING_LET_PRODUCT_KIND_ORDER:
         proton_for_let = proton_by_kind.get(product_kind)
@@ -190,12 +196,17 @@ def calculate_gcr_shielding_let_products_for_thickness(
         if not hze_for_let:
             continue
 
+        let_result = calculate_gcr_let_products(
+            proton=proton_for_let,
+            hze_by_z=hze_for_let,
+            tables=tables,
+        )
+        let_results_by_kind[product_kind] = let_result
+
         let_products.append(
-            calculate_gcr_combined_let_product(
-                proton=proton_for_let,
-                hze_by_z=hze_for_let,
-                tables=tables,
-                product_kind=_GCR_LET_KIND_BY_ENERGY_PRODUCT_KIND[product_kind],
+            SpectrumProduct(
+                kind=_GCR_LET_KIND_BY_ENERGY_PRODUCT_KIND[product_kind],
+                spectrum=let_result.combined_let,
                 label=_let_label(
                     product_kind=product_kind,
                     thickness_g_cm2=thickness_g_cm2,
@@ -209,6 +220,7 @@ def calculate_gcr_shielding_let_products_for_thickness(
         hze_by_kind=hze_by_kind,
         shielded_products=tuple(shielded_products),
         let_products=tuple(let_products),
+        let_results_by_kind=let_results_by_kind,
     )
 
 

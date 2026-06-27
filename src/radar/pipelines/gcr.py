@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from typing import cast
 
 from radar.core.log import LogLevel
 from radar.core.products import SpectrumProduct
@@ -12,9 +14,14 @@ from radar.core.profiles import (
 )
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
+from radar.gcr.output_tables import (
+    gcr_on_orbit_product_output_tables,
+    gcr_shielding_let_output_tables,
+    gcr_source_spectra_output_tables,
+)
 from radar.core.spectra import Spectrum1D
 from radar.core.source_products import validate_products_match_spectra_and_source
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
 from radar.gcr.model import (
     GcrModelInput,
     GcrModelProtocol,
@@ -23,9 +30,12 @@ from radar.gcr.model import (
 )
 from radar.gcr.penetration import apply_ost_geomagnetic_penetration_to_gcr_products
 from radar.gcr.pipeline_shielding import (
+    GCR_SHIELDING_LET_PRODUCT_KIND_ORDER,
     GcrShieldingLetPipelineProducts,
     calculate_gcr_shielding_let_products,
 )
+from radar.gcr.source_spectra import GcrSourceSpectra
+from radar.output_tables import OutputTable
 from radar.shielding.resources import load_normative_shielding_tables
 
 GCR_PIPELINE_COMPONENT = "gcr_pipeline"
@@ -33,6 +43,7 @@ GCR_MODEL_COMPONENT = "gcr_model"
 GCR_GEOMAGNETIC_PENETRATION_COMPONENT = "gcr_geomagnetic_penetration"
 GCR_SHIELDING_COMPONENT = "gcr_shielding"
 GCR_LET_COMPONENT = "gcr_let"
+GCR_OUTPUT_TABLES_COMPONENT = "gcr_output_tables"
 UNVERSIONED_MODEL = "unversioned"
 GCR_GEOMAGNETIC_PENETRATION_MODEL_VERSION = "appendix_zh_mlt_average_v1"
 GCR_GEOMAGNETIC_PENETRATION_DOCUMENT = "OST 134-1044-2007 Appendix Zh"
@@ -77,6 +88,96 @@ def _validate_gcr_pipeline_spectrum(spectrum: Spectrum1D) -> None:
         return
 
     validate_gcr_energy_spectrum(spectrum)
+
+
+def _calculate_source_spectra_if_supported(
+    gcr_model: GcrModelProtocol,
+) -> GcrSourceSpectra | None:
+    method = getattr(gcr_model, "calculate_source_spectra", None)
+
+    if not callable(method):
+        return None
+
+    return cast("Callable[[], GcrSourceSpectra]", method)()
+
+
+def _table_id_float_token(value: float) -> str:
+    return f"{value:.12g}".replace("-", "m").replace(".", "_")
+
+
+def _prefixed_output_tables(
+    *,
+    prefix: str,
+    tables: tuple[OutputTable, ...],
+) -> tuple[OutputTable, ...]:
+    return tuple(
+        replace(table, table_id=f"{prefix}_{table.table_id}")
+        for table in tables
+    )
+
+
+def _set_output_tables(
+    calculation_result: CalculationResult,
+    tables: tuple[OutputTable, ...],
+) -> CalculationResult:
+    result = calculation_result
+
+    for table in tables:
+        result = result.set_output_table(table)
+
+    return result
+
+
+def _shielding_table_prefix(
+    *,
+    thickness_g_cm2: float,
+    product_kind: RadiationProductKind,
+) -> str:
+    return (
+        f"gcr_t{_table_id_float_token(thickness_g_cm2)}_"
+        f"{product_kind.value}"
+    )
+
+
+def _gcr_pipeline_output_tables(
+    *,
+    source_spectra: GcrSourceSpectra | None,
+    on_orbit_products: tuple[SpectrumProduct, ...],
+    shielding_let_by_thickness: tuple[GcrShieldingLetPipelineProducts, ...],
+) -> tuple[OutputTable, ...]:
+    if source_spectra is None:
+        return ()
+
+    tables: list[OutputTable] = []
+    tables.extend(gcr_source_spectra_output_tables(source_spectra))
+    tables.extend(gcr_on_orbit_product_output_tables(on_orbit_products))
+
+    for shielding_result in shielding_let_by_thickness:
+        for product_kind in GCR_SHIELDING_LET_PRODUCT_KIND_ORDER:
+            proton = shielding_result.proton_by_kind.get(product_kind)
+            hze_by_z = shielding_result.hze_by_kind.get(product_kind, {})
+            let_result = shielding_result.let_results_by_kind.get(product_kind)
+
+            if proton is None or let_result is None or not hze_by_z:
+                continue
+
+            prefix = _shielding_table_prefix(
+                thickness_g_cm2=shielding_result.thickness_g_cm2,
+                product_kind=product_kind,
+            )
+            tables.extend(
+                _prefixed_output_tables(
+                    prefix=prefix,
+                    tables=gcr_shielding_let_output_tables(
+                        proton=proton,
+                        hze_by_z=hze_by_z,
+                        let_products=let_result,
+                        include_proton_components=False,
+                    ),
+                )
+            )
+
+    return tuple(tables)
 
 
 def _validate_pipeline_spectra_derived_from_model_result(
@@ -149,6 +250,7 @@ class GcrPipelineResult:
     calculation_result: CalculationResult
     gcr_model_result: GcrModelResult
     spectra: tuple[Spectrum1D, ...]
+    source_spectra: GcrSourceSpectra | None = None
     products: tuple[SpectrumProduct, ...] = ()
     on_orbit_products: tuple[SpectrumProduct, ...] = ()
     shielding_let_by_thickness: tuple[GcrShieldingLetPipelineProducts, ...] = ()
@@ -222,6 +324,7 @@ def calculate_gcr_pipeline(
 
     gcr_model_input = GcrModelInput(mission=config.mission)
     gcr_model_result = gcr_model.calculate(gcr_model_input)
+    source_spectra = _calculate_source_spectra_if_supported(gcr_model)
     products = gcr_model_result.products
 
     calculation_result = calculation_result.set_component_status(
@@ -377,6 +480,42 @@ def calculate_gcr_pipeline(
         )
 
 
+    output_tables = _gcr_pipeline_output_tables(
+        source_spectra=source_spectra,
+        on_orbit_products=on_orbit_products,
+        shielding_let_by_thickness=shielding_let_by_thickness,
+    )
+
+    if output_tables:
+        calculation_result = calculation_result.set_component_status(
+            component=GCR_OUTPUT_TABLES_COMPONENT,
+            status=ComponentStatus.NOT_STARTED,
+        )
+        calculation_result = calculation_result.add_log_entry(
+            level=LogLevel.INFO,
+            stage=GCR_OUTPUT_TABLES_COMPONENT,
+            message="GCR output tables started.",
+            details={
+                "table_count": str(len(output_tables)),
+            },
+        )
+        calculation_result = _set_output_tables(
+            calculation_result=calculation_result,
+            tables=output_tables,
+        )
+        calculation_result = calculation_result.set_component_status(
+            component=GCR_OUTPUT_TABLES_COMPONENT,
+            status=ComponentStatus.COMPLETED,
+        )
+        calculation_result = calculation_result.add_log_entry(
+            level=LogLevel.INFO,
+            stage=GCR_OUTPUT_TABLES_COMPONENT,
+            message="GCR output tables completed.",
+            details={
+                "table_count": str(len(output_tables)),
+            },
+        )
+
     calculation_result = calculation_result.set_component_status(
         component=GCR_PIPELINE_COMPONENT,
         status=ComponentStatus.COMPLETED,
@@ -394,6 +533,7 @@ def calculate_gcr_pipeline(
         calculation_result=calculation_result,
         gcr_model_result=gcr_model_result,
         spectra=spectra,
+        source_spectra=source_spectra,
         products=products,
         on_orbit_products=on_orbit_products,
         shielding_let_by_thickness=shielding_let_by_thickness,

@@ -18,6 +18,7 @@ from radar.pipelines.gcr import (
     GCR_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
     GCR_LET_COMPONENT,
     GCR_MODEL_COMPONENT,
+    GCR_OUTPUT_TABLES_COMPONENT,
     GCR_PIPELINE_COMPONENT,
     GCR_SHIELDING_COMPONENT,
     GcrPipelineResult,
@@ -359,6 +360,28 @@ def test_gcr_pipeline_accepts_gost_gcr_model_for_gost_profile() -> None:
     assert pipeline_result.calculation_result.component_status(
         GCR_LET_COMPONENT
     ) is ComponentStatus.COMPLETED
+    assert pipeline_result.calculation_result.component_status(
+        GCR_OUTPUT_TABLES_COMPONENT
+    ) is ComponentStatus.COMPLETED
+
+    assert pipeline_result.source_spectra is not None
+    output_table_ids = {
+        table.table_id
+        for table in pipeline_result.calculation_result.output_tables
+    }
+    assert len(output_table_ids) == 23
+    assert "gcr_gost_h_total_source_outside_magnetosphere" in output_table_ids
+    assert "gcr_gost_fe_total_source_outside_magnetosphere" in output_table_ids
+    assert "gcr_h_mean_flux_on_orbit" in output_table_ids
+    assert "gcr_fe_mission_fluence_on_orbit" in output_table_ids
+    assert (
+        "gcr_t0_01_mean_flux_gcr_combined_let_behind_al"
+        in output_table_ids
+    )
+    assert all(
+        table.kind.value == "spectrum"
+        for table in pipeline_result.calculation_result.output_tables
+    )
 
     model_info_by_name = {
         info.name: info
