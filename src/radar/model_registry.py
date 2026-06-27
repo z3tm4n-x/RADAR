@@ -227,10 +227,23 @@ def _normalized_sep_energy_grid_mev(
     return tuple(float(value) for value in sep_energy_grid_mev)
 
 
+def _normalized_sep_hze_energy_grid_mev_per_nucleon(
+    sep_hze_energy_grid_mev_per_nucleon: tuple[float, ...],
+) -> tuple[float, ...]:
+    """Return a validated SEP HZE energy-per-nucleon grid."""
+
+    if not sep_hze_energy_grid_mev_per_nucleon:
+        msg = "SEP HZE energy grid must not be empty."
+        raise ValueError(msg)
+
+    return tuple(float(value) for value in sep_hze_energy_grid_mev_per_nucleon)
+
+
 def _ost_sep_kwargs_from_config(
     config: CalculationConfig,
     *,
     sep_energy_grid_mev: tuple[float, ...],
+    sep_hze_energy_grid_mev_per_nucleon: tuple[float, ...] | None = None,
 ) -> dict[str, Any]:
     """Return constructor kwargs for configured OST/GOST SEP proton source models."""
 
@@ -240,7 +253,7 @@ def _ost_sep_kwargs_from_config(
         reference_start_year=config.mission.launch_year,
     )
 
-    return {
+    kwargs: dict[str, Any] = {
         "energy_grid_mev": _normalized_sep_energy_grid_mev(sep_energy_grid_mev),
         "monthly_smoothed_wolf_numbers": mission_solar_activity_monthly_wolf_numbers(
             solar_activity,
@@ -248,11 +261,22 @@ def _ost_sep_kwargs_from_config(
         "version": "protons_only_v1",
     }
 
+    if sep_hze_energy_grid_mev_per_nucleon is not None:
+        kwargs["hze_energy_grid_mev_per_nucleon"] = (
+            _normalized_sep_hze_energy_grid_mev_per_nucleon(
+                sep_hze_energy_grid_mev_per_nucleon,
+            )
+        )
+        kwargs["version"] = "protons_hze_v1"
+
+    return kwargs
+
 
 def source_model_instances_for_config(
     config: CalculationConfig,
     *,
     sep_energy_grid_mev: tuple[float, ...] | None = None,
+    sep_hze_energy_grid_mev_per_nucleon: tuple[float, ...] | None = None,
 ) -> tuple[Any, Any, Any]:
     """Return SEP, GCR and ERB model instances configured from calculation input.
 
@@ -262,6 +286,10 @@ def source_model_instances_for_config(
 
     sep_kwargs: dict[str, Any] | None = None
 
+    if sep_hze_energy_grid_mev_per_nucleon is not None and sep_energy_grid_mev is None:
+        msg = "SEP HZE energy grid requires SEP proton energy grid."
+        raise ValueError(msg)
+
     if (
         sep_energy_grid_mev is not None
         and config.source_model_selection.sep_model_family
@@ -270,6 +298,9 @@ def source_model_instances_for_config(
         sep_kwargs = _ost_sep_kwargs_from_config(
             config,
             sep_energy_grid_mev=sep_energy_grid_mev,
+            sep_hze_energy_grid_mev_per_nucleon=(
+                sep_hze_energy_grid_mev_per_nucleon
+            ),
         )
 
     return source_model_instances_for_selection(

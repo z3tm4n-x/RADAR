@@ -436,6 +436,25 @@ def test_source_model_instances_for_config_configures_ost_sep_model() -> None:
     assert isinstance(erb_model, OstErbModel)
 
 
+def test_source_model_instances_for_config_configures_ost_sep_hze_model() -> None:
+    config = _calculation_config_for_model_builder(lifetime_years=2)
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_config(
+        config,
+        sep_energy_grid_mev=(10.0, 20.0, 100.0),
+        sep_hze_energy_grid_mev_per_nucleon=(5.0, 15.0, 50.0),
+    )
+
+    assert isinstance(sep_model, OstSepModel)
+    assert sep_model.energy_grid_mev == (10.0, 20.0, 100.0)
+    assert sep_model.hze_energy_grid_mev_per_nucleon == (5.0, 15.0, 50.0)
+    assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
+    assert sep_model.version == "protons_hze_v1"
+
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+
+
 def test_source_model_instances_for_config_rejects_empty_sep_grid() -> None:
     config = _calculation_config_for_model_builder()
 
@@ -443,6 +462,27 @@ def test_source_model_instances_for_config_rejects_empty_sep_grid() -> None:
         source_model_instances_for_config(
             config,
             sep_energy_grid_mev=(),
+        )
+
+
+def test_source_model_instances_for_config_rejects_hze_grid_without_sep_grid() -> None:
+    config = _calculation_config_for_model_builder()
+
+    with pytest.raises(ValueError, match="SEP HZE energy grid requires SEP proton"):
+        source_model_instances_for_config(
+            config,
+            sep_hze_energy_grid_mev_per_nucleon=(5.0, 15.0),
+        )
+
+
+def test_source_model_instances_for_config_rejects_empty_hze_grid() -> None:
+    config = _calculation_config_for_model_builder()
+
+    with pytest.raises(ValueError, match="SEP HZE energy grid must not be empty"):
+        source_model_instances_for_config(
+            config,
+            sep_energy_grid_mev=(10.0, 20.0),
+            sep_hze_energy_grid_mev_per_nucleon=(),
         )
 
 
