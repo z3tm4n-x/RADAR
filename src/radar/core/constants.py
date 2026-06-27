@@ -1,10 +1,48 @@
-﻿"""Project-wide constants for RADAR."""
+"""Project-wide constants for RADAR."""
 
 from radar.core.types import DoseQuantity, ShieldGeometry
 from radar.core.units import Unit
 
 DEFAULT_KP = 3
 DEFAULT_SEP_EXCEEDANCE_PROBABILITY = 0.1
+
+# Default computational grids for production SEP pipeline execution.
+# These are evaluation grids, not hidden normative coefficients.
+DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV = (
+    1.0,
+    2.0,
+    5.0,
+    10.0,
+    20.0,
+    30.0,
+    50.0,
+    70.0,
+    100.0,
+    150.0,
+    200.0,
+    300.0,
+    500.0,
+    700.0,
+    1000.0,
+)
+
+DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON = (
+    1.0,
+    2.0,
+    5.0,
+    10.0,
+    20.0,
+    30.0,
+    50.0,
+    70.0,
+    100.0,
+    150.0,
+    200.0,
+    300.0,
+    500.0,
+    700.0,
+    1000.0,
+)
 
 DEFAULT_SHIELD_THICKNESSES_G_CM2 = (
     0.01,

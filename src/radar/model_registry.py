@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from radar.core.constants import (
+    DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON,
+    DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV,
+)
 from radar.core.project import CalculationConfig, SourceModelSelectionConfig
 from radar.core.profiles import (
     MethodologyProfile,
@@ -306,6 +310,25 @@ def source_model_instances_for_config(
     return source_model_instances_for_selection(
         config.source_model_selection,
         sep_kwargs=sep_kwargs,
+    )
+
+
+def source_model_instances_for_pipeline_config(
+    config: CalculationConfig,
+    *,
+    sep_energy_grid_mev: tuple[float, ...] | None = (
+        DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV
+    ),
+    sep_hze_energy_grid_mev_per_nucleon: tuple[float, ...] | None = (
+        DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
+    ),
+) -> tuple[Any, Any, Any]:
+    """Return source model instances configured for production pipeline execution."""
+
+    return source_model_instances_for_config(
+        config,
+        sep_energy_grid_mev=sep_energy_grid_mev,
+        sep_hze_energy_grid_mev_per_nucleon=sep_hze_energy_grid_mev_per_nucleon,
     )
 
 

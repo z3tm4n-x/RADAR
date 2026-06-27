@@ -1,5 +1,9 @@
 import pytest
 
+from radar.core.constants import (
+    DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON,
+    DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV,
+)
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.types import RadiationSource
 from radar.core.project import (
@@ -24,6 +28,7 @@ from radar.model_registry import (
     source_model_classes_for_selection,
     source_model_instances_for_profile,
     source_model_instances_for_config,
+    source_model_instances_for_pipeline_config,
     source_model_instances_for_selection,
     source_model_registration,
     source_model_registration_for_profile,
@@ -449,6 +454,64 @@ def test_source_model_instances_for_config_configures_ost_sep_hze_model() -> Non
     assert sep_model.energy_grid_mev == (10.0, 20.0, 100.0)
     assert sep_model.hze_energy_grid_mev_per_nucleon == (5.0, 15.0, 50.0)
     assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
+    assert sep_model.version == "protons_hze_v1"
+
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_pipeline_config_uses_sep_hze_defaults() -> None:
+    config = _calculation_config_for_model_builder(lifetime_years=2)
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_pipeline_config(config)
+
+    assert isinstance(sep_model, OstSepModel)
+    assert sep_model.energy_grid_mev == DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV
+    assert (
+        sep_model.hze_energy_grid_mev_per_nucleon
+        == DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
+    )
+    assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
+    assert sep_model.version == "protons_hze_v1"
+
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_pipeline_config_can_disable_sep_hze_grid() -> None:
+    config = _calculation_config_for_model_builder(lifetime_years=2)
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_pipeline_config(
+        config,
+        sep_hze_energy_grid_mev_per_nucleon=None,
+    )
+
+    assert isinstance(sep_model, OstSepModel)
+    assert sep_model.energy_grid_mev == DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV
+    assert sep_model.hze_energy_grid_mev_per_nucleon == ()
+    assert sep_model.version == "protons_only_v1"
+
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_pipeline_config_respects_gost_sep_profile() -> None:
+    from radar.sep.event_count import SepEventCountPolicy
+
+    config = _calculation_config_for_model_builder(
+        profile=MethodologyProfile.OST_WITH_GOST_SEP,
+        lifetime_years=2,
+    )
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_pipeline_config(config)
+
+    assert isinstance(sep_model, GostSepModel)
+    assert sep_model.energy_grid_mev == DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV
+    assert (
+        sep_model.hze_energy_grid_mev_per_nucleon
+        == DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
+    )
+    assert sep_model.event_count_policy is SepEventCountPolicy.GOST_R_25645_165_2025_W1_0
     assert sep_model.version == "protons_hze_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
