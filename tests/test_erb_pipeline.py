@@ -325,7 +325,7 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
 
 
 
-def test_erb_pipeline_accepts_ae8_ap8_custom_model() -> None:
+def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
     from radar.core.types import RadiationProductKind
     from radar.erb.igrf import IgrfCoefficients
     from radar.erb.model import Ae8Ap8ErbModel
@@ -345,7 +345,7 @@ def test_erb_pipeline_accepts_ae8_ap8_custom_model() -> None:
         config=CalculationConfig(
             mission=MissionConfig(launch_year=2027, lifetime_years=2),
             orbit=OrbitConfig.circular(altitude_km=2_000.0, inclination_deg=0.0),
-            methodology=MethodologyConfig(profile=MethodologyProfile.CUSTOM),
+            methodology=MethodologyConfig(profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB),
         ),
         erb_model=model,
     )

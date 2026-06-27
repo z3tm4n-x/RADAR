@@ -783,14 +783,14 @@ def test_ost_erb_model_records_appendix_e_fit_metadata() -> None:
 
 
 
-def test_ae8_ap8_erb_model_metadata_is_custom_radbelt() -> None:
+def test_ae8_ap8_erb_model_metadata_declares_ae8_ap8_family() -> None:
     from radar.core.profiles import SourceModelFamily
     from radar.erb.model import AE8_AP8_RADBELT_REFERENCE, Ae8Ap8ErbModel
 
     model = Ae8Ap8ErbModel()
 
     assert model.metadata.source is RadiationSource.ERB
-    assert model.metadata.model_family is SourceModelFamily.CUSTOM
+    assert model.metadata.model_family is SourceModelFamily.AE8_AP8
     assert model.metadata.name == "ae8_ap8_radbelt_model"
     assert model.metadata.document == AE8_AP8_RADBELT_REFERENCE
 

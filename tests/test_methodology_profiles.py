@@ -2,6 +2,7 @@ import pytest
 
 from radar.core.types import RadiationSource
 from radar.core.profiles import (
+    AE8_AP8_RADBELT_DOCUMENT,
     DEFAULT_METHODOLOGY_PROFILE,
     GOST_GCR_DOCUMENT,
     GOST_SEP_DOCUMENT,
@@ -11,6 +12,7 @@ from radar.core.profiles import (
     MethodologySourceModelContract,
     SourceModelFamily,
     SourceModelMetadata,
+    allowed_source_model_families_for_source,
     documents_for_methodology_profile,
     expected_source_model_family_for_profile,
     methodology_profile_spec,
@@ -74,6 +76,18 @@ def test_ost_with_gost_sep_gcr_profile_spec() -> None:
     assert spec.uses_ost_134_1044_2007 is True
     assert spec.uses_gost_sep is True
     assert spec.uses_gost_gcr is True
+
+
+def test_ost_with_ae8_ap8_erb_profile_spec() -> None:
+    spec = methodology_profile_spec(MethodologyProfile.OST_WITH_AE8_AP8_ERB)
+
+    assert spec.documents == (
+        OST_134_1044_2007_DOCUMENT,
+        AE8_AP8_RADBELT_DOCUMENT,
+    )
+    assert spec.uses_ost_134_1044_2007 is True
+    assert spec.uses_gost_sep is False
+    assert spec.uses_gost_gcr is False
 
 
 def test_custom_profile_spec_is_explicitly_custom() -> None:
@@ -182,6 +196,16 @@ def test_ost_with_gost_sep_gcr_source_model_contract() -> None:
     assert contract.erb_model_family is SourceModelFamily.OST_134_1044_2007
 
 
+def test_ost_with_ae8_ap8_erb_source_model_contract() -> None:
+    contract = source_model_contract_for_profile(
+        MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+    )
+
+    assert contract.sep_model_family is SourceModelFamily.OST_134_1044_2007
+    assert contract.gcr_model_family is SourceModelFamily.OST_134_1044_2007
+    assert contract.erb_model_family is SourceModelFamily.AE8_AP8
+
+
 def test_custom_source_model_contract() -> None:
     contract = source_model_contract_for_profile(MethodologyProfile.CUSTOM)
 
@@ -214,11 +238,28 @@ def test_expected_source_model_family_for_profile() -> None:
     )
 
 
+    assert (
+        expected_source_model_family_for_profile(
+            profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+            source=RadiationSource.ERB,
+        )
+        is SourceModelFamily.AE8_AP8
+    )
+
+
 def test_validate_source_model_family_for_profile_accepts_expected_family() -> None:
     validate_source_model_family_for_profile(
         profile=MethodologyProfile.OST_WITH_GOST_SEP,
         source=RadiationSource.SEP,
         model_family=SourceModelFamily.GOST_SEP,
+    )
+
+
+def test_validate_source_model_family_for_profile_accepts_ae8_ap8_erb_family() -> None:
+    validate_source_model_family_for_profile(
+        profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+        source=RadiationSource.ERB,
+        model_family=SourceModelFamily.AE8_AP8,
     )
 
 
@@ -261,6 +302,12 @@ def test_source_model_metadata_accepts_valid_source_family_pair() -> None:
     validate_source_model_metadata(metadata)
 
 
+def test_allowed_source_model_families_include_ae8_ap8_for_erb() -> None:
+    assert SourceModelFamily.AE8_AP8 in allowed_source_model_families_for_source(
+        RadiationSource.ERB,
+    )
+
+
 def test_source_model_metadata_rejects_invalid_source_family_pair() -> None:
     with pytest.raises(ValueError, match="not allowed"):
         SourceModelMetadata(
@@ -270,6 +317,16 @@ def test_source_model_metadata_rejects_invalid_source_family_pair() -> None:
             document=GOST_GCR_DOCUMENT,
         )
 
+
+def test_source_model_metadata_accepts_ae8_ap8_erb_family() -> None:
+    metadata = SourceModelMetadata(
+        source=RadiationSource.ERB,
+        model_family=SourceModelFamily.AE8_AP8,
+        name="ae8_ap8_radbelt_model",
+        document=AE8_AP8_RADBELT_DOCUMENT,
+    )
+
+    validate_source_model_metadata(metadata)
 
 def test_validate_source_model_metadata_for_profile_accepts_custom_metadata() -> None:
     metadata = SourceModelMetadata(

@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import (
@@ -30,6 +30,16 @@ def test_source_model_selection_from_gost_sep_gcr_profile() -> None:
     assert selection.sep_model_family is SourceModelFamily.GOST_SEP
     assert selection.gcr_model_family is SourceModelFamily.GOST_GCR
     assert selection.erb_model_family is SourceModelFamily.OST_134_1044_2007
+
+
+def test_source_model_selection_from_ost_with_ae8_ap8_erb_profile() -> None:
+    selection = SourceModelSelectionConfig.from_profile(
+        MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+    )
+
+    assert selection.sep_model_family is SourceModelFamily.OST_134_1044_2007
+    assert selection.gcr_model_family is SourceModelFamily.OST_134_1044_2007
+    assert selection.erb_model_family is SourceModelFamily.AE8_AP8
 
 
 def test_source_model_selection_from_custom_profile() -> None:
@@ -68,6 +78,16 @@ def test_source_model_selection_rejects_profile_mismatch() -> None:
     with pytest.raises(ValueError, match="does not match methodology profile"):
         SourceModelSelectionConfig(
             profile=MethodologyProfile.OST_WITH_GOST_SEP,
+            sep_model_family=SourceModelFamily.OST_134_1044_2007,
+            gcr_model_family=SourceModelFamily.OST_134_1044_2007,
+            erb_model_family=SourceModelFamily.OST_134_1044_2007,
+        )
+
+
+def test_source_model_selection_rejects_wrong_erb_family_for_ae8_ap8_profile() -> None:
+    with pytest.raises(ValueError, match="does not match methodology profile"):
+        SourceModelSelectionConfig(
+            profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
             sep_model_family=SourceModelFamily.OST_134_1044_2007,
             gcr_model_family=SourceModelFamily.OST_134_1044_2007,
             erb_model_family=SourceModelFamily.OST_134_1044_2007,

@@ -15,6 +15,7 @@ class MethodologyProfile(StrEnum):
     OST_WITH_GOST_SEP = "ost_with_gost_sep"
     OST_WITH_GOST_GCR = "ost_with_gost_gcr"
     OST_WITH_GOST_SEP_GCR = "ost_with_gost_sep_gcr"
+    OST_WITH_AE8_AP8_ERB = "ost_with_ae8_ap8_erb"
     CUSTOM = "custom"
 
 
@@ -24,6 +25,7 @@ class SourceModelFamily(StrEnum):
     OST_134_1044_2007 = "ost_134_1044_2007"
     GOST_SEP = "gost_sep"
     GOST_GCR = "gost_gcr"
+    AE8_AP8 = "ae8_ap8"
     CUSTOM = "custom"
 
 
@@ -32,6 +34,7 @@ DEFAULT_METHODOLOGY_PROFILE = MethodologyProfile.OST_134_1044_2007
 OST_134_1044_2007_DOCUMENT = "OST 134-1044-2007"
 GOST_SEP_DOCUMENT = "GOST SEP"
 GOST_GCR_DOCUMENT = "GOST GCR"
+AE8_AP8_RADBELT_DOCUMENT = "NASA/NSSDC AE8/AP8 RADBELT"
 
 
 @dataclass(frozen=True)
@@ -110,6 +113,16 @@ METHODOLOGY_PROFILE_SPECS: dict[MethodologyProfile, MethodologyProfileSpec] = {
         uses_gost_sep=True,
         uses_gost_gcr=True,
     ),
+    MethodologyProfile.OST_WITH_AE8_AP8_ERB: MethodologyProfileSpec(
+        profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+        documents=(
+            OST_134_1044_2007_DOCUMENT,
+            AE8_AP8_RADBELT_DOCUMENT,
+        ),
+        uses_ost_134_1044_2007=True,
+        uses_gost_sep=False,
+        uses_gost_gcr=False,
+    ),
     MethodologyProfile.CUSTOM: MethodologyProfileSpec(
         profile=MethodologyProfile.CUSTOM,
         documents=("custom",),
@@ -175,6 +188,12 @@ class MethodologySourceModelContract:
                 raise ValueError(msg)
             return
 
+        if self.profile is MethodologyProfile.OST_WITH_AE8_AP8_ERB:
+            if self.erb_model_family is not SourceModelFamily.AE8_AP8:
+                msg = "OST_WITH_AE8_AP8_ERB profile must use AE8/AP8 ERB model family."
+                raise ValueError(msg)
+            return
+
         if self.erb_model_family is not SourceModelFamily.OST_134_1044_2007:
             msg = "ERB model family must remain OST 134-1044-2007 for normative profiles."
             raise ValueError(msg)
@@ -207,6 +226,12 @@ METHODOLOGY_SOURCE_MODEL_CONTRACTS: dict[
         sep_model_family=SourceModelFamily.GOST_SEP,
         gcr_model_family=SourceModelFamily.GOST_GCR,
         erb_model_family=SourceModelFamily.OST_134_1044_2007,
+    ),
+    MethodologyProfile.OST_WITH_AE8_AP8_ERB: MethodologySourceModelContract(
+        profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+        sep_model_family=SourceModelFamily.OST_134_1044_2007,
+        gcr_model_family=SourceModelFamily.OST_134_1044_2007,
+        erb_model_family=SourceModelFamily.AE8_AP8,
     ),
     MethodologyProfile.CUSTOM: MethodologySourceModelContract(
         profile=MethodologyProfile.CUSTOM,
@@ -288,6 +313,7 @@ SOURCE_MODEL_FAMILIES_BY_SOURCE: dict[
     ),
     RadiationSource.ERB: (
         SourceModelFamily.OST_134_1044_2007,
+        SourceModelFamily.AE8_AP8,
         SourceModelFamily.CUSTOM,
     ),
 }

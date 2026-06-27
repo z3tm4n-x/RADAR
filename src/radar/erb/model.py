@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 
 from radar.core.products import SpectrumProduct
 from radar.core.profiles import (
+    AE8_AP8_RADBELT_DOCUMENT,
     OST_134_1044_2007_DOCUMENT,
     SourceModelFamily,
     SourceModelMetadata,
@@ -52,7 +53,7 @@ from radar.solar_activity.ost import ost_wolf_number_cycle_table
 OST_ERB_APPENDIX_A_REFERENCE = "OST 134-1044-2007 Appendix A tables A.1.1/A.1.2/A.2.1/A.2.2"
 OST_ERB_APPENDIX_D_REFERENCE = "OST 134-1044-2007 Appendix D L-B coordinate calculation"
 OST_ERB_APPENDIX_E_REFERENCE = "OST 134-1044-2007 Appendix E orbit-averaged ERB spectra"
-AE8_AP8_RADBELT_REFERENCE = "NASA/NSSDC AE8/AP8 RADBELT"
+AE8_AP8_RADBELT_REFERENCE = AE8_AP8_RADBELT_DOCUMENT
 AE8_AP8_PROTON_ENERGIES_MEV = tuple(0.1 * 10.0 ** (index / 10.0) for index in range(38))
 AE8_AP8_ELECTRON_ENERGIES_MEV = tuple(0.05 * 10.0 ** (index / 10.0) for index in range(24))
 
@@ -753,7 +754,7 @@ class Ae8Ap8ErbModel:
 
         return SourceModelMetadata(
             source=RadiationSource.ERB,
-            model_family=SourceModelFamily.CUSTOM,
+            model_family=SourceModelFamily.AE8_AP8,
             name=self.model,
             document=self.document,
             version=self.version,

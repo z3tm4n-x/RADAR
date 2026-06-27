@@ -12,7 +12,7 @@ from radar.core.profiles import (
     expected_source_model_family_for_profile,
 )
 from radar.core.types import RadiationSource
-from radar.erb.model import OstErbModel
+from radar.erb.model import Ae8Ap8ErbModel, OstErbModel
 from radar.gcr.model import GostGcrModel, OstGcrModel
 from radar.sep.model import GostSepModel, OstSepModel
 from radar.solar_activity.model import (
@@ -84,6 +84,11 @@ REGISTERED_SOURCE_MODELS: tuple[SourceModelRegistration, ...] = (
         source=RadiationSource.ERB,
         model_family=SourceModelFamily.OST_134_1044_2007,
         model_class=OstErbModel,
+    ),
+    SourceModelRegistration(
+        source=RadiationSource.ERB,
+        model_family=SourceModelFamily.AE8_AP8,
+        model_class=Ae8Ap8ErbModel,
     ),
 )
 

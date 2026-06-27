@@ -9,7 +9,7 @@ from radar.core.project import (
     OrbitConfig,
     SourceModelSelectionConfig,
 )
-from radar.erb.model import OstErbModel
+from radar.erb.model import Ae8Ap8ErbModel, OstErbModel
 from radar.gcr.model import GostGcrModel, OstGcrModel
 from radar.model_registry import (
     REGISTERED_SOURCE_MODELS,
@@ -54,6 +54,7 @@ def test_registered_source_model_families_for_gcr() -> None:
 def test_registered_source_model_families_for_erb() -> None:
     assert registered_source_model_families(RadiationSource.ERB) == (
         SourceModelFamily.OST_134_1044_2007,
+        SourceModelFamily.AE8_AP8,
     )
 
 
@@ -97,6 +98,13 @@ def test_source_model_class_for_source_and_family() -> None:
             model_family=SourceModelFamily.OST_134_1044_2007,
         )
         is OstErbModel
+    )
+    assert (
+        source_model_class(
+            source=RadiationSource.ERB,
+            model_family=SourceModelFamily.AE8_AP8,
+        )
+        is Ae8Ap8ErbModel
     )
 
 
@@ -166,6 +174,30 @@ def test_source_model_class_for_gost_gcr_profile() -> None:
     )
 
 
+def test_source_model_class_for_ost_with_ae8_ap8_erb_profile() -> None:
+    assert (
+        source_model_class_for_profile(
+            profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+            source=RadiationSource.SEP,
+        )
+        is OstSepModel
+    )
+    assert (
+        source_model_class_for_profile(
+            profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+            source=RadiationSource.GCR,
+        )
+        is OstGcrModel
+    )
+    assert (
+        source_model_class_for_profile(
+            profile=MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+            source=RadiationSource.ERB,
+        )
+        is Ae8Ap8ErbModel
+    )
+
+
 def test_source_model_registration_for_custom_profile_has_no_default() -> None:
     with pytest.raises(ValueError, match="No registered source model"):
         source_model_registration_for_profile(
@@ -205,6 +237,14 @@ def test_source_model_bundle_for_gost_sep_gcr_profile() -> None:
     assert bundle.sep.model_class is GostSepModel
     assert bundle.gcr.model_class is GostGcrModel
     assert bundle.erb.model_class is OstErbModel
+
+
+def test_source_model_bundle_for_ost_with_ae8_ap8_erb_profile() -> None:
+    bundle = source_model_bundle_for_profile(MethodologyProfile.OST_WITH_AE8_AP8_ERB)
+
+    assert bundle.sep.model_class is OstSepModel
+    assert bundle.gcr.model_class is OstGcrModel
+    assert bundle.erb.model_class is Ae8Ap8ErbModel
 
 
 def test_source_model_bundle_registration_order() -> None:
@@ -250,6 +290,19 @@ def test_source_model_bundle_for_explicit_selection() -> None:
     assert bundle.sep.model_class is GostSepModel
     assert bundle.gcr.model_class is GostGcrModel
     assert bundle.erb.model_class is OstErbModel
+
+
+def test_source_model_bundle_for_explicit_ae8_ap8_erb_selection() -> None:
+    selection = SourceModelSelectionConfig.from_profile(
+        MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+    )
+
+    bundle = source_model_bundle_for_selection(selection)
+
+    assert bundle.profile is MethodologyProfile.OST_WITH_AE8_AP8_ERB
+    assert bundle.sep.model_class is OstSepModel
+    assert bundle.gcr.model_class is OstGcrModel
+    assert bundle.erb.model_class is Ae8Ap8ErbModel
 
 
 def test_source_model_classes_for_explicit_selection() -> None:
@@ -316,6 +369,18 @@ def test_source_model_instances_for_selection_respects_gost_sep_profile() -> Non
     assert isinstance(sep_model, GostSepModel)
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_selection_respects_ae8_ap8_erb_profile() -> None:
+    selection = SourceModelSelectionConfig.from_profile(
+        MethodologyProfile.OST_WITH_AE8_AP8_ERB,
+    )
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_selection(selection)
+
+    assert isinstance(sep_model, OstSepModel)
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, Ae8Ap8ErbModel)
 
 
 
