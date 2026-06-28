@@ -1,6 +1,9 @@
-﻿from radar.shielding.proton_al_survival import DEFAULT_AL27_NONELASTIC_MT
+import pytest
+
+from radar.shielding.proton_al_survival import DEFAULT_AL27_NONELASTIC_MT
 from radar.shielding.resources import (
     load_normative_al27_nonelastic_cross_section_table,
+    load_normative_electron_al_range_table,
     load_normative_hze_al_range_tables,
     load_normative_hze_si_let_tables,
     load_normative_proton_al_range_table,
@@ -18,6 +21,18 @@ def test_normative_proton_resource_tables_load() -> None:
     assert len(proton_si.energy_mev) > 10
     assert proton_al.range_at_energy(10.0) > 0.0
     assert proton_si.total_let_at_energy(10.0) > 0.0
+
+
+def test_normative_electron_resource_table_loads() -> None:
+    electron_al = load_normative_electron_al_range_table()
+
+    assert len(electron_al.energy_mev) == 81
+    assert electron_al.energy_mev[0] == pytest.approx(0.01)
+    assert electron_al.energy_mev[-1] == pytest.approx(1000.0)
+    assert electron_al.range_g_cm2[0] == pytest.approx(0.0003539)
+    assert electron_al.range_g_cm2[-1] == pytest.approx(81.8)
+    assert electron_al.stopping_at_energy(1000.0) == pytest.approx(42.44)
+    assert electron_al.range_at_energy(1.0) > electron_al.range_at_energy(0.1)
 
 
 def test_normative_hze_resource_tables_load() -> None:
@@ -58,6 +73,7 @@ def test_normative_shielding_tables_bundle_loads() -> None:
     tables = load_normative_shielding_tables()
 
     assert tables.proton_al_range.energy_mev
+    assert tables.electron_al_range.energy_mev
     assert tables.proton_si_let.energy_mev
     assert tables.hze_al_ranges_by_z
     assert tables.hze_si_let_by_z

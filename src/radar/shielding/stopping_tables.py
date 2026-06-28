@@ -54,6 +54,7 @@ class StoppingTableCsvOutput:
     """CSV paths written by stopping workbook normalization."""
 
     proton_al_range: Path
+    electron_al_range: Path
     proton_si_let: Path
     hze_al_range: Path
     hze_si_let: Path
@@ -225,6 +226,60 @@ def _write_proton_al_range_csv(
                     energy_value,
                     stopping_value * 1000.0,
                     rho_al_g_cm3 * range_value / 10.0,
+                    range_value,
+                    sheet_name,
+                )
+            )
+
+
+def _write_electron_al_range_csv(
+    *,
+    workbook_path: str | Path,
+    output_path: Path,
+    sheet_name: str,
+) -> None:
+    rows = _worksheet_numeric_rows(workbook_path, sheet_name=sheet_name)
+
+    _require_column(rows, "E", sheet_name)
+    _require_column(rows, "e", sheet_name)
+    _require_column(rows, "R", sheet_name)
+
+    with output_path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(
+            (
+                "energy_mev",
+                "stopping_mev_cm2_g",
+                "range_g_cm2",
+                "range_mg_cm2",
+                "source_sheet",
+            )
+        )
+
+        for row in rows:
+            energy_mev = row.get("E")
+            stopping_mev_cm2_mg = row.get("e")
+            range_mg_cm2 = row.get("R")
+
+            if not (
+                _positive(energy_mev)
+                and _positive(stopping_mev_cm2_mg)
+                and _positive(range_mg_cm2)
+            ):
+                continue
+
+            energy_value = _require_positive_float(energy_mev, name="electron Al energy")
+            stopping_value = _require_positive_float(
+                stopping_mev_cm2_mg,
+                name="electron Al stopping",
+            )
+            range_value = _require_positive_float(range_mg_cm2, name="electron Al range")
+
+            writer.writerow(
+                (
+                    energy_value,
+                    stopping_value * 1000.0,
+                    range_value * 1.0e-3,
                     range_value,
                     sheet_name,
                 )
@@ -447,6 +502,7 @@ def convert_stopping_workbook_to_csvs(
     output_dir: str | Path,
     rho_al_g_cm3: float = ALUMINIUM_DENSITY_G_CM3,
     proton_al_sheet: str = "p_Al",
+    electron_al_sheet: str = "e_Al",
     proton_si_sheet: str = "p_Si",
     hze_al_sheet: str = "i_R_Al",
     hze_si_e_sheet: str = "i_Si_e",
@@ -459,6 +515,7 @@ def convert_stopping_workbook_to_csvs(
 
     output = StoppingTableCsvOutput(
         proton_al_range=destination / "proton_al_range.csv",
+        electron_al_range=destination / "electron_al_range.csv",
         proton_si_let=destination / "proton_si_let.csv",
         hze_al_range=destination / "hze_al_range.csv",
         hze_si_let=destination / "hze_si_let.csv",
@@ -469,6 +526,11 @@ def convert_stopping_workbook_to_csvs(
         output_path=output.proton_al_range,
         sheet_name=proton_al_sheet,
         rho_al_g_cm3=rho_al_g_cm3,
+    )
+    _write_electron_al_range_csv(
+        workbook_path=workbook_path,
+        output_path=output.electron_al_range,
+        sheet_name=electron_al_sheet,
     )
     _write_proton_si_let_csv(
         workbook_path=workbook_path,
@@ -507,8 +569,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         rho_al_g_cm3=args.rho_al,
     )
 
-    print(f"proton Al range: {output.proton_al_range}")
-    print(f"proton Si LET:   {output.proton_si_let}")
+    print(f"proton Al range:   {output.proton_al_range}")
+    print(f"electron Al range: {output.electron_al_range}")
+    print(f"proton Si LET:     {output.proton_si_let}")
     print(f"HZE Al range:    {output.hze_al_range}")
     print(f"HZE Si LET:      {output.hze_si_let}")
 

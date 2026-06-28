@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,11 @@ def _sample_workbook(path: Path) -> None:
     p_al.append(("E", "H", "R"))
     p_al.append((1.0, 2.0, 0.1))
     p_al.append((10.0, 3.0, 1.0))
+
+    e_al = workbook.create_sheet("e_Al")
+    e_al.append(("E", "e", "R"))
+    e_al.append((0.1, 0.01, 2.0))
+    e_al.append((1.0, 0.02, 20.0))
 
     p_si = workbook.create_sheet("p_Si")
     p_si.append(("E", "H_coll", "H_nucl"))
@@ -55,6 +60,7 @@ def test_convert_stopping_workbook_to_csvs(tmp_path: Path) -> None:
     )
 
     assert output.proton_al_range.exists()
+    assert output.electron_al_range.exists()
     assert output.proton_si_let.exists()
     assert output.hze_al_range.exists()
     assert output.hze_si_let.exists()
@@ -63,6 +69,12 @@ def test_convert_stopping_workbook_to_csvs(tmp_path: Path) -> None:
     assert proton_al[0]["energy_mev"] == "1.0"
     assert float(proton_al[0]["stopping_mev_cm2_g"]) == pytest.approx(2000.0)
     assert float(proton_al[0]["range_g_cm2"]) == pytest.approx(0.027)
+
+    electron_al = _read_csv(output.electron_al_range)
+    assert electron_al[0]["energy_mev"] == "0.1"
+    assert float(electron_al[0]["stopping_mev_cm2_g"]) == pytest.approx(10.0)
+    assert float(electron_al[0]["range_g_cm2"]) == pytest.approx(0.002)
+    assert float(electron_al[0]["range_mg_cm2"]) == pytest.approx(2.0)
 
     proton_si = _read_csv(output.proton_si_let)
     assert float(proton_si[0]["let_electronic_mev_cm2_mg"]) == pytest.approx(4.0)
