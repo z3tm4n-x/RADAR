@@ -9,13 +9,14 @@ from radar.core.types import (
     SpectrumQuantity,
 )
 from radar.core.units import Unit
-from radar.erb.shielding import ErbProtonShieldingResult
+from radar.erb.shielding import ErbElectronShieldingResult, ErbProtonShieldingResult
 from radar.erb.output_tables import (
     ERB_OUTPUT_DOSE_SEE_DEFERRED_REASON,
     ERB_OUTPUT_DOSE_STATUS_NOT_CALCULATED,
     ERB_OUTPUT_LOCATION_ON_ORBIT,
     ERB_OUTPUT_SHIELDING_NOT_APPLIED,
     ERB_OUTPUT_SINGLE_EVENT_EFFECTS_STATUS_NOT_CALCULATED,
+    erb_electron_shielding_output_tables,
     erb_product_output_tables,
     erb_proton_shielding_output_tables,
 )
@@ -160,3 +161,35 @@ def test_erb_proton_shielding_output_tables_can_include_components() -> None:
     assert total_metadata["particle"] == "proton"
     assert total_metadata["dose_status"] == "not_calculated"
     assert total_metadata["single_event_effects_status"] == "not_calculated"
+
+
+def test_erb_electron_shielding_output_tables_include_deferred_effects_metadata() -> None:
+    primary = _erb_spectrum(
+        particle=Particle.ELECTRON,
+        model="erb_test_model:electron:primary",
+    )
+    shielding_result = ErbElectronShieldingResult(
+        primary=primary,
+        thickness_g_cm2=0.25,
+    )
+
+    tables = erb_electron_shielding_output_tables(shielding_result)
+
+    assert len(tables) == 1
+    assert tables[0].table_id == "erb_electron_primary_energy_behind_al"
+
+    metadata = dict(tables[0].metadata)
+
+    assert metadata["location"] == "behind_shielding"
+    assert metadata["shielding"] == "applied"
+    assert metadata["shield_material"] == "Al"
+    assert metadata["shield_geometry"] == "centered_spherical_shell"
+    assert metadata["thickness_g_cm2"] == "0.25"
+    assert metadata["component"] == "primary_csda"
+    assert metadata["source"] == "erb"
+    assert metadata["particle"] == "electron"
+    assert metadata["electron_transport"] == "primary_csda"
+    assert metadata["bremsstrahlung_transport"] == "not_included"
+    assert metadata["secondary_particles"] == "not_included"
+    assert metadata["dose_status"] == "not_calculated"
+    assert metadata["single_event_effects_status"] == "not_calculated"

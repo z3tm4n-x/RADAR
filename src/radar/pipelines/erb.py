@@ -22,11 +22,14 @@ from radar.erb.model import (
     validate_erb_energy_spectrum,
 )
 from radar.erb.output_tables import (
+    erb_electron_shielding_output_tables,
     erb_product_output_tables,
     erb_proton_shielding_output_tables,
 )
 from radar.erb.shielding import (
+    ErbElectronShieldingResult,
     ErbProtonShieldingResult,
+    calculate_erb_electron_shielding_spectrum,
     calculate_erb_proton_shielding_spectrum,
 )
 from radar.output_tables import OutputTable
@@ -37,8 +40,8 @@ ERB_MODEL_COMPONENT = "erb_model"
 ERB_SHIELDING_COMPONENT = "erb_shielding"
 ERB_OUTPUT_TABLES_COMPONENT = "erb_output_tables"
 UNVERSIONED_MODEL = "unversioned"
-ERB_SHIELDING_MODEL = "erb_proton_al_shielding"
-ERB_SHIELDING_MODEL_VERSION = "al_spherical_csda_secondary_v1"
+ERB_SHIELDING_MODEL = "erb_al_shielding"
+ERB_SHIELDING_MODEL_VERSION = "al_spherical_csda_proton_secondary_electron_primary_v1"
 ERB_SHIELDING_DOCUMENT = "RADAR shielding normative tables"
 
 
@@ -98,42 +101,56 @@ def _validate_pipeline_spectra_derived_from_model_result(
 
 @dataclass(frozen=True)
 class ErbShieldingPipelineProduct:
-    """ERB proton shielding result associated with one source product."""
+    """ERB shielding result associated with one source product."""
 
     thickness_g_cm2: float
     source_product: SpectrumProduct
-    result: ErbProtonShieldingResult
+    result: ErbProtonShieldingResult | ErbElectronShieldingResult
     shielded_product: SpectrumProduct
 
 
-def _calculate_erb_proton_shielding_by_thickness(
+def _calculate_erb_shielding_by_thickness(
     *,
     products: tuple[SpectrumProduct, ...],
     thicknesses_g_cm2: tuple[float, ...],
 ) -> tuple[ErbShieldingPipelineProduct, ...]:
-    proton_products = tuple(
+    shielding_products = tuple(
         product
         for product in products
-        if product.spectrum.particle is Particle.PROTON
+        if product.spectrum.particle in (Particle.PROTON, Particle.ELECTRON)
     )
 
-    if not proton_products:
+    if not shielding_products:
         return ()
 
     tables = load_normative_shielding_tables()
     shielding_results: list[ErbShieldingPipelineProduct] = []
 
     for thickness_g_cm2 in thicknesses_g_cm2:
-        for product in proton_products:
-            result = calculate_erb_proton_shielding_spectrum(
-                spectrum=product.spectrum,
-                tables=tables,
-                thickness_g_cm2=thickness_g_cm2,
-            )
+        for product in shielding_products:
+            if product.spectrum.particle is Particle.PROTON:
+                proton_result = calculate_erb_proton_shielding_spectrum(
+                    spectrum=product.spectrum,
+                    tables=tables,
+                    thickness_g_cm2=thickness_g_cm2,
+                )
+                result: ErbProtonShieldingResult | ErbElectronShieldingResult = proton_result
+                shielded_spectrum = proton_result.total
+            elif product.spectrum.particle is Particle.ELECTRON:
+                electron_result = calculate_erb_electron_shielding_spectrum(
+                    spectrum=product.spectrum,
+                    tables=tables,
+                    thickness_g_cm2=thickness_g_cm2,
+                )
+                result = electron_result
+                shielded_spectrum = electron_result.primary
+            else:
+                continue
+
             source_label = product.label or product.kind.value
             shielded_product = SpectrumProduct(
                 kind=product.kind,
-                spectrum=result.total,
+                spectrum=shielded_spectrum,
                 label=(
                     f"{source_label} behind Al shield "
                     f"{thickness_g_cm2:g} g/cm^2"
@@ -163,13 +180,22 @@ def _erb_pipeline_output_tables(
             thickness_g_cm2=shielding_result.thickness_g_cm2,
             product_kind=shielding_result.source_product.kind,
         )
+        result = shielding_result.result
+
+        if isinstance(result, ErbProtonShieldingResult):
+            shielding_tables = erb_proton_shielding_output_tables(
+                result,
+                include_components=False,
+            )
+        elif isinstance(result, ErbElectronShieldingResult):
+            shielding_tables = erb_electron_shielding_output_tables(result)
+        else:
+            continue
+
         tables.extend(
             _prefixed_output_tables(
                 prefix=prefix,
-                tables=erb_proton_shielding_output_tables(
-                    shielding_result.result,
-                    include_components=False,
-                ),
+                tables=shielding_tables,
             )
         )
 
@@ -305,6 +331,11 @@ def calculate_erb_pipeline(
             for product in on_orbit_products
             if product.spectrum.particle is Particle.PROTON
         )
+        electron_products = tuple(
+            product
+            for product in on_orbit_products
+            if product.spectrum.particle is Particle.ELECTRON
+        )
 
         calculation_result = calculation_result.set_component_status(
             component=ERB_SHIELDING_COMPONENT,
@@ -313,19 +344,17 @@ def calculate_erb_pipeline(
         calculation_result = calculation_result.add_log_entry(
             level=LogLevel.INFO,
             stage=ERB_SHIELDING_COMPONENT,
-            message="ERB proton shielding started.",
+            message="ERB shielding started.",
             details={
                 "thicknesses_g_cm2": ",".join(
                     f"{value:g}" for value in config.shielding.thicknesses_g_cm2
                 ),
                 "input_proton_products": str(len(proton_products)),
-                "input_electron_products": str(
-                    len(on_orbit_products) - len(proton_products)
-                ),
+                "input_electron_products": str(len(electron_products)),
             },
         )
 
-        shielding_by_thickness = _calculate_erb_proton_shielding_by_thickness(
+        shielding_by_thickness = _calculate_erb_shielding_by_thickness(
             products=on_orbit_products,
             thicknesses_g_cm2=config.shielding.thicknesses_g_cm2,
         )
@@ -350,7 +379,7 @@ def calculate_erb_pipeline(
         calculation_result = calculation_result.add_log_entry(
             level=LogLevel.INFO,
             stage=ERB_SHIELDING_COMPONENT,
-            message="ERB proton shielding completed.",
+            message="ERB shielding completed.",
             details={
                 "shielded_products": str(len(shielded_products)),
                 "thickness_count": str(len(config.shielding.thicknesses_g_cm2)),

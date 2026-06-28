@@ -190,7 +190,7 @@ def test_erb_pipeline_records_integrated_proton_shielding_tables() -> None:
         for table in pipeline_result.calculation_result.output_tables
     )
 
-    assert len(table_ids) == 9
+    assert len(table_ids) == 12
     assert "erb_proton_mean_flux_mean_differential_flux_on_orbit" in table_ids
     assert "erb_electron_mean_flux_mean_differential_flux_on_orbit" in table_ids
     assert (
@@ -205,6 +205,23 @@ def test_erb_pipeline_records_integrated_proton_shielding_tables() -> None:
         "erb_t0_1_mission_fluence_erb_proton_total_energy_behind_al"
         in table_ids
     )
+    assert (
+        "erb_t0_1_mean_flux_erb_electron_primary_energy_behind_al"
+        in table_ids
+    )
+    assert (
+        "erb_t0_1_maximum_flux_erb_electron_primary_energy_behind_al"
+        in table_ids
+    )
+    assert (
+        "erb_t0_1_mission_fluence_erb_electron_primary_energy_behind_al"
+        in table_ids
+    )
+    assert len(pipeline_result.shielded_products) == 6
+    assert sum(
+        product.spectrum.particle is Particle.ELECTRON
+        for product in pipeline_result.shielded_products
+    ) == 3
 
 
 def test_erb_pipeline_result_validates_spectra() -> None:
@@ -392,9 +409,9 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
     )
 
     assert len(pipeline_result.on_orbit_products) == 6
-    assert len(pipeline_result.shielded_products) == 3
-    assert len(pipeline_result.products) == 9
-    assert len(pipeline_result.spectra) == 9
+    assert len(pipeline_result.shielded_products) == 6
+    assert len(pipeline_result.products) == 12
+    assert len(pipeline_result.spectra) == 12
     assert tuple(product.kind for product in pipeline_result.on_orbit_products) == (
         RadiationProductKind.MEAN_FLUX,
         RadiationProductKind.MAXIMUM_FLUX,
@@ -406,11 +423,22 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
     assert tuple(
         product.spectrum.particle
         for product in pipeline_result.shielded_products
-    ) == (Particle.PROTON, Particle.PROTON, Particle.PROTON)
+    ) == (
+        Particle.PROTON,
+        Particle.PROTON,
+        Particle.PROTON,
+        Particle.ELECTRON,
+        Particle.ELECTRON,
+        Particle.ELECTRON,
+    )
     assert all(
         "+erb_proton_al_shielding_primary_survival_secondary+"
         in product.spectrum.model
-        for product in pipeline_result.shielded_products
+        for product in pipeline_result.shielded_products[:3]
+    )
+    assert all(
+        "+erb_electron_al_shielding_primary_csda+" in product.spectrum.model
+        for product in pipeline_result.shielded_products[3:]
     )
     assert pipeline_result.calculation_result.component_status(
         ERB_MODEL_COMPONENT
@@ -450,9 +478,9 @@ def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
 
     assert pipeline_result.erb_model_result.model == "ae8_ap8_radbelt_model"
     assert len(pipeline_result.on_orbit_products) == 6
-    assert len(pipeline_result.shielded_products) == 3
-    assert len(pipeline_result.products) == 9
-    assert len(pipeline_result.spectra) == 9
+    assert len(pipeline_result.shielded_products) == 6
+    assert len(pipeline_result.products) == 12
+    assert len(pipeline_result.spectra) == 12
     assert tuple(product.kind for product in pipeline_result.on_orbit_products) == (
         RadiationProductKind.MEAN_FLUX,
         RadiationProductKind.MAXIMUM_FLUX,
@@ -464,8 +492,15 @@ def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
     assert tuple(
         product.spectrum.particle
         for product in pipeline_result.shielded_products
-    ) == (Particle.PROTON, Particle.PROTON, Particle.PROTON)
-    assert len(pipeline_result.shielding_by_thickness) == 3
+    ) == (
+        Particle.PROTON,
+        Particle.PROTON,
+        Particle.PROTON,
+        Particle.ELECTRON,
+        Particle.ELECTRON,
+        Particle.ELECTRON,
+    )
+    assert len(pipeline_result.shielding_by_thickness) == 6
     assert pipeline_result.calculation_result.component_status(
         ERB_SHIELDING_COMPONENT
     ) is ComponentStatus.COMPLETED

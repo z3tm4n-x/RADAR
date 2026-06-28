@@ -1,8 +1,8 @@
 """ERB output table builders.
 
-Dose, shielding, bremsstrahlung, and single-event-effect output tables are
-intentionally not constructed here. They are deferred until the corresponding
-physical models are available.
+Dose, bremsstrahlung, and single-event-effect output tables are intentionally
+not constructed here. They are deferred until the corresponding physical
+models are available.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from math import isfinite
 from radar.core.products import SpectrumProduct
 from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.types import Particle, RadiationSource
-from radar.erb.shielding import ErbProtonShieldingResult
+from radar.erb.shielding import ErbElectronShieldingResult, ErbProtonShieldingResult
 from radar.output_tables import OutputTable, spectrum_output_table
 
 ERB_OUTPUT_LOCATION_ON_ORBIT = "on_orbit"
@@ -136,10 +136,10 @@ def _format_float(value: float) -> str:
 
 def _shielding_metadata(
     *,
-    result: ErbProtonShieldingResult,
+    result: ErbProtonShieldingResult | ErbElectronShieldingResult,
     component: str,
 ) -> dict[str, str]:
-    return {
+    metadata = {
         "stage": "shielding",
         "location": ERB_OUTPUT_LOCATION_BEHIND_SHIELDING,
         "shielding": ERB_OUTPUT_SHIELDING_APPLIED,
@@ -147,14 +147,50 @@ def _shielding_metadata(
         "shield_geometry": ERB_OUTPUT_SHIELD_GEOMETRY_CENTERED_SPHERICAL_SHELL,
         "thickness_g_cm2": _format_float(result.thickness_g_cm2),
         "component": component,
-        "nonelastic_survival": str(result.nonelastic_survival).lower(),
-        "secondary_protons": str(result.secondary_protons).lower(),
         "dose_status": ERB_OUTPUT_DOSE_STATUS_NOT_CALCULATED,
         "single_event_effects_status": (
             ERB_OUTPUT_SINGLE_EVENT_EFFECTS_STATUS_NOT_CALCULATED
         ),
         "dose_see_dependency": ERB_OUTPUT_DOSE_SEE_DEFERRED_REASON,
     }
+
+    if isinstance(result, ErbProtonShieldingResult):
+        metadata.update(
+            {
+                "nonelastic_survival": str(result.nonelastic_survival).lower(),
+                "secondary_protons": str(result.secondary_protons).lower(),
+            }
+        )
+    else:
+        metadata.update(
+            {
+                "electron_transport": "primary_csda",
+                "bremsstrahlung_transport": "not_included",
+                "secondary_particles": "not_included",
+            }
+        )
+
+    return metadata
+
+
+def erb_electron_shielding_output_tables(
+    result: ErbElectronShieldingResult,
+) -> tuple[OutputTable, ...]:
+    """Return ERB primary electron behind-shielding energy spectrum table."""
+
+    return (
+        spectrum_output_table(
+            table_id="erb_electron_primary_energy_behind_al",
+            title=(
+                "????. ????????? "
+                "?? Al-???????. "
+                "????????? CSDA-??????"
+            ),
+            spectrum=result.primary,
+            metadata=_shielding_metadata(result=result, component="primary_csda"),
+        ),
+    )
+
 
 
 def erb_proton_shielding_output_tables(

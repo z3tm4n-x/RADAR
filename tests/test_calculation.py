@@ -181,13 +181,13 @@ def test_execute_calculation_records_model_information(
         "gcr_al_shielding",
         "gcr_si_let",
         "ost_erb_model",
-        "erb_proton_al_shielding",
+        "erb_al_shielding",
     } <= set(model_versions)
     assert model_versions["ost_sep_model"] == "unversioned"
     assert model_versions["ost_gcr_model"] == "unversioned"
     assert model_versions["ost_erb_model"] == "unversioned"
-    assert model_versions["erb_proton_al_shielding"] == (
-        "al_spherical_csda_secondary_v1"
+    assert model_versions["erb_al_shielding"] == (
+        "al_spherical_csda_proton_secondary_electron_primary_v1"
     )
 
     model_statuses = {
@@ -201,7 +201,7 @@ def test_execute_calculation_records_model_information(
     assert model_statuses["gcr_al_shielding"] == "calculated"
     assert model_statuses["gcr_si_let"] == "calculated"
     assert model_statuses["ost_erb_model"] == "calculated"
-    assert model_statuses["erb_proton_al_shielding"] == "calculated"
+    assert model_statuses["erb_al_shielding"] == "calculated"
 
 
 def test_execute_calculation_writes_log_entries(
@@ -214,7 +214,7 @@ def test_execute_calculation_writes_log_entries(
     )
     assert calculation_result.log.warnings()
     assert any(
-        "\u042d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u044b \u0437\u0430 \u0437\u0430\u0449\u0438\u0442\u043e\u0439" in entry.message
+        "????????? ?????????" in entry.message
         for entry in calculation_result.log.entries
     )
     assert all(entry.level is not LogLevel.ERROR for entry in calculation_result.log.entries)
@@ -234,9 +234,9 @@ def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tabl
     assert any(table_id.startswith("erb_") for table_id in output_table_ids)
     assert "erb_electron_mean_flux_mean_differential_flux_on_orbit" in output_table_ids
     assert "erb_t1_mean_flux_erb_proton_total_energy_behind_al" in output_table_ids
-    assert not any(
-        "erb_electron" in table_id and "behind_al" in table_id
-        for table_id in output_table_ids
+    assert (
+        "erb_t1_mean_flux_erb_electron_primary_energy_behind_al"
+        in output_table_ids
     )
 
     dose_table = next(

@@ -192,6 +192,12 @@ def _set_erb_pipeline_source_state(
         if product.spectrum.particle is Particle.ELECTRON
     )
 
+    electron_shielding_status = (
+        "calculated_primary_csda"
+        if electron_shielded_products
+        else "not_calculated"
+    )
+
     result = _merge_calculation_result(
         result=result,
         additional=pipeline_result.calculation_result,
@@ -213,18 +219,18 @@ def _set_erb_pipeline_source_state(
         },
     )
 
-    if electron_on_orbit_products and not electron_shielded_products:
+    if electron_on_orbit_products:
         result = result.add_log_entry(
             LogLevel.WARNING,
             _source_component_title(RadiationSource.ERB),
             (
-                "\u042d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u044b \u0437\u0430 \u0437\u0430\u0449\u0438\u0442\u043e\u0439, "
-                "\u0442\u043e\u0440\u043c\u043e\u0437\u043d\u043e\u0435 \u0438\u0437\u043b\u0443\u0447\u0435\u043d\u0438\u0435, "
-                "\u0434\u043e\u0437\u0430 \u0438 \u043e\u0434\u0438\u043d\u043e\u0447\u043d\u044b\u0435 \u044d\u0444\u0444\u0435\u043a\u0442\u044b "
-                "\u0434\u043b\u044f \u0415\u0420\u041f\u0417 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u043d\u044b."
+                "????????? ?????????, ???? ? ????????? ??????? "
+                "??? ???? ???? ?? ??????????. "
+                "????????? ????????? ?? ??????? ?????????? CSDA "
+                "??? ?????????? ????????? ? ????????? ??????."
             ),
             {
-                "electron_shielding_status": "not_calculated",
+                "electron_shielding_status": electron_shielding_status,
                 "bremsstrahlung_status": "not_calculated",
                 "dose_status": "not_calculated",
                 "single_event_effects_status": "not_calculated",
