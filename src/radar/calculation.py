@@ -7,7 +7,10 @@ from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
 from radar.core.types import RadiationSource
 from radar.model_registry import SourceModelRegistration, source_model_bundle_for_selection
-from radar.pipelines.execution import calculate_sep_pipeline_for_config
+from radar.pipelines.execution import (
+    calculate_gcr_pipeline_for_config,
+    calculate_sep_pipeline_for_config,
+)
 from radar.solar_activity.model import build_mission_solar_activity
 from radar.solar_activity.ost import ost_wolf_number_cycle_table
 from radar.output_tables import OutputTable
@@ -113,7 +116,7 @@ def _set_sep_pipeline_source_state(
     result: CalculationResult,
     config: CalculationConfig,
 ) -> CalculationResult:
-    """Run the configured SEP pipeline and register it as the ??? source state."""
+    """Run the configured SEP pipeline and register it as the SEP source state."""
 
     pipeline_result = calculate_sep_pipeline_for_config(config)
 
@@ -129,7 +132,37 @@ def _set_sep_pipeline_source_state(
     return result.add_log_entry(
         LogLevel.INFO,
         _source_component_title(RadiationSource.SEP),
-        "?????? ??? ???????? ????? ?????? pipeline.",
+        "\u0420\u0430\u0441\u0447\u0451\u0442 \u0421\u041a\u041b \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u043b\u043d\u044b\u0439 pipeline.",
+        {
+            "source_products": str(len(pipeline_result.source_products)),
+            "on_orbit_products": str(len(pipeline_result.on_orbit_products)),
+            "shielded_products": str(len(pipeline_result.shielded_products)),
+            "let_products": str(len(pipeline_result.let_products)),
+        },
+    )
+
+
+def _set_gcr_pipeline_source_state(
+    result: CalculationResult,
+    config: CalculationConfig,
+) -> CalculationResult:
+    """Run the configured GCR pipeline and register it as the GCR source state."""
+
+    pipeline_result = calculate_gcr_pipeline_for_config(config)
+
+    result = _merge_calculation_result(
+        result=result,
+        additional=pipeline_result.calculation_result,
+    )
+    result = result.set_component_status(
+        component=_source_component_title(RadiationSource.GCR),
+        status=ComponentStatus.COMPLETED,
+    )
+
+    return result.add_log_entry(
+        LogLevel.INFO,
+        _source_component_title(RadiationSource.GCR),
+        "\u0420\u0430\u0441\u0447\u0451\u0442 \u0413\u041a\u041b \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u043b\u043d\u044b\u0439 pipeline.",
         {
             "source_products": str(len(pipeline_result.source_products)),
             "on_orbit_products": str(len(pipeline_result.on_orbit_products)),
@@ -258,8 +291,8 @@ def _placeholder_single_event_effects_table(config: CalculationConfig) -> Output
 def execute_calculation(config: CalculationConfig) -> CalculationResult:
     """Execute RADAR calculation plumbing.
 
-    SEP is calculated through the configured full pipeline. GCR and ERB still use
-    placeholder source states until their top-level execution path is connected.
+    SEP and GCR are calculated through configured full pipelines. ERB still uses
+    a placeholder source state until its top-level execution path is connected.
     """
 
     result = CalculationResult(config=config)
@@ -280,6 +313,10 @@ def execute_calculation(config: CalculationConfig) -> CalculationResult:
     for registration in bundle.registrations:
         if registration.source is RadiationSource.SEP:
             result = _set_sep_pipeline_source_state(result, config)
+            continue
+
+        if registration.source is RadiationSource.GCR:
+            result = _set_gcr_pipeline_source_state(result, config)
             continue
 
         result = _set_placeholder_source_state(result, registration)

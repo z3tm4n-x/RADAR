@@ -1,6 +1,7 @@
 import pytest
 
 from radar.core.constants import (
+    DEFAULT_GCR_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON,
     DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON,
     DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV,
 )
@@ -475,7 +476,35 @@ def test_source_model_instances_for_pipeline_config_uses_sep_hze_defaults() -> N
     assert sep_model.version == "protons_hze_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
+    assert (
+        gcr_model.energy_grid_mev_per_nucleon
+        == DEFAULT_GCR_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
+    )
     assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_pipeline_config_can_override_gcr_grid() -> None:
+    config = _calculation_config_for_model_builder(lifetime_years=2)
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_pipeline_config(
+        config,
+        gcr_energy_grid_mev_per_nucleon=(10.0, 100.0),
+    )
+
+    assert isinstance(sep_model, OstSepModel)
+    assert isinstance(gcr_model, OstGcrModel)
+    assert gcr_model.energy_grid_mev_per_nucleon == (10.0, 100.0)
+    assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_instances_for_pipeline_config_rejects_empty_gcr_grid() -> None:
+    config = _calculation_config_for_model_builder(lifetime_years=2)
+
+    with pytest.raises(ValueError, match="GCR energy grid must not be empty"):
+        source_model_instances_for_pipeline_config(
+            config,
+            gcr_energy_grid_mev_per_nucleon=(),
+        )
 
 
 def test_source_model_instances_for_pipeline_config_can_disable_sep_hze_grid() -> None:

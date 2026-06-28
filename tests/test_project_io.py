@@ -170,6 +170,7 @@ def test_calculate_and_save_project_file_writes_result(tmp_path) -> None:
         "single_event_effects",
     } <= output_table_ids
     assert any(table_id.startswith("sep_") for table_id in output_table_ids)
+    assert any(table_id.startswith("gcr_") for table_id in output_table_ids)
 
 
 def test_calculate_project_file_overwrites_input_file(tmp_path) -> None:
@@ -199,6 +200,7 @@ def test_calculate_project_file_overwrites_input_file(tmp_path) -> None:
         "single_event_effects",
     } <= output_table_ids
     assert any(table_id.startswith("sep_") for table_id in output_table_ids)
+    assert any(table_id.startswith("gcr_") for table_id in output_table_ids)
 
 
 def test_calculate_project_file_can_write_to_output_file(tmp_path) -> None:

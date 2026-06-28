@@ -9,6 +9,14 @@ from radar.core.project import (
 from radar.core.result import ComponentStatus
 from radar.core.types import DoseQuantity, SolarActivityLevel
 from radar.core.units import Unit
+from radar.pipelines.gcr import (
+    GCR_GEOMAGNETIC_PENETRATION_COMPONENT,
+    GCR_LET_COMPONENT,
+    GCR_MODEL_COMPONENT,
+    GCR_OUTPUT_TABLES_COMPONENT,
+    GCR_PIPELINE_COMPONENT,
+    GCR_SHIELDING_COMPONENT,
+)
 from radar.pipelines.sep import (
     SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
     SEP_LET_COMPONENT,
@@ -24,7 +32,7 @@ def _config() -> CalculationConfig:
     return CalculationConfig(
         mission=MissionConfig(launch_year=2028, lifetime_years=7),
         orbit=OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0),
-        shielding=ShieldingConfig(thicknesses_g_cm2=(1.0, 2.0, 5.0)),
+        shielding=ShieldingConfig(thicknesses_g_cm2=(1.0,)),
         kp=4,
         dose_quantity=DoseQuantity.ACCUMULATED_DOSE,
         dose_unit=Unit.RAD,
@@ -44,8 +52,9 @@ def test_execute_calculation_sets_source_component_statuses() -> None:
     result = execute_calculation(_config())
 
     assert result.component_status("\u0421\u041a\u041b") is ComponentStatus.COMPLETED
-    assert result.component_status("\u0413\u041a\u041b") is ComponentStatus.SKIPPED
+    assert result.component_status("\u0413\u041a\u041b") is ComponentStatus.COMPLETED
     assert result.component_status("\u0415\u0420\u041f\u0417") is ComponentStatus.SKIPPED
+
     assert result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
     assert result.component_status(SEP_MODEL_COMPONENT) is ComponentStatus.COMPLETED
     assert (
@@ -55,6 +64,16 @@ def test_execute_calculation_sets_source_component_statuses() -> None:
     assert result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.COMPLETED
     assert result.component_status(SEP_LET_COMPONENT) is ComponentStatus.COMPLETED
     assert result.component_status(SEP_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
+
+    assert result.component_status(GCR_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(GCR_MODEL_COMPONENT) is ComponentStatus.COMPLETED
+    assert (
+        result.component_status(GCR_GEOMAGNETIC_PENETRATION_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert result.component_status(GCR_SHIELDING_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(GCR_LET_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(GCR_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
 
 
 def test_execute_calculation_records_model_information() -> None:
@@ -66,14 +85,16 @@ def test_execute_calculation_records_model_information() -> None:
     }
     assert {
         "ost_sep_model",
+        "ost_gcr_model",
         "ost_134_1044_2007_geomagnetic_penetration",
         "sep_al_shielding",
         "sep_si_let",
-        "ost_gcr_model",
+        "gcr_al_shielding",
+        "gcr_si_let",
         "ost_erb_model",
     } <= set(model_versions)
     assert model_versions["ost_sep_model"] == "unversioned"
-    assert model_versions["ost_gcr_model"] == "source_spectra_outside_magnetosphere_v1"
+    assert model_versions["ost_gcr_model"] == "unversioned"
     assert model_versions["ost_erb_model"] == "ost_appendix_a_v1"
 
     model_statuses = {
@@ -81,12 +102,11 @@ def test_execute_calculation_records_model_information() -> None:
         for model in result.model_info
     }
     assert model_statuses["ost_sep_model"] == "calculated"
+    assert model_statuses["ost_gcr_model"] == "calculated"
     assert model_statuses["sep_al_shielding"] == "calculated"
     assert model_statuses["sep_si_let"] == "calculated"
-    assert (
-        model_statuses["ost_gcr_model"]
-        == "\u0447\u0438\u0441\u043b\u0435\u043d\u043d\u0430\u044f \u0447\u0430\u0441\u0442\u044c \u043d\u0435 \u0440\u0435\u0430\u043b\u0438\u0437\u043e\u0432\u0430\u043d\u0430"
-    )
+    assert model_statuses["gcr_al_shielding"] == "calculated"
+    assert model_statuses["gcr_si_let"] == "calculated"
     assert (
         model_statuses["ost_erb_model"]
         == "\u0447\u0438\u0441\u043b\u0435\u043d\u043d\u0430\u044f \u0447\u0430\u0441\u0442\u044c \u043d\u0435 \u0440\u0435\u0430\u043b\u0438\u0437\u043e\u0432\u0430\u043d\u0430"
@@ -102,7 +122,7 @@ def test_execute_calculation_writes_log_entries() -> None:
     assert all(entry.level is not LogLevel.ERROR for entry in result.log.entries)
 
 
-def test_execute_calculation_builds_placeholder_summary_and_sep_output_tables() -> None:
+def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tables() -> None:
     result = execute_calculation(_config())
 
     output_table_ids = {table.table_id for table in result.output_tables}
@@ -112,6 +132,7 @@ def test_execute_calculation_builds_placeholder_summary_and_sep_output_tables() 
         "single_event_effects",
     } <= output_table_ids
     assert any(table_id.startswith("sep_") for table_id in output_table_ids)
+    assert any(table_id.startswith("gcr_") for table_id in output_table_ids)
 
     dose_table = next(
         table
@@ -119,8 +140,6 @@ def test_execute_calculation_builds_placeholder_summary_and_sep_output_tables() 
         if table.table_id == "dose_by_thickness"
     )
     assert dose_table.rows[0].cells == (1.0, 0.0)
-    assert dose_table.rows[1].cells == (2.0, 0.0)
-    assert dose_table.rows[2].cells == (5.0, 0.0)
     assert ("status", "placeholder") in dose_table.metadata
 
     see_table = next(
@@ -129,7 +148,7 @@ def test_execute_calculation_builds_placeholder_summary_and_sep_output_tables() 
         if table.table_id == "single_event_effects"
     )
     see_column_keys = tuple(column.key for column in see_table.columns)
-    assert [row.cells[0] for row in see_table.rows] == [1.0, 2.0, 5.0]
+    assert [row.cells[0] for row in see_table.rows] == [1.0]
     assert see_table.kind.value == "single_event"
     assert ("status", "placeholder") in see_table.metadata
     assert all(

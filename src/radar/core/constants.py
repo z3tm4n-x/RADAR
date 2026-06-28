@@ -6,6 +6,16 @@ from radar.core.units import Unit
 DEFAULT_KP = 3
 DEFAULT_SEP_EXCEEDANCE_PROBABILITY = 0.1
 
+# Default computational grid for production GCR pipeline execution.
+# The upper point is limited to keep HZE shielding bin edges within tables.
+DEFAULT_GCR_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON = (
+    10.0,
+    30.0,
+    100.0,
+    300.0,
+)
+
+
 # Default computational grids for production SEP pipeline execution.
 # These are evaluation grids, not hidden normative coefficients.
 DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV = (

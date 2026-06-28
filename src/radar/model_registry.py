@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from radar.core.constants import (
+    DEFAULT_GCR_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON,
     DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON,
     DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV,
 )
@@ -219,6 +220,18 @@ def source_model_instances_for_profile(
     )
 
 
+def _normalized_gcr_energy_grid_mev_per_nucleon(
+    gcr_energy_grid_mev_per_nucleon: tuple[float, ...],
+) -> tuple[float, ...]:
+    """Return a validated GCR energy-per-nucleon grid."""
+
+    if not gcr_energy_grid_mev_per_nucleon:
+        msg = "GCR energy grid must not be empty."
+        raise ValueError(msg)
+
+    return tuple(float(value) for value in gcr_energy_grid_mev_per_nucleon)
+
+
 def _normalized_sep_energy_grid_mev(
     sep_energy_grid_mev: tuple[float, ...],
 ) -> tuple[float, ...]:
@@ -281,6 +294,7 @@ def source_model_instances_for_config(
     *,
     sep_energy_grid_mev: tuple[float, ...] | None = None,
     sep_hze_energy_grid_mev_per_nucleon: tuple[float, ...] | None = None,
+    gcr_energy_grid_mev_per_nucleon: tuple[float, ...] | None = None,
 ) -> tuple[Any, Any, Any]:
     """Return SEP, GCR and ERB model instances configured from calculation input.
 
@@ -289,6 +303,16 @@ def source_model_instances_for_config(
     """
 
     sep_kwargs: dict[str, Any] | None = None
+    gcr_kwargs: dict[str, Any] | None = None
+
+    if gcr_energy_grid_mev_per_nucleon is not None:
+        gcr_kwargs = {
+            "energy_grid_mev_per_nucleon": (
+                _normalized_gcr_energy_grid_mev_per_nucleon(
+                    gcr_energy_grid_mev_per_nucleon,
+                )
+            ),
+        }
 
     if sep_hze_energy_grid_mev_per_nucleon is not None and sep_energy_grid_mev is None:
         msg = "SEP HZE energy grid requires SEP proton energy grid."
@@ -310,6 +334,7 @@ def source_model_instances_for_config(
     return source_model_instances_for_selection(
         config.source_model_selection,
         sep_kwargs=sep_kwargs,
+        gcr_kwargs=gcr_kwargs,
     )
 
 
@@ -322,6 +347,9 @@ def source_model_instances_for_pipeline_config(
     sep_hze_energy_grid_mev_per_nucleon: tuple[float, ...] | None = (
         DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
     ),
+    gcr_energy_grid_mev_per_nucleon: tuple[float, ...] | None = (
+        DEFAULT_GCR_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
+    ),
 ) -> tuple[Any, Any, Any]:
     """Return source model instances configured for production pipeline execution."""
 
@@ -329,6 +357,7 @@ def source_model_instances_for_pipeline_config(
         config,
         sep_energy_grid_mev=sep_energy_grid_mev,
         sep_hze_energy_grid_mev_per_nucleon=sep_hze_energy_grid_mev_per_nucleon,
+        gcr_energy_grid_mev_per_nucleon=gcr_energy_grid_mev_per_nucleon,
     )
 
 
