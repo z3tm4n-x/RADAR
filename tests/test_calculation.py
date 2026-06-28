@@ -1,3 +1,5 @@
+import pytest
+
 from radar.calculation import execute_calculation
 from radar.core.log import LogLevel
 from radar.core.project import (
@@ -6,7 +8,7 @@ from radar.core.project import (
     OrbitConfig,
     ShieldingConfig,
 )
-from radar.core.result import ComponentStatus
+from radar.core.result import CalculationResult, ComponentStatus
 from radar.core.types import DoseQuantity, SolarActivityLevel
 from radar.core.units import Unit
 from radar.pipelines.gcr import (
@@ -39,49 +41,113 @@ def _config() -> CalculationConfig:
     )
 
 
-def test_execute_calculation_returns_result_for_config() -> None:
-    config = _config()
+def _maximum_activity_config() -> CalculationConfig:
+    base_config = _config()
+    return CalculationConfig(
+        mission=MissionConfig(
+            launch_year=2028,
+            lifetime_years=3,
+            solar_activity_level=SolarActivityLevel.MAXIMUM,
+        ),
+        orbit=base_config.orbit,
+        shielding=base_config.shielding,
+        kp=base_config.kp,
+        dose_quantity=base_config.dose_quantity,
+        dose_unit=base_config.dose_unit,
+        methodology=base_config.methodology,
+    )
 
-    result = execute_calculation(config)
 
-    assert result.config == config
-    assert not result.has_errors()
+@pytest.fixture(scope="module")
+def calculation_result() -> CalculationResult:
+    return execute_calculation(_config())
 
 
-def test_execute_calculation_sets_source_component_statuses() -> None:
-    result = execute_calculation(_config())
+@pytest.fixture(scope="module")
+def maximum_activity_result() -> CalculationResult:
+    return execute_calculation(_maximum_activity_config())
 
-    assert result.component_status("\u0421\u041a\u041b") is ComponentStatus.COMPLETED
-    assert result.component_status("\u0413\u041a\u041b") is ComponentStatus.COMPLETED
-    assert result.component_status("\u0415\u0420\u041f\u0417") is ComponentStatus.SKIPPED
 
-    assert result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
-    assert result.component_status(SEP_MODEL_COMPONENT) is ComponentStatus.COMPLETED
+def test_execute_calculation_returns_result_for_config(
+    calculation_result: CalculationResult,
+) -> None:
+    assert calculation_result.config == _config()
+    assert not calculation_result.has_errors()
+
+
+def test_execute_calculation_sets_source_component_statuses(
+    calculation_result: CalculationResult,
+) -> None:
     assert (
-        result.component_status(SEP_GEOMAGNETIC_PENETRATION_COMPONENT)
+        calculation_result.component_status("\u0421\u041a\u041b")
         is ComponentStatus.COMPLETED
     )
-    assert result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.COMPLETED
-    assert result.component_status(SEP_LET_COMPONENT) is ComponentStatus.COMPLETED
-    assert result.component_status(SEP_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
-
-    assert result.component_status(GCR_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
-    assert result.component_status(GCR_MODEL_COMPONENT) is ComponentStatus.COMPLETED
     assert (
-        result.component_status(GCR_GEOMAGNETIC_PENETRATION_COMPONENT)
+        calculation_result.component_status("\u0413\u041a\u041b")
         is ComponentStatus.COMPLETED
     )
-    assert result.component_status(GCR_SHIELDING_COMPONENT) is ComponentStatus.COMPLETED
-    assert result.component_status(GCR_LET_COMPONENT) is ComponentStatus.COMPLETED
-    assert result.component_status(GCR_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
+    assert (
+        calculation_result.component_status("\u0415\u0420\u041f\u0417")
+        is ComponentStatus.SKIPPED
+    )
+
+    assert (
+        calculation_result.component_status(SEP_PIPELINE_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(SEP_MODEL_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(SEP_GEOMAGNETIC_PENETRATION_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(SEP_SHIELDING_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(SEP_LET_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(SEP_OUTPUT_TABLES_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+
+    assert (
+        calculation_result.component_status(GCR_PIPELINE_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(GCR_MODEL_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(GCR_GEOMAGNETIC_PENETRATION_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(GCR_SHIELDING_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(GCR_LET_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(GCR_OUTPUT_TABLES_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
 
 
-def test_execute_calculation_records_model_information() -> None:
-    result = execute_calculation(_config())
-
+def test_execute_calculation_records_model_information(
+    calculation_result: CalculationResult,
+) -> None:
     model_versions = {
         model.name: model.version
-        for model in result.model_info
+        for model in calculation_result.model_info
     }
     assert {
         "ost_sep_model",
@@ -99,7 +165,7 @@ def test_execute_calculation_records_model_information() -> None:
 
     model_statuses = {
         model.name: model.status
-        for model in result.model_info
+        for model in calculation_result.model_info
     }
     assert model_statuses["ost_sep_model"] == "calculated"
     assert model_statuses["ost_gcr_model"] == "calculated"
@@ -113,19 +179,22 @@ def test_execute_calculation_records_model_information() -> None:
     )
 
 
-def test_execute_calculation_writes_log_entries() -> None:
-    result = execute_calculation(_config())
+def test_execute_calculation_writes_log_entries(
+    calculation_result: CalculationResult,
+) -> None:
+    assert calculation_result.log.entries[0].level is LogLevel.INFO
+    assert (
+        calculation_result.log.entries[0].stage
+        == "\u0437\u0430\u043f\u0443\u0441\u043a \u0440\u0430\u0441\u0447\u0451\u0442\u0430"
+    )
+    assert calculation_result.log.warnings()
+    assert all(entry.level is not LogLevel.ERROR for entry in calculation_result.log.entries)
 
-    assert result.log.entries[0].level is LogLevel.INFO
-    assert result.log.entries[0].stage == "\u0437\u0430\u043f\u0443\u0441\u043a \u0440\u0430\u0441\u0447\u0451\u0442\u0430"
-    assert result.log.warnings()
-    assert all(entry.level is not LogLevel.ERROR for entry in result.log.entries)
 
-
-def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tables() -> None:
-    result = execute_calculation(_config())
-
-    output_table_ids = {table.table_id for table in result.output_tables}
+def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tables(
+    calculation_result: CalculationResult,
+) -> None:
+    output_table_ids = {table.table_id for table in calculation_result.output_tables}
     assert {
         "dose_by_thickness",
         "source_contributions",
@@ -136,7 +205,7 @@ def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tabl
 
     dose_table = next(
         table
-        for table in result.output_tables
+        for table in calculation_result.output_tables
         if table.table_id == "dose_by_thickness"
     )
     assert dose_table.rows[0].cells == (1.0, 0.0)
@@ -144,7 +213,7 @@ def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tabl
 
     see_table = next(
         table
-        for table in result.output_tables
+        for table in calculation_result.output_tables
         if table.table_id == "single_event_effects"
     )
     see_column_keys = tuple(column.key for column in see_table.columns)
@@ -161,40 +230,24 @@ def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tabl
     )
 
 
-def test_execute_calculation_result_can_be_saved_in_project_file() -> None:
-    config = _config()
-    result = execute_calculation(config)
-
+def test_execute_calculation_result_can_be_saved_in_project_file(
+    calculation_result: CalculationResult,
+) -> None:
     project_file = ProjectFile.create(
-        calculation_config=config,
-        calculation_result=result,
+        calculation_config=calculation_result.config,
+        calculation_result=calculation_result,
     )
     restored = project_file_from_json(project_file.to_json())
 
-    assert restored.calculation_result == result
+    assert restored.calculation_result == calculation_result
 
 
-def test_execute_calculation_records_ost_solar_activity_input_data() -> None:
-    base_config = _config()
-    config = CalculationConfig(
-        mission=MissionConfig(
-            launch_year=2028,
-            lifetime_years=3,
-            solar_activity_level=SolarActivityLevel.MAXIMUM,
-        ),
-        orbit=base_config.orbit,
-        shielding=base_config.shielding,
-        kp=base_config.kp,
-        dose_quantity=base_config.dose_quantity,
-        dose_unit=base_config.dose_unit,
-        methodology=base_config.methodology,
-    )
-
-    result = execute_calculation(config)
-
+def test_execute_calculation_records_ost_solar_activity_input_data(
+    maximum_activity_result: CalculationResult,
+) -> None:
     solar_data = next(
         info
-        for info in result.input_data_info
+        for info in maximum_activity_result.input_data_info
         if info.name == "\u0421\u0410"
     )
     assert solar_data.source == "\u041e\u0421\u0422 134-1044-2007"
@@ -204,25 +257,10 @@ def test_execute_calculation_records_ost_solar_activity_input_data() -> None:
     assert ("wolf_numbers", "11.5, 33.9, 100.8") in solar_data.values
 
 
-def test_execute_calculation_logs_ost_wolf_numbers_for_mission() -> None:
-    base_config = _config()
-    config = CalculationConfig(
-        mission=MissionConfig(
-            launch_year=2028,
-            lifetime_years=3,
-            solar_activity_level=SolarActivityLevel.MAXIMUM,
-        ),
-        orbit=base_config.orbit,
-        shielding=base_config.shielding,
-        kp=base_config.kp,
-        dose_quantity=base_config.dose_quantity,
-        dose_unit=base_config.dose_unit,
-        methodology=base_config.methodology,
-    )
-
-    result = execute_calculation(config)
-
-    messages = tuple(entry.message for entry in result.log.entries)
+def test_execute_calculation_logs_ost_wolf_numbers_for_mission(
+    maximum_activity_result: CalculationResult,
+) -> None:
+    messages = tuple(entry.message for entry in maximum_activity_result.log.entries)
     assert any(
         message
         == "\u0427\u0438\u0441\u043b\u0430 \u0412\u043e\u043b\u044c\u0444\u0430 \u043f\u043e \u0442\u0430\u0431\u043b\u0438\u0446\u0435 \u0413.1 \u041e\u0421\u0422: 11.5, 33.9, 100.8"

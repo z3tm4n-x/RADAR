@@ -1,5 +1,8 @@
 from datetime import UTC, datetime
 
+import pytest
+
+import radar.project_io as project_io
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import CalculationConfig, MethodologyConfig, MissionConfig, OrbitConfig
 from radar.core.result import CalculationResult, ComponentStatus
@@ -50,11 +53,22 @@ def _output_table():
     )
 
 
-def _calculation_result() -> CalculationResult:
-    return CalculationResult(config=_calculation_config()).set_component_status(
-        "СКЛ",
+def _calculation_result_for_config(config: CalculationConfig) -> CalculationResult:
+    return CalculationResult(config=config).set_component_status(
+        "\u0421\u041a\u041b",
         ComponentStatus.COMPLETED,
     ).set_output_table(_output_table())
+
+
+def _calculation_result() -> CalculationResult:
+    return _calculation_result_for_config(_calculation_config())
+
+
+def _stub_execute_calculation(monkeypatch: pytest.MonkeyPatch) -> None:
+    def execute(config: CalculationConfig) -> CalculationResult:
+        return _calculation_result_for_config(config)
+
+    monkeypatch.setattr(project_io, "execute_calculation", execute)
 
 
 def test_save_project_file_writes_project_file(tmp_path) -> None:
@@ -146,8 +160,12 @@ def test_save_project_file_writes_calculation_result(tmp_path) -> None:
     assert read_project_file(path).calculation_result == result
 
 
-def test_calculate_and_save_project_file_writes_result(tmp_path) -> None:
+def test_calculate_and_save_project_file_writes_result(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path = tmp_path / "calculated_project.radar.json"
+    _stub_execute_calculation(monkeypatch)
 
     project_file = calculate_and_save_project_file(
         path,
@@ -159,23 +177,18 @@ def test_calculate_and_save_project_file_writes_result(tmp_path) -> None:
     assert project_file.calculation_result is not None
     assert restored == project_file
     assert restored.calculation_result is not None
-    assert restored.calculation_result.config == _calculation_config()
-    output_table_ids = {
-        table.table_id
-        for table in restored.calculation_result.output_tables
-    }
-    assert {
-        "dose_by_thickness",
-        "source_contributions",
-        "single_event_effects",
-    } <= output_table_ids
-    assert any(table_id.startswith("sep_") for table_id in output_table_ids)
-    assert any(table_id.startswith("gcr_") for table_id in output_table_ids)
+    assert restored.calculation_result == _calculation_result_for_config(
+        _calculation_config(),
+    )
 
 
-def test_calculate_project_file_overwrites_input_file(tmp_path) -> None:
+def test_calculate_project_file_overwrites_input_file(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     path = tmp_path / "project.radar.json"
     created_at = datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC)
+    _stub_execute_calculation(monkeypatch)
 
     save_project_file(
         path,
@@ -189,24 +202,19 @@ def test_calculate_project_file_overwrites_input_file(tmp_path) -> None:
     assert project_file == restored
     assert restored.created_at == created_at.isoformat()
     assert restored.calculation_result is not None
-    assert restored.calculation_result.config == _calculation_config()
-    output_table_ids = {
-        table.table_id
-        for table in restored.calculation_result.output_tables
-    }
-    assert {
-        "dose_by_thickness",
-        "source_contributions",
-        "single_event_effects",
-    } <= output_table_ids
-    assert any(table_id.startswith("sep_") for table_id in output_table_ids)
-    assert any(table_id.startswith("gcr_") for table_id in output_table_ids)
+    assert restored.calculation_result == _calculation_result_for_config(
+        _calculation_config(),
+    )
 
 
-def test_calculate_project_file_can_write_to_output_file(tmp_path) -> None:
+def test_calculate_project_file_can_write_to_output_file(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     input_path = tmp_path / "input_project.radar.json"
     output_path = tmp_path / "output_project.radar.json"
     created_at = datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC)
+    _stub_execute_calculation(monkeypatch)
     output_created_at = datetime(2029, 6, 7, 8, 9, 10, tzinfo=UTC)
 
     save_project_file(
@@ -226,5 +234,6 @@ def test_calculate_project_file_can_write_to_output_file(tmp_path) -> None:
     assert original.calculation_result is None
     assert project_file == restored
     assert restored.created_at == output_created_at.isoformat()
-    assert restored.calculation_result is not None
-    assert restored.calculation_result.config == _calculation_config()
+    assert restored.calculation_result == _calculation_result_for_config(
+        _calculation_config(),
+    )
