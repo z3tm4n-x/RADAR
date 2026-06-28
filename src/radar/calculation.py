@@ -7,6 +7,7 @@ from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
 from radar.core.types import RadiationSource
 from radar.model_registry import SourceModelRegistration, source_model_bundle_for_selection
+from radar.pipelines.execution import calculate_sep_pipeline_for_config
 from radar.solar_activity.model import build_mission_solar_activity
 from radar.solar_activity.ost import ost_wolf_number_cycle_table
 from radar.output_tables import OutputTable
@@ -74,6 +75,68 @@ def _set_placeholder_source_state(
         },
     )
 
+
+
+def _merge_calculation_result(
+    result: CalculationResult,
+    additional: CalculationResult,
+) -> CalculationResult:
+    """Merge one calculation result into another."""
+
+    for log_entry in additional.log.entries:
+        result = result.add_log_entry(
+            level=log_entry.level,
+            stage=log_entry.stage,
+            message=log_entry.message,
+            details=dict(log_entry.details),
+        )
+
+    for status_entry in additional.component_statuses:
+        result = result.set_component_status(
+            component=status_entry.component,
+            status=status_entry.status,
+        )
+
+    for model in additional.model_info:
+        result = result.set_model_info(model)
+
+    for info in additional.input_data_info:
+        result = result.set_input_data_info(info)
+
+    for table in additional.output_tables:
+        result = result.set_output_table(table)
+
+    return result
+
+
+def _set_sep_pipeline_source_state(
+    result: CalculationResult,
+    config: CalculationConfig,
+) -> CalculationResult:
+    """Run the configured SEP pipeline and register it as the ??? source state."""
+
+    pipeline_result = calculate_sep_pipeline_for_config(config)
+
+    result = _merge_calculation_result(
+        result=result,
+        additional=pipeline_result.calculation_result,
+    )
+    result = result.set_component_status(
+        component=_source_component_title(RadiationSource.SEP),
+        status=ComponentStatus.COMPLETED,
+    )
+
+    return result.add_log_entry(
+        LogLevel.INFO,
+        _source_component_title(RadiationSource.SEP),
+        "?????? ??? ???????? ????? ?????? pipeline.",
+        {
+            "source_products": str(len(pipeline_result.source_products)),
+            "on_orbit_products": str(len(pipeline_result.on_orbit_products)),
+            "shielded_products": str(len(pipeline_result.shielded_products)),
+            "let_products": str(len(pipeline_result.let_products)),
+        },
+    )
 
 def _set_solar_activity_state(
     result: CalculationResult,
@@ -193,11 +256,10 @@ def _placeholder_single_event_effects_table(config: CalculationConfig) -> Output
 
 
 def execute_calculation(config: CalculationConfig) -> CalculationResult:
-    """Execute temporary RADAR calculation plumbing.
+    """Execute RADAR calculation plumbing.
 
-    This function intentionally does not call normative source-model equations yet.
-    It creates a reproducible calculation result containing selected model metadata,
-    component states, log entries and placeholder output tables.
+    SEP is calculated through the configured full pipeline. GCR and ERB still use
+    placeholder source states until their top-level execution path is connected.
     """
 
     result = CalculationResult(config=config)
@@ -216,6 +278,10 @@ def execute_calculation(config: CalculationConfig) -> CalculationResult:
     bundle = source_model_bundle_for_selection(config.source_model_selection)
 
     for registration in bundle.registrations:
+        if registration.source is RadiationSource.SEP:
+            result = _set_sep_pipeline_source_state(result, config)
+            continue
+
         result = _set_placeholder_source_state(result, registration)
 
     result = result.set_output_table(_placeholder_dose_table(config))

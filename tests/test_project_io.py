@@ -160,14 +160,16 @@ def test_calculate_and_save_project_file_writes_result(tmp_path) -> None:
     assert restored == project_file
     assert restored.calculation_result is not None
     assert restored.calculation_result.config == _calculation_config()
-    assert {
+    output_table_ids = {
         table.table_id
         for table in restored.calculation_result.output_tables
-    } == {
+    }
+    assert {
         "dose_by_thickness",
         "source_contributions",
         "single_event_effects",
-    }
+    } <= output_table_ids
+    assert any(table_id.startswith("sep_") for table_id in output_table_ids)
 
 
 def test_calculate_project_file_overwrites_input_file(tmp_path) -> None:
@@ -187,14 +189,16 @@ def test_calculate_project_file_overwrites_input_file(tmp_path) -> None:
     assert restored.created_at == created_at.isoformat()
     assert restored.calculation_result is not None
     assert restored.calculation_result.config == _calculation_config()
-    assert {
+    output_table_ids = {
         table.table_id
         for table in restored.calculation_result.output_tables
-    } == {
+    }
+    assert {
         "dose_by_thickness",
         "source_contributions",
         "single_event_effects",
-    }
+    } <= output_table_ids
+    assert any(table_id.startswith("sep_") for table_id in output_table_ids)
 
 
 def test_calculate_project_file_can_write_to_output_file(tmp_path) -> None:

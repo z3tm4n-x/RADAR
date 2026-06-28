@@ -1,10 +1,22 @@
 from radar.calculation import execute_calculation
 from radar.core.log import LogLevel
-from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
-from radar.core.types import SolarActivityLevel
+from radar.core.project import (
+    CalculationConfig,
+    MissionConfig,
+    OrbitConfig,
+    ShieldingConfig,
+)
 from radar.core.result import ComponentStatus
-from radar.core.types import DoseQuantity
+from radar.core.types import DoseQuantity, SolarActivityLevel
 from radar.core.units import Unit
+from radar.pipelines.sep import (
+    SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+    SEP_LET_COMPONENT,
+    SEP_MODEL_COMPONENT,
+    SEP_OUTPUT_TABLES_COMPONENT,
+    SEP_PIPELINE_COMPONENT,
+    SEP_SHIELDING_COMPONENT,
+)
 from radar.project_file import ProjectFile, project_file_from_json
 
 
@@ -31,32 +43,53 @@ def test_execute_calculation_returns_result_for_config() -> None:
 def test_execute_calculation_sets_source_component_statuses() -> None:
     result = execute_calculation(_config())
 
-    assert result.component_status("СКЛ") is ComponentStatus.SKIPPED
-    assert result.component_status("ГКЛ") is ComponentStatus.SKIPPED
-    assert result.component_status("ЕРПЗ") is ComponentStatus.SKIPPED
+    assert result.component_status("\u0421\u041a\u041b") is ComponentStatus.COMPLETED
+    assert result.component_status("\u0413\u041a\u041b") is ComponentStatus.SKIPPED
+    assert result.component_status("\u0415\u0420\u041f\u0417") is ComponentStatus.SKIPPED
+    assert result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(SEP_MODEL_COMPONENT) is ComponentStatus.COMPLETED
+    assert (
+        result.component_status(SEP_GEOMAGNETIC_PENETRATION_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(SEP_LET_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(SEP_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
 
 
 def test_execute_calculation_records_model_information() -> None:
     result = execute_calculation(_config())
 
-    assert len(result.model_info) == 3
-    assert {model.name for model in result.model_info} == {
-        "ost_sep_model",
-        "ost_gcr_model",
-        "ost_erb_model",
-    }
     model_versions = {
         model.name: model.version
         for model in result.model_info
     }
-    assert model_versions == {
-        "ost_sep_model": "not_implemented",
-        "ost_gcr_model": "source_spectra_outside_magnetosphere_v1",
-        "ost_erb_model": "ost_appendix_a_v1",
-    }
-    assert all(
-        model.status == "численная часть не реализована"
+    assert {
+        "ost_sep_model",
+        "ost_134_1044_2007_geomagnetic_penetration",
+        "sep_al_shielding",
+        "sep_si_let",
+        "ost_gcr_model",
+        "ost_erb_model",
+    } <= set(model_versions)
+    assert model_versions["ost_sep_model"] == "unversioned"
+    assert model_versions["ost_gcr_model"] == "source_spectra_outside_magnetosphere_v1"
+    assert model_versions["ost_erb_model"] == "ost_appendix_a_v1"
+
+    model_statuses = {
+        model.name: model.status
         for model in result.model_info
+    }
+    assert model_statuses["ost_sep_model"] == "calculated"
+    assert model_statuses["sep_al_shielding"] == "calculated"
+    assert model_statuses["sep_si_let"] == "calculated"
+    assert (
+        model_statuses["ost_gcr_model"]
+        == "\u0447\u0438\u0441\u043b\u0435\u043d\u043d\u0430\u044f \u0447\u0430\u0441\u0442\u044c \u043d\u0435 \u0440\u0435\u0430\u043b\u0438\u0437\u043e\u0432\u0430\u043d\u0430"
+    )
+    assert (
+        model_statuses["ost_erb_model"]
+        == "\u0447\u0438\u0441\u043b\u0435\u043d\u043d\u0430\u044f \u0447\u0430\u0441\u0442\u044c \u043d\u0435 \u0440\u0435\u0430\u043b\u0438\u0437\u043e\u0432\u0430\u043d\u0430"
     )
 
 
@@ -64,19 +97,21 @@ def test_execute_calculation_writes_log_entries() -> None:
     result = execute_calculation(_config())
 
     assert result.log.entries[0].level is LogLevel.INFO
-    assert result.log.entries[0].stage == "запуск расчёта"
+    assert result.log.entries[0].stage == "\u0437\u0430\u043f\u0443\u0441\u043a \u0440\u0430\u0441\u0447\u0451\u0442\u0430"
     assert result.log.warnings()
     assert all(entry.level is not LogLevel.ERROR for entry in result.log.entries)
 
 
-def test_execute_calculation_builds_placeholder_output_tables() -> None:
+def test_execute_calculation_builds_placeholder_summary_and_sep_output_tables() -> None:
     result = execute_calculation(_config())
 
-    assert {table.table_id for table in result.output_tables} == {
+    output_table_ids = {table.table_id for table in result.output_tables}
+    assert {
         "dose_by_thickness",
         "source_contributions",
         "single_event_effects",
-    }
+    } <= output_table_ids
+    assert any(table_id.startswith("sep_") for table_id in output_table_ids)
 
     dose_table = next(
         table
@@ -119,6 +154,7 @@ def test_execute_calculation_result_can_be_saved_in_project_file() -> None:
 
     assert restored.calculation_result == result
 
+
 def test_execute_calculation_records_ost_solar_activity_input_data() -> None:
     base_config = _config()
     config = CalculationConfig(
@@ -137,8 +173,12 @@ def test_execute_calculation_records_ost_solar_activity_input_data() -> None:
 
     result = execute_calculation(config)
 
-    solar_data = next(info for info in result.input_data_info if info.name == "СА")
-    assert solar_data.source == "ОСТ 134-1044-2007"
+    solar_data = next(
+        info
+        for info in result.input_data_info
+        if info.name == "\u0421\u0410"
+    )
+    assert solar_data.source == "\u041e\u0421\u0422 134-1044-2007"
     assert solar_data.table_id == "ost_134_1044_2007_table_g_1_wolf_numbers"
     assert ("level", "maximum") in solar_data.values
     assert ("cycle_years", "1, 2, 3") in solar_data.values
@@ -165,7 +205,7 @@ def test_execute_calculation_logs_ost_wolf_numbers_for_mission() -> None:
 
     messages = tuple(entry.message for entry in result.log.entries)
     assert any(
-        message == "Числа Вольфа по таблице Г.1 ОСТ: 11.5, 33.9, 100.8"
+        message
+        == "\u0427\u0438\u0441\u043b\u0430 \u0412\u043e\u043b\u044c\u0444\u0430 \u043f\u043e \u0442\u0430\u0431\u043b\u0438\u0446\u0435 \u0413.1 \u041e\u0421\u0422: 11.5, 33.9, 100.8"
         for message in messages
     )
-
