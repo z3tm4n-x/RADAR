@@ -1,8 +1,23 @@
 from datetime import UTC, datetime
 
+import pytest
+
+import radar.project_io as project_io
 from radar.__main__ import main
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
-from radar.project_io import calculate_and_save_project_file, read_project_file, save_project_file
+from radar.core.result import CalculationResult, InputDataInfo
+from radar.core.types import RadiationSource
+from radar.project_io import (
+    calculate_and_save_project_file,
+    read_project_file,
+    save_project_file,
+)
+from radar.standard_output_tables import (
+    DoseByThicknessPoint,
+    SourceContribution,
+    dose_by_thickness_output_table,
+    source_contribution_output_table,
+)
 
 
 def _calculation_config() -> CalculationConfig:
@@ -11,6 +26,61 @@ def _calculation_config() -> CalculationConfig:
         orbit=OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0),
         kp=4,
     )
+
+
+def _calculation_result_for_config(config: CalculationConfig) -> CalculationResult:
+    result = CalculationResult(config=config)
+    result = result.set_input_data_info(
+        InputDataInfo(
+            name="\u0421\u0410",
+            source="\u041e\u0421\u0422 134-1044-2007",
+            table_id="ost_134_1044_2007_table_g_1_wolf_numbers",
+            values=(
+                ("level", config.mission.solar_activity_level.value),
+                ("cycle_years", "1, 2, 3"),
+                ("wolf_numbers", "11.5, 33.9, 100.8"),
+            ),
+        )
+    )
+    result = result.set_output_table(
+        dose_by_thickness_output_table(
+            table_id="dose_by_thickness",
+            title="\u0414\u043e\u0437\u0430 \u043f\u043e \u0442\u043e\u043b\u0449\u0438\u043d\u0435 \u0437\u0430\u0449\u0438\u0442\u044b",
+            points=tuple(
+                DoseByThicknessPoint(
+                    thickness_g_cm2=thickness,
+                    value=0.0,
+                )
+                for thickness in config.shielding.thicknesses_g_cm2
+            ),
+            dose_quantity=config.dose_quantity,
+            value_unit=config.dose_unit,
+            metadata={"status": "test_stub"},
+        )
+    )
+    return result.set_output_table(
+        source_contribution_output_table(
+            table_id="source_contributions",
+            title="\u0412\u043a\u043b\u0430\u0434\u044b \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u043e\u0432 \u0438\u0437\u043b\u0443\u0447\u0435\u043d\u0438\u044f",
+            contributions=(
+                SourceContribution(source=RadiationSource.SEP, value=0.0),
+                SourceContribution(source=RadiationSource.GCR, value=0.0),
+                SourceContribution(source=RadiationSource.ERB, value=0.0),
+            ),
+            value_title="\u0417\u043d\u0430\u0447\u0435\u043d\u0438\u0435",
+            value_unit=config.dose_unit,
+            metadata={"status": "test_stub"},
+        )
+    )
+
+
+def _stub_project_io_execute_calculation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def execute(config: CalculationConfig) -> CalculationResult:
+        return _calculation_result_for_config(config)
+
+    monkeypatch.setattr(project_io, "execute_calculation", execute)
 
 
 def test_main_init_creates_project_file(tmp_path, capsys) -> None:
@@ -166,7 +236,11 @@ def test_main_init_rejects_circular_orbit_without_altitude(tmp_path, capsys) -> 
     assert "Для круговой орбиты укажите --altitude-km" in captured.err
 
 
-def test_main_run_overwrites_input_project_file(tmp_path, capsys) -> None:
+def test_main_run_overwrites_input_project_file(
+    tmp_path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     input_path = tmp_path / "input.radar.json"
     created_at = datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC)
 
@@ -175,6 +249,8 @@ def test_main_run_overwrites_input_project_file(tmp_path, capsys) -> None:
         _calculation_config(),
         created_at=created_at,
     )
+
+    _stub_project_io_execute_calculation(monkeypatch)
 
     exit_code = main(["run", str(input_path)])
     restored = read_project_file(input_path)
@@ -186,7 +262,11 @@ def test_main_run_overwrites_input_project_file(tmp_path, capsys) -> None:
     assert "Расчёт проекта RADAR сохранён" in captured.out
 
 
-def test_main_run_writes_output_project_file(tmp_path, capsys) -> None:
+def test_main_run_writes_output_project_file(
+    tmp_path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     input_path = tmp_path / "input.radar.json"
     output_path = tmp_path / "output.radar.json"
 
@@ -195,6 +275,8 @@ def test_main_run_writes_output_project_file(tmp_path, capsys) -> None:
         _calculation_config(),
         created_at=datetime(2028, 1, 2, 3, 4, 5, tzinfo=UTC),
     )
+
+    _stub_project_io_execute_calculation(monkeypatch)
 
     exit_code = main(["run", str(input_path), "--output", str(output_path)])
     original = read_project_file(input_path)
@@ -244,8 +326,13 @@ def test_main_show_project_without_result(tmp_path, capsys) -> None:
     assert "Выходные таблицы: отсутствуют" in captured.out
 
 
-def test_main_show_project_with_result(tmp_path, capsys) -> None:
+def test_main_show_project_with_result(
+    tmp_path,
+    capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     input_path = tmp_path / "output.radar.json"
+    _stub_project_io_execute_calculation(monkeypatch)
 
     calculate_and_save_project_file(
         input_path,
@@ -268,7 +355,10 @@ def test_main_show_project_with_result(tmp_path, capsys) -> None:
     assert "source_contributions" in captured.out
 
 
-def test_main_run_preserves_solar_activity_in_protocol(tmp_path) -> None:
+def test_main_run_preserves_solar_activity_in_protocol(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     input_path = tmp_path / "input.radar.json"
     output_path = tmp_path / "output.radar.json"
 
@@ -288,6 +378,8 @@ def test_main_run_preserves_solar_activity_in_protocol(tmp_path) -> None:
     )
     assert exit_code == 0
 
+    _stub_project_io_execute_calculation(monkeypatch)
+
     exit_code = main(["run", str(input_path), "--output", str(output_path)])
     restored = read_project_file(output_path)
 
@@ -301,7 +393,10 @@ def test_main_run_preserves_solar_activity_in_protocol(tmp_path) -> None:
     }
 
 
-def test_main_run_uses_configured_shield_thicknesses(tmp_path) -> None:
+def test_main_run_uses_configured_shield_thicknesses(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     input_path = tmp_path / "input.radar.json"
     output_path = tmp_path / "output.radar.json"
 
@@ -322,6 +417,8 @@ def test_main_run_uses_configured_shield_thicknesses(tmp_path) -> None:
         ],
     )
     assert exit_code == 0
+
+    _stub_project_io_execute_calculation(monkeypatch)
 
     exit_code = main(["run", str(input_path), "--output", str(output_path)])
     restored = read_project_file(output_path)
