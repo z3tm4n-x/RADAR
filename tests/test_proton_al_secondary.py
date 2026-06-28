@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import pytest
 
@@ -95,6 +95,18 @@ def test_secondary_spectrum_is_nonnegative_and_nonzero_for_positive_kernel() -> 
 
     assert all(value >= 0.0 for value in secondary.y)
     assert any(value > 0.0 for value in secondary.y)
+
+
+def test_secondary_spectrum_skips_below_minimum_residual_range() -> None:
+    secondary = calculate_secondary_proton_spectrum_through_al(
+        incident_spectrum=_spectrum(),
+        stopping_table=_stopping_table(),
+        kernel=_kernel(),
+        thickness_g_cm2=1.0,
+        depth_steps=10,
+    )
+
+    assert all(value >= 0.0 for value in secondary.y)
 
 
 def test_secondary_spectrum_is_zero_for_zero_cross_section() -> None:

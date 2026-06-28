@@ -11,6 +11,12 @@ from radar.core.project import (
 from radar.core.result import CalculationResult, ComponentStatus
 from radar.core.types import DoseQuantity, SolarActivityLevel
 from radar.core.units import Unit
+from radar.pipelines.erb import (
+    ERB_MODEL_COMPONENT,
+    ERB_OUTPUT_TABLES_COMPONENT,
+    ERB_PIPELINE_COMPONENT,
+    ERB_SHIELDING_COMPONENT,
+)
 from radar.pipelines.gcr import (
     GCR_GEOMAGNETIC_PENETRATION_COMPONENT,
     GCR_LET_COMPONENT,
@@ -88,7 +94,7 @@ def test_execute_calculation_sets_source_component_statuses(
     )
     assert (
         calculation_result.component_status("\u0415\u0420\u041f\u0417")
-        is ComponentStatus.SKIPPED
+        is ComponentStatus.COMPLETED
     )
 
     assert (
@@ -141,6 +147,23 @@ def test_execute_calculation_sets_source_component_statuses(
         is ComponentStatus.COMPLETED
     )
 
+    assert (
+        calculation_result.component_status(ERB_PIPELINE_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(ERB_MODEL_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(ERB_SHIELDING_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+    assert (
+        calculation_result.component_status(ERB_OUTPUT_TABLES_COMPONENT)
+        is ComponentStatus.COMPLETED
+    )
+
 
 def test_execute_calculation_records_model_information(
     calculation_result: CalculationResult,
@@ -158,10 +181,14 @@ def test_execute_calculation_records_model_information(
         "gcr_al_shielding",
         "gcr_si_let",
         "ost_erb_model",
+        "erb_proton_al_shielding",
     } <= set(model_versions)
     assert model_versions["ost_sep_model"] == "unversioned"
     assert model_versions["ost_gcr_model"] == "unversioned"
-    assert model_versions["ost_erb_model"] == "ost_appendix_a_v1"
+    assert model_versions["ost_erb_model"] == "unversioned"
+    assert model_versions["erb_proton_al_shielding"] == (
+        "al_spherical_csda_secondary_v1"
+    )
 
     model_statuses = {
         model.name: model.status
@@ -173,10 +200,8 @@ def test_execute_calculation_records_model_information(
     assert model_statuses["sep_si_let"] == "calculated"
     assert model_statuses["gcr_al_shielding"] == "calculated"
     assert model_statuses["gcr_si_let"] == "calculated"
-    assert (
-        model_statuses["ost_erb_model"]
-        == "\u0447\u0438\u0441\u043b\u0435\u043d\u043d\u0430\u044f \u0447\u0430\u0441\u0442\u044c \u043d\u0435 \u0440\u0435\u0430\u043b\u0438\u0437\u043e\u0432\u0430\u043d\u0430"
-    )
+    assert model_statuses["ost_erb_model"] == "calculated"
+    assert model_statuses["erb_proton_al_shielding"] == "calculated"
 
 
 def test_execute_calculation_writes_log_entries(
@@ -188,6 +213,10 @@ def test_execute_calculation_writes_log_entries(
         == "\u0437\u0430\u043f\u0443\u0441\u043a \u0440\u0430\u0441\u0447\u0451\u0442\u0430"
     )
     assert calculation_result.log.warnings()
+    assert any(
+        "\u042d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u044b \u0437\u0430 \u0437\u0430\u0449\u0438\u0442\u043e\u0439" in entry.message
+        for entry in calculation_result.log.entries
+    )
     assert all(entry.level is not LogLevel.ERROR for entry in calculation_result.log.entries)
 
 
@@ -202,6 +231,13 @@ def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tabl
     } <= output_table_ids
     assert any(table_id.startswith("sep_") for table_id in output_table_ids)
     assert any(table_id.startswith("gcr_") for table_id in output_table_ids)
+    assert any(table_id.startswith("erb_") for table_id in output_table_ids)
+    assert "erb_electron_mean_flux_mean_differential_flux_on_orbit" in output_table_ids
+    assert "erb_t1_mean_flux_erb_proton_total_energy_behind_al" in output_table_ids
+    assert not any(
+        "erb_electron" in table_id and "behind_al" in table_id
+        for table_id in output_table_ids
+    )
 
     dose_table = next(
         table

@@ -5,9 +5,10 @@ from __future__ import annotations
 from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
-from radar.core.types import RadiationSource
+from radar.core.types import Particle, RadiationSource
 from radar.model_registry import SourceModelRegistration, source_model_bundle_for_selection
 from radar.pipelines.execution import (
+    calculate_erb_pipeline_for_config,
     calculate_gcr_pipeline_for_config,
     calculate_sep_pipeline_for_config,
 )
@@ -171,6 +172,68 @@ def _set_gcr_pipeline_source_state(
         },
     )
 
+
+def _set_erb_pipeline_source_state(
+    result: CalculationResult,
+    config: CalculationConfig,
+) -> CalculationResult:
+    """Run the configured ERB pipeline and register it as the ERB source state."""
+
+    pipeline_result = calculate_erb_pipeline_for_config(config)
+
+    electron_on_orbit_products = tuple(
+        product
+        for product in pipeline_result.on_orbit_products
+        if product.spectrum.particle is Particle.ELECTRON
+    )
+    electron_shielded_products = tuple(
+        product
+        for product in pipeline_result.shielded_products
+        if product.spectrum.particle is Particle.ELECTRON
+    )
+
+    result = _merge_calculation_result(
+        result=result,
+        additional=pipeline_result.calculation_result,
+    )
+    result = result.set_component_status(
+        component=_source_component_title(RadiationSource.ERB),
+        status=ComponentStatus.COMPLETED,
+    )
+    result = result.add_log_entry(
+        LogLevel.INFO,
+        _source_component_title(RadiationSource.ERB),
+        "\u0420\u0430\u0441\u0447\u0451\u0442 \u0415\u0420\u041f\u0417 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d \u0447\u0435\u0440\u0435\u0437 ERB pipeline.",
+        {
+            "on_orbit_products": str(len(pipeline_result.on_orbit_products)),
+            "shielded_products": str(len(pipeline_result.shielded_products)),
+            "electron_on_orbit_products": str(len(electron_on_orbit_products)),
+            "electron_shielded_products": str(len(electron_shielded_products)),
+            "output_tables": str(len(pipeline_result.calculation_result.output_tables)),
+        },
+    )
+
+    if electron_on_orbit_products and not electron_shielded_products:
+        result = result.add_log_entry(
+            LogLevel.WARNING,
+            _source_component_title(RadiationSource.ERB),
+            (
+                "\u042d\u043b\u0435\u043a\u0442\u0440\u043e\u043d\u044b \u0437\u0430 \u0437\u0430\u0449\u0438\u0442\u043e\u0439, "
+                "\u0442\u043e\u0440\u043c\u043e\u0437\u043d\u043e\u0435 \u0438\u0437\u043b\u0443\u0447\u0435\u043d\u0438\u0435, "
+                "\u0434\u043e\u0437\u0430 \u0438 \u043e\u0434\u0438\u043d\u043e\u0447\u043d\u044b\u0435 \u044d\u0444\u0444\u0435\u043a\u0442\u044b "
+                "\u0434\u043b\u044f \u0415\u0420\u041f\u0417 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u043d\u044b."
+            ),
+            {
+                "electron_shielding_status": "not_calculated",
+                "bremsstrahlung_status": "not_calculated",
+                "dose_status": "not_calculated",
+                "single_event_effects_status": "not_calculated",
+            },
+        )
+
+    return result
+
+
 def _set_solar_activity_state(
     result: CalculationResult,
     config: CalculationConfig,
@@ -291,8 +354,9 @@ def _placeholder_single_event_effects_table(config: CalculationConfig) -> Output
 def execute_calculation(config: CalculationConfig) -> CalculationResult:
     """Execute RADAR calculation plumbing.
 
-    SEP and GCR are calculated through configured full pipelines. ERB still uses
-    a placeholder source state until its top-level execution path is connected.
+    SEP, GCR and ERB source pipelines are calculated through configured
+    pipeline execution. ERB electron shielding, bremsstrahlung, dose and SEE
+    remain explicitly deferred.
     """
 
     result = CalculationResult(config=config)
@@ -319,6 +383,10 @@ def execute_calculation(config: CalculationConfig) -> CalculationResult:
             result = _set_gcr_pipeline_source_state(result, config)
             continue
 
+        if registration.source is RadiationSource.ERB:
+            result = _set_erb_pipeline_source_state(result, config)
+            continue
+
         result = _set_placeholder_source_state(result, registration)
 
     result = result.set_output_table(_placeholder_dose_table(config))
@@ -328,7 +396,7 @@ def execute_calculation(config: CalculationConfig) -> CalculationResult:
     return result.add_log_entry(
         LogLevel.WARNING,
         "выходные таблицы",
-        "Сформированы временные нулевые таблицы без физического расчёта.",
+        "Сформированы временные нулевые итоговые таблицы дозы и эффектов.",
         {
             "tables": str(len(result.output_tables)),
         },

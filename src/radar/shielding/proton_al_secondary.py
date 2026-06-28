@@ -389,6 +389,9 @@ def _incident_energy_at_depth(
     if residual_range <= 0.0:
         return None
 
+    if residual_range < table.range_g_cm2[0]:
+        return None
+
     return table.energy_at_range(residual_range)
 
 
