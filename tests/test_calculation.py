@@ -229,6 +229,7 @@ def test_execute_calculation_builds_calculated_dose_and_pipeline_output_tables(
     assert {
         "dose_by_thickness",
         "source_contributions",
+        "dose_components",
         "single_event_effects",
     } <= output_table_ids
     assert any(table_id.startswith("sep_") for table_id in output_table_ids)
@@ -259,6 +260,28 @@ def test_execute_calculation_builds_calculated_dose_and_pipeline_output_tables(
     assert ("status", "calculated") in source_table.metadata
     assert ("optional_let_dose_included_in_total", "false") in source_table.metadata
     assert any(row.cells[1] > 0.0 for row in source_table.rows)
+
+    dose_components_table = next(
+        table
+        for table in calculation_result.output_tables
+        if table.table_id == "dose_components"
+    )
+    dose_component_column_keys = tuple(
+        column.key for column in dose_components_table.columns
+    )
+    assert ("status", "calculated") in dose_components_table.metadata
+    assert ("optional_let_dose_included_in_total", "false") in (
+        dose_components_table.metadata
+    )
+    assert any(
+        row.cells[dose_component_column_keys.index("included_in_total")] is False
+        for row in dose_components_table.rows
+    )
+    assert any(
+        row.cells[dose_component_column_keys.index("component")]
+        == "erb_electron_shieldose2"
+        for row in dose_components_table.rows
+    )
 
     see_table = next(
         table

@@ -6,6 +6,7 @@ from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
 from radar.core.types import Particle, RadiationSource
+from radar.core.units import Unit
 from radar.model_registry import SourceModelRegistration, source_model_bundle_for_selection
 from radar.pipelines.dose import (
     DosePipelineResult,
@@ -21,7 +22,12 @@ from radar.pipelines.gcr import GcrPipelineResult
 from radar.pipelines.sep import SepPipelineResult
 from radar.solar_activity.model import build_mission_solar_activity
 from radar.solar_activity.ost import ost_wolf_number_cycle_table
-from radar.output_tables import OutputTable
+from radar.output_tables import (
+    OutputTable,
+    OutputTableColumn,
+    OutputTableKind,
+    output_table_from_rows,
+)
 from radar.single_event_effects import (
     SingleEventEffectContribution,
     SingleEventEffectMechanism,
@@ -437,6 +443,82 @@ def _source_contribution_table(
     )
 
 
+def _dose_components_table(
+    *,
+    dose_result: DosePipelineResult,
+) -> OutputTable:
+    """Return detailed dose component table."""
+
+    return output_table_from_rows(
+        table_id="dose_components",
+        title="\u041a\u043e\u043c\u043f\u043e\u043d\u0435\u043d\u0442\u044b \u0434\u043e\u0437\u044b",
+        kind=OutputTableKind.DOSE,
+        columns=(
+            OutputTableColumn(
+                key="thickness_g_cm2",
+                title="\u0422\u043e\u043b\u0449\u0438\u043d\u0430 \u0437\u0430\u0449\u0438\u0442\u044b",
+                unit=Unit.THICKNESS.value,
+            ),
+            OutputTableColumn(
+                key="source",
+                title="\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a",
+            ),
+            OutputTableColumn(
+                key="component",
+                title="\u041a\u043e\u043c\u043f\u043e\u043d\u0435\u043d\u0442\u0430",
+            ),
+            OutputTableColumn(
+                key="dose_rad",
+                title="\u0414\u043e\u0437\u0430",
+                unit=Unit.RAD.value,
+            ),
+            OutputTableColumn(
+                key="included_in_total",
+                title="\u0412\u043a\u043b\u044e\u0447\u0435\u043d\u043e \u0432 \u0438\u0442\u043e\u0433",
+            ),
+            OutputTableColumn(
+                key="product_kind",
+                title="Product kind",
+            ),
+            OutputTableColumn(
+                key="particle",
+                title="Particle",
+            ),
+            OutputTableColumn(
+                key="model",
+                title="Dose model",
+            ),
+        ),
+        rows=tuple(
+            {
+                "thickness_g_cm2": component.thickness_g_cm2,
+                "source": _source_component_title(component.source),
+                "component": component.component,
+                "dose_rad": component.dose_rad,
+                "included_in_total": component.included_in_total,
+                "product_kind": component.product.kind.value,
+                "particle": component.product.spectrum.particle.value,
+                "model": component.model,
+            }
+            for component in sorted(
+                dose_result.components,
+                key=lambda item: (
+                    item.thickness_g_cm2,
+                    item.source.value,
+                    item.component,
+                    item.product.kind.value,
+                ),
+            )
+        ),
+        metadata={
+            "status": "calculated",
+            "model": dose_result.model,
+            "version": dose_result.version,
+            "optional_let_dose_included_in_total": "false",
+        },
+    )
+
+
 def _set_dose_pipeline_state(
     *,
     result: CalculationResult,
@@ -476,6 +558,9 @@ def _set_dose_pipeline_state(
             config=config,
             dose_result=dose_result,
         )
+    )
+    result = result.set_output_table(
+        _dose_components_table(dose_result=dose_result)
     )
     result = result.set_component_status(component, ComponentStatus.COMPLETED)
 
