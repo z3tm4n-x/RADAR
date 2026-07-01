@@ -182,6 +182,7 @@ def test_execute_calculation_records_model_information(
         "gcr_si_let",
         "ost_erb_model",
         "erb_al_shielding",
+        "radar_dose_pipeline",
     } <= set(model_versions)
     assert model_versions["ost_sep_model"] == "unversioned"
     assert model_versions["ost_gcr_model"] == "unversioned"
@@ -202,6 +203,7 @@ def test_execute_calculation_records_model_information(
     assert model_statuses["gcr_si_let"] == "calculated"
     assert model_statuses["ost_erb_model"] == "calculated"
     assert model_statuses["erb_al_shielding"] == "calculated"
+    assert model_statuses["radar_dose_pipeline"] == "calculated"
 
 
 def test_execute_calculation_writes_log_entries(
@@ -214,13 +216,13 @@ def test_execute_calculation_writes_log_entries(
     )
     assert calculation_result.log.warnings()
     assert any(
-        "????????? ?????????" in entry.message
+        "SHIELDOSE-2" in entry.message
         for entry in calculation_result.log.entries
     )
     assert all(entry.level is not LogLevel.ERROR for entry in calculation_result.log.entries)
 
 
-def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tables(
+def test_execute_calculation_builds_calculated_dose_and_pipeline_output_tables(
     calculation_result: CalculationResult,
 ) -> None:
     output_table_ids = {table.table_id for table in calculation_result.output_tables}
@@ -244,8 +246,19 @@ def test_execute_calculation_builds_placeholder_summary_and_pipeline_output_tabl
         for table in calculation_result.output_tables
         if table.table_id == "dose_by_thickness"
     )
-    assert dose_table.rows[0].cells == (1.0, 0.0)
-    assert ("status", "placeholder") in dose_table.metadata
+    assert dose_table.rows[0].cells[0] == 1.0
+    assert dose_table.rows[0].cells[1] > 0.0
+    assert ("status", "calculated") in dose_table.metadata
+    assert ("optional_let_dose_included_in_total", "false") in dose_table.metadata
+
+    source_table = next(
+        table
+        for table in calculation_result.output_tables
+        if table.table_id == "source_contributions"
+    )
+    assert ("status", "calculated") in source_table.metadata
+    assert ("optional_let_dose_included_in_total", "false") in source_table.metadata
+    assert any(row.cells[1] > 0.0 for row in source_table.rows)
 
     see_table = next(
         table
