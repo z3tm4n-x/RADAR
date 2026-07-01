@@ -8,9 +8,8 @@ from math import exp, isfinite, log
 from radar.core.products import SpectrumProduct
 from radar.core.types import RadiationProductKind, RadiationSource, SpectrumQuantity
 from radar.core.units import Unit
+from radar.dose.constants import MEV_PER_MG_TO_MEV_PER_G, MEV_TO_RAD
 
-MEV_TO_RAD = 1.6021892e-8
-MEV_PER_MG_TO_MEV_PER_G = 1000.0
 ION_LET_DOSE_MODEL = "ion_let_fluence_dose"
 
 
