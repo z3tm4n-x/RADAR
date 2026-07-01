@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from radar.core.products import SpectrumProduct
@@ -10,7 +12,10 @@ from radar.dose.electron_shieldose2 import load_normative_elbrbas2_database
 from radar.pipelines.dose import (
     DOSE_PIPELINE_MODEL,
     DOSE_PIPELINE_MODEL_VERSION,
+    calculate_dose_pipeline_from_pipeline_results,
     calculate_dose_pipeline_from_products,
+    let_products_by_thickness_from_pipeline_results,
+    shielded_products_by_thickness_from_pipeline_results,
 )
 from radar.shielding.proton_si_let import ProtonSiLetTable
 
@@ -172,3 +177,141 @@ def test_dose_pipeline_rejects_invalid_thicknesses() -> None:
             let_products_by_thickness={},
             electron_n_energy_points=101,
         )
+
+
+
+def _fake_shielding_result(
+    *,
+    thickness_g_cm2: float,
+    shielded_products: tuple[SpectrumProduct, ...] = (),
+    let_products: tuple[SpectrumProduct, ...] = (),
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        thickness_g_cm2=thickness_g_cm2,
+        shielded_products=shielded_products,
+        let_products=let_products,
+    )
+
+
+def _fake_erb_shielding_result(
+    *,
+    thickness_g_cm2: float,
+    shielded_product: SpectrumProduct,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        thickness_g_cm2=thickness_g_cm2,
+        shielded_product=shielded_product,
+    )
+
+
+def test_collects_pipeline_products_by_thickness() -> None:
+    sep_result = SimpleNamespace(
+        shielding_let_by_thickness=(
+            _fake_shielding_result(
+                thickness_g_cm2=0.1,
+                shielded_products=(_shielded_proton_product(RadiationSource.SEP),),
+                let_products=(_let_product(RadiationSource.SEP),),
+            ),
+        ),
+    )
+    gcr_result = SimpleNamespace(
+        shielding_let_by_thickness=(
+            _fake_shielding_result(
+                thickness_g_cm2=0.1,
+                shielded_products=(_shielded_proton_product(RadiationSource.GCR),),
+                let_products=(_let_product(RadiationSource.GCR),),
+            ),
+        ),
+    )
+    erb_result = SimpleNamespace(
+        shielding_by_thickness=(
+            _fake_erb_shielding_result(
+                thickness_g_cm2=0.1,
+                shielded_product=_shielded_proton_product(RadiationSource.ERB),
+            ),
+        ),
+    )
+
+    shielded = shielded_products_by_thickness_from_pipeline_results(
+        sep_result=sep_result,
+        gcr_result=gcr_result,
+        erb_result=erb_result,
+    )
+    let_products = let_products_by_thickness_from_pipeline_results(
+        sep_result=sep_result,
+        gcr_result=gcr_result,
+    )
+
+    assert len(shielded[0.1]) == 3
+    assert {
+        product.spectrum.source
+        for product in shielded[0.1]
+    } == {RadiationSource.SEP, RadiationSource.GCR, RadiationSource.ERB}
+    assert len(let_products[0.1]) == 2
+    assert {
+        product.spectrum.source
+        for product in let_products[0.1]
+    } == {RadiationSource.SEP, RadiationSource.GCR}
+
+
+def test_calculates_dose_pipeline_from_source_pipeline_results() -> None:
+    sep_result = SimpleNamespace(
+        shielding_let_by_thickness=(
+            _fake_shielding_result(
+                thickness_g_cm2=0.1,
+                shielded_products=(_shielded_proton_product(RadiationSource.SEP),),
+                let_products=(_let_product(RadiationSource.SEP),),
+            ),
+            _fake_shielding_result(
+                thickness_g_cm2=1.0,
+                shielded_products=(_shielded_proton_product(RadiationSource.SEP),),
+                let_products=(_let_product(RadiationSource.SEP),),
+            ),
+        ),
+    )
+    gcr_result = SimpleNamespace(
+        shielding_let_by_thickness=(
+            _fake_shielding_result(
+                thickness_g_cm2=0.1,
+                shielded_products=(_shielded_proton_product(RadiationSource.GCR),),
+                let_products=(_let_product(RadiationSource.GCR),),
+            ),
+            _fake_shielding_result(
+                thickness_g_cm2=1.0,
+                shielded_products=(_shielded_proton_product(RadiationSource.GCR),),
+                let_products=(_let_product(RadiationSource.GCR),),
+            ),
+        ),
+    )
+    erb_result = SimpleNamespace(
+        on_orbit_products=(_erb_electron_on_orbit_product(),),
+        shielding_by_thickness=(
+            _fake_erb_shielding_result(
+                thickness_g_cm2=0.1,
+                shielded_product=_shielded_proton_product(RadiationSource.ERB),
+            ),
+            _fake_erb_shielding_result(
+                thickness_g_cm2=1.0,
+                shielded_product=_shielded_proton_product(RadiationSource.ERB),
+            ),
+        ),
+    )
+    config = SimpleNamespace(
+        shielding=SimpleNamespace(thicknesses_g_cm2=(0.1, 1.0)),
+    )
+
+    result = calculate_dose_pipeline_from_pipeline_results(
+        config=config,
+        sep_result=sep_result,
+        gcr_result=gcr_result,
+        erb_result=erb_result,
+        proton_si_let_table=_proton_table(),
+        electron_database=load_normative_elbrbas2_database(),
+        electron_n_energy_points=101,
+    )
+
+    assert len(result.components) == 12
+    assert len(result.included_components) == 8
+    assert len(result.optional_components) == 4
+    assert all(total.included_total_rad > 0.0 for total in result.totals_by_thickness)
+    assert all(total.optional_total_rad > 0.0 for total in result.totals_by_thickness)

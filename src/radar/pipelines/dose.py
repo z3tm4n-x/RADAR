@@ -7,6 +7,7 @@ from math import isfinite
 from typing import Mapping
 
 from radar.core.products import SpectrumProduct
+from radar.core.project import CalculationConfig
 from radar.core.types import RadiationSource
 from radar.dose.electron_shieldose2 import Shieldose2ElectronDatabase
 from radar.dose.erb_electron import (
@@ -23,6 +24,9 @@ from radar.dose.proton import (
     PROTON_SHIELDED_DOSE_MODEL,
     calculate_proton_dose_from_shielded_fluence,
 )
+from radar.pipelines.erb import ErbPipelineResult
+from radar.pipelines.gcr import GcrPipelineResult
+from radar.pipelines.sep import SepPipelineResult
 from radar.shielding.proton_si_let import ProtonSiLetTable
 
 DOSE_PIPELINE_MODEL = "radar_dose_pipeline"
@@ -270,11 +274,131 @@ def calculate_dose_pipeline_from_products(
     )
 
 
+def _append_products(
+    grouped: dict[float, list[SpectrumProduct]],
+    *,
+    thickness_g_cm2: float,
+    products: tuple[SpectrumProduct, ...],
+) -> None:
+    grouped.setdefault(float(thickness_g_cm2), []).extend(products)
+
+
+def _freeze_product_mapping(
+    grouped: dict[float, list[SpectrumProduct]],
+) -> dict[float, tuple[SpectrumProduct, ...]]:
+    return {
+        thickness: tuple(products)
+        for thickness, products in sorted(grouped.items())
+    }
+
+
+def shielded_products_by_thickness_from_pipeline_results(
+    *,
+    sep_result: SepPipelineResult | None = None,
+    gcr_result: GcrPipelineResult | None = None,
+    erb_result: ErbPipelineResult | None = None,
+) -> dict[float, tuple[SpectrumProduct, ...]]:
+    """Collect shielded energy products from source pipeline results."""
+
+    grouped: dict[float, list[SpectrumProduct]] = {}
+
+    if sep_result is not None:
+        for sep_shielding_result in sep_result.shielding_let_by_thickness:
+            _append_products(
+                grouped,
+                thickness_g_cm2=sep_shielding_result.thickness_g_cm2,
+                products=sep_shielding_result.shielded_products,
+            )
+
+    if gcr_result is not None:
+        for gcr_shielding_result in gcr_result.shielding_let_by_thickness:
+            _append_products(
+                grouped,
+                thickness_g_cm2=gcr_shielding_result.thickness_g_cm2,
+                products=gcr_shielding_result.shielded_products,
+            )
+
+    if erb_result is not None:
+        for erb_shielding_result in erb_result.shielding_by_thickness:
+            _append_products(
+                grouped,
+                thickness_g_cm2=erb_shielding_result.thickness_g_cm2,
+                products=(erb_shielding_result.shielded_product,),
+            )
+
+    return _freeze_product_mapping(grouped)
+
+
+def let_products_by_thickness_from_pipeline_results(
+    *,
+    sep_result: SepPipelineResult | None = None,
+    gcr_result: GcrPipelineResult | None = None,
+) -> dict[float, tuple[SpectrumProduct, ...]]:
+    """Collect LET products from SEP/GCR pipeline results."""
+
+    grouped: dict[float, list[SpectrumProduct]] = {}
+
+    if sep_result is not None:
+        for sep_shielding_result in sep_result.shielding_let_by_thickness:
+            _append_products(
+                grouped,
+                thickness_g_cm2=sep_shielding_result.thickness_g_cm2,
+                products=sep_shielding_result.let_products,
+            )
+
+    if gcr_result is not None:
+        for gcr_shielding_result in gcr_result.shielding_let_by_thickness:
+            _append_products(
+                grouped,
+                thickness_g_cm2=gcr_shielding_result.thickness_g_cm2,
+                products=gcr_shielding_result.let_products,
+            )
+
+    return _freeze_product_mapping(grouped)
+
+
+def calculate_dose_pipeline_from_pipeline_results(
+    *,
+    config: CalculationConfig,
+    sep_result: SepPipelineResult | None = None,
+    gcr_result: GcrPipelineResult | None = None,
+    erb_result: ErbPipelineResult | None = None,
+    proton_si_let_table: ProtonSiLetTable | None = None,
+    electron_database: Shieldose2ElectronDatabase | None = None,
+    electron_n_energy_points: int = 1001,
+) -> DosePipelineResult:
+    """Calculate dose from already executed SEP/GCR/ERB pipelines."""
+
+    erb_on_orbit_products: tuple[SpectrumProduct, ...] = ()
+    if erb_result is not None:
+        erb_on_orbit_products = erb_result.on_orbit_products
+
+    return calculate_dose_pipeline_from_products(
+        thicknesses_g_cm2=config.shielding.thicknesses_g_cm2,
+        erb_on_orbit_products=erb_on_orbit_products,
+        shielded_products_by_thickness=shielded_products_by_thickness_from_pipeline_results(
+            sep_result=sep_result,
+            gcr_result=gcr_result,
+            erb_result=erb_result,
+        ),
+        let_products_by_thickness=let_products_by_thickness_from_pipeline_results(
+            sep_result=sep_result,
+            gcr_result=gcr_result,
+        ),
+        proton_si_let_table=proton_si_let_table,
+        electron_database=electron_database,
+        electron_n_energy_points=electron_n_energy_points,
+    )
+
+
 __all__ = [
     "DOSE_PIPELINE_MODEL",
     "DOSE_PIPELINE_MODEL_VERSION",
     "DoseComponent",
     "DosePipelineResult",
     "DoseTotalByThickness",
+    "calculate_dose_pipeline_from_pipeline_results",
     "calculate_dose_pipeline_from_products",
+    "let_products_by_thickness_from_pipeline_results",
+    "shielded_products_by_thickness_from_pipeline_results",
 ]
