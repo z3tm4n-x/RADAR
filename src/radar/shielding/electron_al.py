@@ -8,11 +8,27 @@ from math import exp, isfinite, log
 from pathlib import Path
 from typing import Mapping
 
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.spectra import ShieldingDescriptor, Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import (
+    Particle,
+    RadiationSource,
+    SpectrumLocation,
+    SpectrumOrdinateBasis,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 
 ELECTRON_AL_PRIMARY_CSDA_MODEL = "electron_primary_al_spherical_csda"
+ELECTRON_AL_OUTPUT_ENERGY_SUPPORT_INCOMPLETE = (
+    "electron_al_output_energy_interval_outside_stopping_table_support"
+)
+ELECTRON_AL_MAPPED_RANGE_SUPPORT_INCOMPLETE = (
+    "electron_al_mapped_range_interval_outside_stopping_table_support"
+)
+ELECTRON_AL_SOURCE_ENERGY_SUPPORT_INCOMPLETE = (
+    "electron_al_mapped_source_interval_outside_spectrum_support"
+)
 
 _REQUIRED_COLUMNS = {
     "energy_mev",
@@ -115,10 +131,17 @@ def integrate_spectrum_loglog(
     lo_mev: tuple[float, ...],
     hi_mev: tuple[float, ...],
 ) -> tuple[float, ...]:
-    """Conservatively integrate a spectrum over intervals using log-log interpolation."""
+    """Integrate point samples, using log-log or linear-through-zero segments."""
 
     if len(lo_mev) != len(hi_mev):
         msg = "Integration interval lower/upper arrays must have equal length."
+        raise ValueError(msg)
+
+    if spectrum.ordinate_basis is not SpectrumOrdinateBasis.POINT_SAMPLE:
+        msg = (
+            "Log-log point interpolation requires point-sample source ordinates; "
+            "conservative remapping of bin-average input is not implemented."
+        )
         raise ValueError(msg)
 
     values: list[float] = []
@@ -128,12 +151,12 @@ def integrate_spectrum_loglog(
             values.append(0.0)
             continue
 
-        interval_lo = max(lo, spectrum.x[0])
-        interval_hi = min(hi, spectrum.x[-1])
+        if lo < spectrum.x[0] or hi > spectrum.x[-1]:
+            msg = "Integration interval is outside the source spectrum support."
+            raise ValueError(msg)
 
-        if interval_hi <= interval_lo:
-            values.append(0.0)
-            continue
+        interval_lo = lo
+        interval_hi = hi
 
         total = 0.0
 
@@ -161,7 +184,7 @@ def integrate_spectrum_loglog(
 def shield_electron_spectrum_primary_through_al(
     *,
     spectrum: Spectrum1D,
-    table: ElectronAlRangeEnergyTable,
+    table: ElectronAlRangeEnergyTable | None,
     thickness_g_cm2: float,
     output_energy_mev: tuple[float, ...] | None = None,
     model: str | None = None,
@@ -190,16 +213,35 @@ def shield_electron_spectrum_primary_through_al(
         output_model = f"{spectrum.model}+{ELECTRON_AL_PRIMARY_CSDA_MODEL}"
 
     if thickness_g_cm2 == 0.0 and output_energy == spectrum.x:
-        return Spectrum1D(
-            x=spectrum.x,
+        return derive_spectrum(
+            spectrum,
             y=spectrum.y,
-            x_unit=spectrum.x_unit,
-            y_unit=spectrum.y_unit,
-            quantity=spectrum.quantity,
-            particle=spectrum.particle,
-            source=spectrum.source,
             model=output_model,
+            location=SpectrumLocation.BEHIND_SHIELD,
+            shielding=ShieldingDescriptor(
+                material="aluminium",
+                areal_density_g_cm2=thickness_g_cm2,
+            ),
+            transformation=TransformationStep(
+                name=ELECTRON_AL_PRIMARY_CSDA_MODEL,
+                version="1",
+                parameters=(
+                    ("geometry", "centered_spherical_shell"),
+                    ("thickness_g_cm2", f"{thickness_g_cm2:.17g}"),
+                ),
+            ),
         )
+
+    if table is None:
+        msg = "Positive Al shielding requires an electron Al range table."
+        raise ValueError(msg)
+
+    if spectrum.ordinate_basis is not SpectrumOrdinateBasis.POINT_SAMPLE:
+        msg = (
+            "Electron Al CSDA remapping requires point-sample source ordinates; "
+            "conservative remapping of bin-average input is not implemented."
+        )
+        raise ValueError(msg)
 
     edges = log_bin_edges_from_centers(output_energy)
     widths = tuple(right - left for left, right in zip(edges, edges[1:]))
@@ -208,18 +250,52 @@ def shield_electron_spectrum_primary_through_al(
     input_energy_hi: list[float] = []
     valid: list[bool] = []
 
-    for output_lo, output_hi in zip(edges, edges[1:]):
-        range_lo = _range_at_energy_clamped(table, output_lo) + thickness_g_cm2
-        range_hi = _range_at_energy_clamped(table, output_hi) + thickness_g_cm2
+    incomplete_reasons: list[str] = []
 
-        if range_lo >= table.max_range_g_cm2 or range_hi >= table.max_range_g_cm2:
+    for output_lo, output_hi in zip(edges, edges[1:]):
+        # CSDA is monotonic, so each supported part remains one contiguous
+        # interval as it is intersected with the table and source domains.
+        # The final integral is nevertheless divided by the original, full
+        # output-bin width below: the published bin edges are never clipped.
+        supported_output_lo = max(output_lo, table.energy_mev[0])
+        supported_output_hi = min(output_hi, table.energy_mev[-1])
+        if supported_output_lo != output_lo or supported_output_hi != output_hi:
+            incomplete_reasons.append(ELECTRON_AL_OUTPUT_ENERGY_SUPPORT_INCOMPLETE)
+
+        if supported_output_hi <= supported_output_lo:
             input_energy_lo.append(0.0)
             input_energy_hi.append(0.0)
             valid.append(False)
             continue
 
-        input_energy_lo.append(table.energy_at_range(range_lo))
-        input_energy_hi.append(table.energy_at_range(range_hi))
+        mapped_range_lo = table.range_at_energy(supported_output_lo) + thickness_g_cm2
+        mapped_range_hi = table.range_at_energy(supported_output_hi) + thickness_g_cm2
+        supported_range_lo = max(mapped_range_lo, table.range_g_cm2[0])
+        supported_range_hi = min(mapped_range_hi, table.max_range_g_cm2)
+        if supported_range_lo != mapped_range_lo or supported_range_hi != mapped_range_hi:
+            incomplete_reasons.append(ELECTRON_AL_MAPPED_RANGE_SUPPORT_INCOMPLETE)
+
+        if supported_range_hi <= supported_range_lo:
+            input_energy_lo.append(0.0)
+            input_energy_hi.append(0.0)
+            valid.append(False)
+            continue
+
+        mapped_source_lo = table.energy_at_range(supported_range_lo)
+        mapped_source_hi = table.energy_at_range(supported_range_hi)
+        supported_source_lo = max(mapped_source_lo, spectrum.x[0])
+        supported_source_hi = min(mapped_source_hi, spectrum.x[-1])
+        if supported_source_lo != mapped_source_lo or supported_source_hi != mapped_source_hi:
+            incomplete_reasons.append(ELECTRON_AL_SOURCE_ENERGY_SUPPORT_INCOMPLETE)
+
+        if supported_source_hi <= supported_source_lo:
+            input_energy_lo.append(0.0)
+            input_energy_hi.append(0.0)
+            valid.append(False)
+            continue
+
+        input_energy_lo.append(supported_source_lo)
+        input_energy_hi.append(supported_source_hi)
         valid.append(True)
 
     integrals = integrate_spectrum_loglog(
@@ -233,16 +309,36 @@ def shield_electron_spectrum_primary_through_al(
         for integral, width, is_valid in zip(integrals, widths, valid)
     )
 
-    return Spectrum1D(
+    output = derive_spectrum(
+        spectrum,
         x=output_energy,
         y=output_values,
-        x_unit=spectrum.x_unit,
-        y_unit=spectrum.y_unit,
-        quantity=spectrum.quantity,
-        particle=spectrum.particle,
-        source=spectrum.source,
         model=output_model,
+        location=SpectrumLocation.BEHIND_SHIELD,
+        shielding=ShieldingDescriptor(
+            material="aluminium",
+            areal_density_g_cm2=thickness_g_cm2,
+        ),
+        ordinate_basis=SpectrumOrdinateBasis.BIN_AVERAGE,
+        bin_edges=edges,
+        transformation=TransformationStep(
+            name=ELECTRON_AL_PRIMARY_CSDA_MODEL,
+            version="1",
+            parameters=(
+                ("geometry", "centered_spherical_shell"),
+                ("thickness_g_cm2", f"{thickness_g_cm2:.17g}"),
+            ),
+        ),
+        additional_dataset_refs=("stopping/electron_al_range.csv",),
     )
+
+    if incomplete_reasons:
+        output = mark_spectrum_incomplete(
+            output,
+            *tuple(dict.fromkeys(incomplete_reasons)),
+        )
+
+    return output
 
 
 def _integral_powerlaw_segment(
@@ -254,8 +350,19 @@ def _integral_powerlaw_segment(
     a: float,
     b: float,
 ) -> float:
-    if b <= a or y1 <= 0.0 or y2 <= 0.0:
+    if b <= a:
         return 0.0
+
+    if y1 == 0.0 or y2 == 0.0:
+        # A POINT_SAMPLE spectrum still defines the segment when one endpoint
+        # is zero.  Log-log interpolation is undefined there, so use the
+        # unique straight line through the two samples and integrate only the
+        # requested sub-interval.  Treating the whole segment as zero loses a
+        # finite triangular contribution present in OST electron spectra.
+        slope = (y2 - y1) / (e2 - e1)
+        value_a = y1 + slope * (a - e1)
+        value_b = y1 + slope * (b - e1)
+        return 0.5 * (value_a + value_b) * (b - a)
 
     exponent = log(y2 / y1) / log(e2 / e1)
     coefficient = y1 / (e1**exponent)
@@ -263,22 +370,7 @@ def _integral_powerlaw_segment(
     if abs(exponent + 1.0) < 1.0e-12:
         return float(coefficient * log(b / a))
 
-    return float(
-        coefficient * (b ** (exponent + 1.0) - a ** (exponent + 1.0)) / (exponent + 1.0)
-    )
-
-
-def _range_at_energy_clamped(
-    table: ElectronAlRangeEnergyTable,
-    energy_mev: float,
-) -> float:
-    if energy_mev <= table.energy_mev[0]:
-        return table.range_g_cm2[0]
-
-    if energy_mev >= table.energy_mev[-1]:
-        return table.range_g_cm2[-1]
-
-    return table.range_at_energy(energy_mev)
+    return float(coefficient * (b ** (exponent + 1.0) - a ** (exponent + 1.0)) / (exponent + 1.0))
 
 
 def _validate_spectrum(spectrum: Spectrum1D) -> None:
@@ -432,3 +524,16 @@ def load_electron_al_range_energy_table(path: str | Path) -> ElectronAlRangeEner
         range_g_cm2=tuple(row[1] for row in rows),
         stopping_mev_cm2_g=tuple(row[2] for row in rows),
     )
+
+
+__all__ = [
+    "ELECTRON_AL_MAPPED_RANGE_SUPPORT_INCOMPLETE",
+    "ELECTRON_AL_OUTPUT_ENERGY_SUPPORT_INCOMPLETE",
+    "ELECTRON_AL_PRIMARY_CSDA_MODEL",
+    "ELECTRON_AL_SOURCE_ENERGY_SUPPORT_INCOMPLETE",
+    "ElectronAlRangeEnergyTable",
+    "integrate_spectrum_loglog",
+    "load_electron_al_range_energy_table",
+    "log_bin_edges_from_centers",
+    "shield_electron_spectrum_primary_through_al",
+]

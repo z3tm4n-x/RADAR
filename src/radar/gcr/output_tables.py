@@ -32,7 +32,7 @@ from radar.gcr.source_spectra import (
 
 GCR_OUTPUT_LOCATION_OUTSIDE_MAGNETOSPHERE = "outside_magnetosphere"
 GCR_OUTPUT_LOCATION_ON_ORBIT = "on_orbit"
-GCR_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shielding"
+GCR_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shield"
 
 GCR_OUTPUT_SHIELD_MATERIAL_AL = "Al"
 GCR_OUTPUT_SHIELD_GEOMETRY_CENTERED_SPHERICAL_SHELL = "centered_spherical_shell"
@@ -66,6 +66,9 @@ def _main_component_from_model(model: str) -> str:
 
 
 def _symbol_from_spectrum_model(spectrum: Spectrum1D) -> str:
+    if spectrum.species is not None and not spectrum.species.is_aggregate:
+        return spectrum.species.symbol
+
     parts = spectrum.model.split(":")
 
     if len(parts) < 2 or not parts[1]:
@@ -83,20 +86,20 @@ def _common_metadata(
     geomagnetic_penetration: str,
     shielding: str,
 ) -> dict[str, str]:
-    return {
+    metadata = {
         "stage": stage,
-        "location": location,
         "main_component": _main_component_from_model(spectrum.model),
         "nek": GCR_OUTPUT_LOW_ENERGY_COMPONENT_INCLUDED,
         "akl": GCR_OUTPUT_LOW_ENERGY_COMPONENT_INCLUDED,
         "geomagnetic_penetration": geomagnetic_penetration,
         "shielding": shielding,
         "dose_status": GCR_OUTPUT_DOSE_STATUS_NOT_CALCULATED,
-        "single_event_effects_status": (
-            GCR_OUTPUT_SINGLE_EVENT_EFFECTS_STATUS_NOT_CALCULATED
-        ),
+        "single_event_effects_status": (GCR_OUTPUT_SINGLE_EVENT_EFFECTS_STATUS_NOT_CALCULATED),
         "dose_see_dependency": GCR_OUTPUT_DOSE_SEE_DEFERRED_REASON,
     }
+    if spectrum.location is None:
+        metadata["location"] = location
+    return metadata
 
 
 def _metadata_with(
@@ -109,13 +112,7 @@ def _metadata_with(
 
 
 def _table_id_token(value: str) -> str:
-    return (
-        value.lower()
-        .replace(" ", "_")
-        .replace("-", "_")
-        .replace("+", "_")
-        .replace(":", "_")
-    )
+    return value.lower().replace(" ", "_").replace("-", "_").replace("+", "_").replace(":", "_")
 
 
 def _source_component_spectra(
@@ -162,10 +159,7 @@ def gcr_source_spectra_output_tables(
                         f"gcr_{main_component}_{ion.symbol.lower()}_"
                         f"{component}_source_outside_magnetosphere"
                     ),
-                    title=(
-                        f"ГКЛ. {ion.symbol}. {component}. "
-                        "Исходный спектр вне магнитосферы"
-                    ),
+                    title=(f"ГКЛ. {ion.symbol}. {component}. Исходный спектр вне магнитосферы"),
                     spectrum=spectrum,
                     metadata=_metadata_with(
                         base,
@@ -221,9 +215,7 @@ def gcr_on_orbit_product_output_tables(
         product_token = _on_orbit_product_table_token(product)
         tables.append(
             spectrum_output_table(
-                table_id=(
-                    f"gcr_{symbol.lower()}_{product_token}_on_orbit"
-                ),
+                table_id=(f"gcr_{symbol.lower()}_{product_token}_on_orbit"),
                 title=(
                     f"ГКЛ. {symbol}. {product.kind.value}. "
                     "Спектр на орбите после геомагнитного проникновения"
@@ -288,9 +280,7 @@ def gcr_proton_shielding_output_tables(
                 base,
                 {
                     "component": "total",
-                    "proton_nonelastic_survival": (
-                        str(result.nonelastic_survival).lower()
-                    ),
+                    "proton_nonelastic_survival": (str(result.nonelastic_survival).lower()),
                     "secondary_protons": str(result.secondary_protons).lower(),
                 },
             ),
@@ -308,18 +298,13 @@ def gcr_proton_shielding_output_tables(
                 ),
                 spectrum_output_table(
                     table_id="gcr_proton_primary_survived_energy_behind_al",
-                    title=(
-                        "ГКЛ. Протоны за Al-защитой. "
-                        "Первичный спектр с survival"
-                    ),
+                    title=("ГКЛ. Протоны за Al-защитой. Первичный спектр с survival"),
                     spectrum=result.primary_survived,
                     metadata=_metadata_with(
                         base,
                         {
                             "component": "primary_survived",
-                            "proton_nonelastic_survival": (
-                                str(result.nonelastic_survival).lower()
-                            ),
+                            "proton_nonelastic_survival": (str(result.nonelastic_survival).lower()),
                         },
                     ),
                 ),
@@ -358,8 +343,7 @@ def gcr_hze_shielding_output_tables(
             spectrum_output_table(
                 table_id=f"gcr_hze_z{z}_energy_behind_al",
                 title=(
-                    f"ГКЛ. ТЗЧ Z={result.z} {result.symbol} за Al-защитой. "
-                    "Энергетический спектр"
+                    f"ГКЛ. ТЗЧ Z={result.z} {result.symbol} за Al-защитой. Энергетический спектр"
                 ),
                 spectrum=result.spectrum,
                 metadata=_metadata_with(
@@ -382,11 +366,12 @@ def gcr_let_output_tables(
     *,
     result: GcrLetProductsResult,
     thickness_g_cm2: float,
+    include_diagnostics: bool = True,
 ) -> tuple[OutputTable, ...]:
-    """Return GCR proton, HZE and combined LET spectrum tables."""
+    """Return GCR direct-ion and diagnostic LET spectrum tables."""
 
     base = _shielding_metadata(
-        spectrum=result.combined_let,
+        spectrum=result.hze_aggregate_let,
         stage="let",
         thickness_g_cm2=thickness_g_cm2,
     )
@@ -422,22 +407,47 @@ def gcr_let_output_tables(
             )
         )
 
-    tables.append(
-        spectrum_output_table(
-            table_id="gcr_combined_let_behind_al",
-            title="ГКЛ. Суммарный ЛПЭ-спектр за Al-защитой в Si",
-            spectrum=result.combined_let,
-            metadata=_metadata_with(
-                base,
-                {
-                    "component": "combined_let",
-                    "hze_z_values": ",".join(str(z) for z in sorted(result.hze_let_by_z)),
-                    "let_target": "Si",
-                },
+    aggregate_metadata = {
+        "hze_z_values": ",".join(str(z) for z in sorted(result.hze_let_by_z)),
+        "let_target": "Si",
+    }
+    tables.extend(
+        (
+            spectrum_output_table(
+                table_id="gcr_hze_aggregate_let_behind_al",
+                title="ГКЛ. Суммарный ЛПЭ-спектр ТЗЧ за Al-защитой в Si",
+                spectrum=result.hze_aggregate_let,
+                metadata=_metadata_with(
+                    base,
+                    {
+                        **aggregate_metadata,
+                        "component": "hze_direct_ion_aggregate_let",
+                        "semantic_role": "hze_direct_ion",
+                    },
+                ),
+            ),
+            spectrum_output_table(
+                table_id="gcr_combined_let_behind_al",
+                title="ГКЛ. Диагностический ЛПЭ-спектр протоны+ТЗЧ за Al-защитой в Si",
+                spectrum=result.mixed_let_diagnostic,
+                metadata=_metadata_with(
+                    base,
+                    {
+                        **aggregate_metadata,
+                        "component": "mixed_proton_hze_let_diagnostic",
+                        "semantic_role": "diagnostic_only",
+                    },
+                ),
             ),
         )
     )
 
+    if not include_diagnostics:
+        diagnostic_ids = {
+            "gcr_proton_let_behind_al",
+            "gcr_combined_let_behind_al",
+        }
+        tables = [table for table in tables if table.table_id not in diagnostic_ids]
     return tuple(tables)
 
 
@@ -447,6 +457,7 @@ def gcr_shielding_let_output_tables(
     hze_by_z: Mapping[int, GcrHzeShieldingResult],
     let_products: GcrLetProductsResult,
     include_proton_components: bool = False,
+    include_let_diagnostics: bool = True,
 ) -> tuple[OutputTable, ...]:
     """Return all GCR shielding and LET spectrum output tables."""
 
@@ -459,6 +470,7 @@ def gcr_shielding_let_output_tables(
         *gcr_let_output_tables(
             result=let_products,
             thickness_g_cm2=proton.thickness_g_cm2,
+            include_diagnostics=include_let_diagnostics,
         ),
     )
 

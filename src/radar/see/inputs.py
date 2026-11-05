@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from radar.core.products import SpectrumProduct
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 
 ERB_PROTON_SEE_MARKER = "erb_proton_al_shielding_primary_survival_secondary"
@@ -60,6 +66,9 @@ def _is_heavy_ion_let_see_product(product: SpectrumProduct) -> bool:
         and product.kind is RadiationProductKind.MISSION_LET_FLUENCE
         and spectrum.quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE
         and spectrum.particle is Particle.HZE
+        and spectrum.let_role is LetSpectrumRole.HZE_DIRECT_ION
+        and spectrum.species is not None
+        and spectrum.species.is_aggregate
         and spectrum.x_unit is Unit.LET
         and spectrum.y_unit is Unit.DIFFERENTIAL_LET_FLUENCE
     )

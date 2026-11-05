@@ -1,7 +1,10 @@
 """OST 134-1044-2007 geomagnetic disturbance correction.
 
 Implements Appendix Zh formulas Zh.4--Zh.6 for converting quiet cutoff
-rigidity Rc into disturbed cutoff rigidity Rc* using Kp and magnetic local time.
+rigidity Rc into disturbed cutoff rigidity Rc* using Kp and local time in hours.
+The legacy parameter name ``magnetic_local_time_hours`` does not establish the
+time convention used in the formula's calibration. That qualification remains
+unresolved; these numerical helpers do not infer a Sun history or a convention.
 """
 
 from __future__ import annotations
@@ -12,8 +15,8 @@ MIN_DISTURBANCE_CUTOFF_GV = 1.0e-4
 
 
 def _validate_kp(kp: int) -> None:
-    if not isinstance(kp, int):
-        msg = "Kp must be an integer."
+    if isinstance(kp, bool) or not isinstance(kp, int):
+        msg = "Kp must be an integer, not a boolean."
         raise ValueError(msg)
 
     if not 0 <= kp <= 9:
@@ -22,8 +25,8 @@ def _validate_kp(kp: int) -> None:
 
 
 def _validate_cutoff_rigidity(cutoff_rigidity_gv: float) -> None:
-    if not math.isfinite(cutoff_rigidity_gv):
-        msg = "Cutoff rigidity must be finite."
+    if isinstance(cutoff_rigidity_gv, bool) or not math.isfinite(cutoff_rigidity_gv):
+        msg = "Cutoff rigidity must be a finite non-boolean number."
         raise ValueError(msg)
 
     if cutoff_rigidity_gv < 0.0:
@@ -32,16 +35,16 @@ def _validate_cutoff_rigidity(cutoff_rigidity_gv: float) -> None:
 
 
 def _normalized_mlt_hours(magnetic_local_time_hours: float) -> float:
-    if not math.isfinite(magnetic_local_time_hours):
-        msg = "Magnetic local time must be finite."
+    if isinstance(magnetic_local_time_hours, bool) or not math.isfinite(magnetic_local_time_hours):
+        msg = "Magnetic local time must be a finite non-boolean number."
         raise ValueError(msg)
 
     return magnetic_local_time_hours % 24.0
 
 
 def _validate_mlt_sample_count(mlt_sample_count: int) -> None:
-    if not isinstance(mlt_sample_count, int):
-        msg = "MLT sample count must be an integer."
+    if isinstance(mlt_sample_count, bool) or not isinstance(mlt_sample_count, int):
+        msg = "MLT sample count must be an integer, not a boolean."
         raise ValueError(msg)
 
     if mlt_sample_count < 1:
@@ -104,7 +107,11 @@ def ost_cutoff_disturbance_factor_mlt_average(
     kp: int,
     mlt_sample_count: int = 24,
 ) -> float:
-    """Return MLT-averaged disturbance factor for the current RADAR builder."""
+    """Return the uniform mean of delta, an auxiliary statistic, not orbit access.
+
+    Production access averages pointwise cutoff indicators instead of applying
+    a cutoff based on this averaged factor.
+    """
 
     _validate_cutoff_rigidity(cutoff_rigidity_gv)
     _validate_kp(kp)
@@ -142,7 +149,7 @@ def ost_disturbed_cutoff_rigidity_mlt_average_gv(
     kp: int,
     mlt_sample_count: int = 24,
 ) -> float:
-    """Return MLT-averaged disturbed cutoff rigidity Rc* = Rc / <delta>."""
+    """Return Rc/<delta>, not <Rc/delta> and not the production access operator."""
 
     delta = ost_cutoff_disturbance_factor_mlt_average(
         cutoff_rigidity_gv=cutoff_rigidity_gv,

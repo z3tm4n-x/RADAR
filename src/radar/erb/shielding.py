@@ -12,8 +12,9 @@ from math import isfinite
 
 from radar.core.products import SpectrumProduct
 from radar.core.source_products import validate_product_allowed_for_source
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource
+from radar.core.spectra import ShieldingDescriptor, Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import Particle, RadiationSource, SpectrumLocation
 from radar.erb.model import validate_erb_energy_spectrum
 from radar.shielding.electron_al import shield_electron_spectrum_primary_through_al
 from radar.shielding.proton_al import shield_proton_spectrum_primary_through_al
@@ -32,6 +33,10 @@ ERB_ELECTRON_AL_NO_BREMSSTRAHLUNG_TRANSPORT = "electron_bremsstrahlung_transport
 ERB_ELECTRON_AL_NO_SECONDARY_PARTICLES = "electron_secondary_particles_not_included"
 ERB_PROTON_AL_CENTERED_SPHERICAL_SHELL = "centered_spherical_shell"
 ERB_PROTON_AL_NO_HIDDEN_4PI = "no_hidden_4pi_factor"
+ERB_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON = (
+    "proton nonelastic survival was not included"
+)
+ERB_PROTON_SECONDARY_OMITTED_REASON = "secondary proton production was not included"
 
 
 @dataclass(frozen=True)
@@ -102,16 +107,27 @@ def _validate_erb_electron_spectrum(spectrum: Spectrum1D) -> None:
         raise ValueError(msg)
 
 
-def _zero_spectrum_like(spectrum: Spectrum1D, *, model: str) -> Spectrum1D:
-    return Spectrum1D(
-        x=spectrum.x,
+def _zero_spectrum_like(
+    spectrum: Spectrum1D,
+    *,
+    model: str,
+    thickness_g_cm2: float,
+) -> Spectrum1D:
+    return derive_spectrum(
+        spectrum,
         y=tuple(0.0 for _ in spectrum.x),
-        x_unit=spectrum.x_unit,
-        y_unit=spectrum.y_unit,
-        quantity=spectrum.quantity,
         particle=Particle.PROTON,
-        source=spectrum.source,
         model=model,
+        location=SpectrumLocation.BEHIND_SHIELD,
+        shielding=ShieldingDescriptor(
+            material="aluminium",
+            areal_density_g_cm2=thickness_g_cm2,
+        ),
+        transformation=TransformationStep(
+            name="secondary_protons_omitted",
+            version="1",
+            parameters=(("thickness_g_cm2", f"{thickness_g_cm2:.17g}"),),
+        ),
     )
 
 
@@ -203,8 +219,9 @@ def calculate_erb_proton_shielding_spectrum(
         )
     else:
         secondary = _zero_spectrum_like(
-            spectrum,
+            primary_survived,
             model=f"{spectrum.model}+secondary_protons_not_included",
+            thickness_g_cm2=thickness_g_cm2,
         )
 
     total = combine_primary_and_secondary_proton_spectra(
@@ -216,6 +233,14 @@ def calculate_erb_proton_shielding_spectrum(
             include_secondary_protons=include_secondary_protons,
         ),
     )
+    if thickness_g_cm2 > 0.0:
+        omitted_reasons: list[str] = []
+        if not include_nonelastic_survival:
+            omitted_reasons.append(ERB_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON)
+        if not include_secondary_protons:
+            omitted_reasons.append(ERB_PROTON_SECONDARY_OMITTED_REASON)
+        if omitted_reasons:
+            total = mark_spectrum_incomplete(total, *omitted_reasons)
 
     return ErbProtonShieldingResult(
         primary=primary,
@@ -287,7 +312,7 @@ def calculate_erb_electron_shielding_spectrum(
     _validate_erb_electron_spectrum(spectrum)
 
     electron_al_range = tables.electron_al_range
-    if electron_al_range is None:
+    if electron_al_range is None and thickness_g_cm2 > 0.0:
         msg = "ERB electron shielding requires an electron Al range table."
         raise ValueError(msg)
 
@@ -297,6 +322,12 @@ def calculate_erb_electron_shielding_spectrum(
         thickness_g_cm2=thickness_g_cm2,
         model=_electron_model(input_model=spectrum.model),
     )
+    if thickness_g_cm2 > 0.0:
+        primary = mark_spectrum_incomplete(
+            primary,
+            ERB_ELECTRON_AL_NO_BREMSSTRAHLUNG_TRANSPORT,
+            ERB_ELECTRON_AL_NO_SECONDARY_PARTICLES,
+        )
 
     return ErbElectronShieldingResult(
         primary=primary,
@@ -338,6 +369,8 @@ __all__ = [
     "ERB_PROTON_AL_CENTERED_SPHERICAL_SHELL",
     "ERB_PROTON_AL_NO_HIDDEN_4PI",
     "ERB_PROTON_AL_SHIELDING_MODEL",
+    "ERB_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON",
+    "ERB_PROTON_SECONDARY_OMITTED_REASON",
     "ErbElectronShieldingResult",
     "ErbProtonShieldingResult",
     "calculate_erb_electron_shielding_product",

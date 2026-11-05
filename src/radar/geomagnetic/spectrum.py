@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, SpectrumQuantity
+from radar.core.spectra import Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import Particle, SpectrumLocation, SpectrumQuantity
 from radar.core.units import Unit
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.physics.rigidity import (
@@ -18,6 +19,48 @@ ENERGY_SPECTRUM_QUANTITIES = (
     SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
     SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
 )
+
+
+def _penetration_transformation(
+    spectrum: Spectrum1D,
+    penetration: PenetrationFunction,
+    particle_parameters: tuple[tuple[str, str], ...],
+) -> TransformationStep:
+    """Retain the source statistic: a dimensionless access factor is not time.
+
+    OST Zh.1/Zh.7 supplies one orbit-averaged access operator for the B/V
+    source spectra. It does not define a maximum of instantaneous access.
+    In particular, a source-peak spectrum multiplied by this operator must
+    not be relabelled as a reconstructed instantaneous orbital maximum.
+    """
+    temporal_application = {
+        SpectrumQuantity.DIFFERENTIAL_FLUENCE: "mission_fluence_no_time_rescaling",
+        SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX: "source_peak_not_instantaneous_orbit_maximum",
+        SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX: "source_maximum_not_instantaneous_orbit_maximum",
+        SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX: "source_mean_rate_no_time_rescaling",
+        SpectrumQuantity.DIFFERENTIAL_FLUX: "source_rate_no_time_rescaling",
+    }[spectrum.quantity]
+    return TransformationStep(
+        name="geomagnetic_penetration",
+        version=penetration.model_version,
+        parameters=(
+            ("penetration_model", penetration.model),
+            ("kp", str(penetration.kp)),
+            *particle_parameters,
+            *((f"operator_{key}", value) for key, value in penetration.parameters),
+            ("source_statistic_application", temporal_application),
+            ("time_multiplier", "none"),
+        ),
+    )
+
+
+def _retain_penetration_qualification(
+    spectrum: Spectrum1D,
+    penetration: PenetrationFunction,
+) -> Spectrum1D:
+    if penetration.incomplete_reasons:
+        return mark_spectrum_incomplete(spectrum, *penetration.incomplete_reasons)
+    return spectrum
 
 
 def _validate_proton_energy_spectrum(spectrum: Spectrum1D) -> None:
@@ -72,16 +115,17 @@ def apply_proton_penetration(
     if output_model is None:
         output_model = f"{spectrum.model}+{penetration.model}"
 
-    return Spectrum1D(
-        x=spectrum.x,
+    transformed = derive_spectrum(
+        spectrum,
         y=tuple(value * factor for value, factor in zip(spectrum.y, factors)),
-        x_unit=spectrum.x_unit,
-        y_unit=spectrum.y_unit,
-        quantity=spectrum.quantity,
-        particle=spectrum.particle,
-        source=spectrum.source,
         model=output_model,
+        location=SpectrumLocation.ON_ORBIT,
+        shielding=None,
+        transformation=_penetration_transformation(
+            spectrum, penetration, (("particle", "proton"),),
+        ),
     )
+    return _retain_penetration_qualification(transformed, penetration)
 
 
 
@@ -93,8 +137,8 @@ def _validate_hze_energy_spectrum(
         msg = "Geomagnetic penetration can be applied only to HZE spectra."
         raise ValueError(msg)
 
-    if spectrum.x_unit is not Unit.MEV:
-        msg = "HZE spectrum energy-per-nucleon grid must be in MeV."
+    if spectrum.x_unit not in (Unit.MEV, Unit.MEV_PER_NUCLEON):
+        msg = "HZE spectrum energy-per-nucleon grid must be in MeV/nucleon."
         raise ValueError(msg)
 
     if spectrum.quantity not in ENERGY_SPECTRUM_QUANTITIES:
@@ -155,13 +199,17 @@ def apply_hze_penetration(
     if output_model is None:
         output_model = f"{spectrum.model}+{penetration.model}"
 
-    return Spectrum1D(
-        x=spectrum.x,
+    transformed = derive_spectrum(
+        spectrum,
         y=tuple(value * factor for value, factor in zip(spectrum.y, factors)),
-        x_unit=spectrum.x_unit,
-        y_unit=spectrum.y_unit,
-        quantity=spectrum.quantity,
-        particle=spectrum.particle,
-        source=spectrum.source,
         model=output_model,
+        location=SpectrumLocation.ON_ORBIT,
+        shielding=None,
+        transformation=_penetration_transformation(
+            spectrum, penetration, (
+                ("particle", "hze"),
+                ("mass_to_charge", f"{mass_to_charge:.17g}"),
+            ),
+        ),
     )
+    return _retain_penetration_qualification(transformed, penetration)

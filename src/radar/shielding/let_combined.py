@@ -5,11 +5,22 @@ from __future__ import annotations
 from math import exp, log
 from typing import Iterable
 
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, SpectrumQuantity
+from radar.core.spectra import ParticleSpecies, Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    SpectrumCompleteness,
+    SpectrumOrdinateBasis,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 
-COMBINED_LET_MODEL = "combined_proton_hze_let"
+HZE_AGGREGATE_LET_MODEL = "hze_direct_ion_aggregate_let"
+MIXED_LET_DIAGNOSTIC_MODEL = "mixed_proton_hze_let_diagnostic"
+# Compatibility name for callers that intentionally request the mixed
+# diagnostic.  It no longer identifies a canonical assessment spectrum.
+COMBINED_LET_MODEL = MIXED_LET_DIAGNOSTIC_MODEL
 
 _LET_QUANTITIES = (
     SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE,
@@ -83,7 +94,12 @@ def rebin_let_spectrum_to_grid(
 
     _validate_let_spectrum(spectrum)
 
-    source_edges = _log_edges_from_centers(spectrum.x)
+    source_edges = (
+        spectrum.bin_edges
+        if spectrum.ordinate_basis is SpectrumOrdinateBasis.BIN_AVERAGE
+        else _log_edges_from_centers(spectrum.x)
+    )
+    assert source_edges is not None
     target_edges = _log_edges_from_centers(let_centers)
     target_counts = [0.0 for _ in let_centers]
 
@@ -112,15 +128,18 @@ def rebin_let_spectrum_to_grid(
         for index, count in enumerate(target_counts)
     )
 
-    return Spectrum1D(
+    return derive_spectrum(
+        spectrum,
         x=let_centers,
         y=target_values,
-        x_unit=Unit.LET,
-        y_unit=spectrum.y_unit,
-        quantity=spectrum.quantity,
-        particle=spectrum.particle,
-        source=spectrum.source,
         model=f"{spectrum.model}+rebin_let",
+        ordinate_basis=SpectrumOrdinateBasis.BIN_AVERAGE,
+        bin_edges=target_edges,
+        transformation=TransformationStep(
+            name="conservative_let_rebin",
+            version="1",
+            parameters=(("target_points", str(len(let_centers))),),
+        ),
     )
 
 
@@ -138,14 +157,11 @@ def combine_let_spectra(
     *,
     spectra: Iterable[Spectrum1D],
     let_centers: tuple[float, ...] | None = None,
-    particle: Particle = Particle.HZE,
+    particle: Particle | None = None,
     model: str | None = None,
+    let_role: LetSpectrumRole | None = None,
 ) -> Spectrum1D:
-    """Return a combined LET spectrum on a common LET grid.
-
-    Particle.HZE is used as the existing group particle marker because RADAR does
-    not yet define a dedicated mixed-particle enum value.
-    """
+    """Return a combined LET spectrum on a common LET grid."""
 
     spectra_tuple = _as_tuple(spectra)
     first = spectra_tuple[0]
@@ -166,6 +182,18 @@ def combine_let_spectra(
             msg = "Combined LET spectra must have the same y unit."
             raise ValueError(msg)
 
+        for field_name in (
+            "angular_basis",
+            "temporal_basis",
+            "location",
+            "shielding",
+            "assessment_mode",
+            "mission_duration_s",
+        ):
+            if getattr(spectrum, field_name) != getattr(first, field_name):
+                msg = f"Combined LET spectra must have the same {field_name}."
+                raise ValueError(msg)
+
     output_centers = let_centers or first.x
     _ = _log_edges_from_centers(output_centers)
 
@@ -178,15 +206,95 @@ def combine_let_spectra(
         for index in range(len(output_centers))
     )
 
-    return Spectrum1D(
+    additional_document_refs: list[str] = []
+    additional_dataset_refs: list[str] = []
+    incomplete_reasons: list[str] = []
+    completeness = first.completeness
+    for spectrum in spectra_tuple:
+        if spectrum.model_reference is not None:
+            additional_document_refs.extend(spectrum.model_reference.document_refs)
+            additional_dataset_refs.extend(spectrum.model_reference.dataset_refs)
+        if spectrum.completeness is SpectrumCompleteness.INCOMPLETE:
+            completeness = SpectrumCompleteness.INCOMPLETE
+            incomplete_reasons.extend(spectrum.incomplete_reasons)
+
+    input_particles = {spectrum.particle for spectrum in spectra_tuple}
+    if particle is None:
+        particle = (
+            next(iter(input_particles))
+            if len(input_particles) == 1
+            else Particle.MIXED_ION
+        )
+
+    if let_role is None:
+        if particle is Particle.HZE and all(
+            spectrum.particle is Particle.HZE for spectrum in spectra_tuple
+        ):
+            let_role = (
+                LetSpectrumRole.HZE_DIRECT_ION
+                if len(spectra_tuple) > 1
+                else LetSpectrumRole.HZE_SPECIES
+            )
+        elif particle is Particle.MIXED_ION:
+            let_role = LetSpectrumRole.MIXED_DIAGNOSTIC
+        elif particle is Particle.PROTON:
+            let_role = LetSpectrumRole.PROTON_DIAGNOSTIC
+        else:
+            msg = "Combined LET spectrum requires an explicit compatible LET role."
+            raise ValueError(msg)
+
+    species = first.species
+    if let_role is LetSpectrumRole.HZE_DIRECT_ION:
+        species = ParticleSpecies(symbol="HZE aggregate", is_aggregate=True)
+    elif let_role is LetSpectrumRole.MIXED_DIAGNOSTIC:
+        species = ParticleSpecies(symbol="proton+HZE aggregate", is_aggregate=True)
+
+    output = derive_spectrum(
+        rebinned[0],
         x=output_centers,
         y=total_values,
-        x_unit=Unit.LET,
-        y_unit=first.y_unit,
-        quantity=first.quantity,
         particle=particle,
-        source=first.source,
         model=model or COMBINED_LET_MODEL,
+        species=species,
+        let_role=let_role,
+        transformation=TransformationStep(
+            name="combine_let_spectra",
+            version="1",
+            parameters=(
+                ("input_count", str(len(spectra_tuple))),
+                ("input_models", "|".join(spectrum.model for spectrum in spectra_tuple)),
+            ),
+        ),
+        additional_document_refs=tuple(dict.fromkeys(additional_document_refs)),
+        additional_dataset_refs=tuple(dict.fromkeys(additional_dataset_refs)),
+        completeness=completeness,
+        incomplete_reasons=tuple(dict.fromkeys(incomplete_reasons)),
+    )
+    return output
+
+
+def combine_hze_let_spectra(
+    *,
+    hze_let_spectra: Iterable[Spectrum1D],
+    let_centers: tuple[float, ...] | None = None,
+    model: str | None = None,
+) -> Spectrum1D:
+    """Return the HZE-only aggregate used by the direct-ion SEE model."""
+
+    hze_tuple = tuple(hze_let_spectra)
+    if not hze_tuple:
+        msg = "HZE aggregate LET requires at least one HZE LET spectrum."
+        raise ValueError(msg)
+    if any(spectrum.particle is not Particle.HZE for spectrum in hze_tuple):
+        msg = "HZE aggregate LET accepts only HZE LET spectra."
+        raise ValueError(msg)
+
+    return combine_let_spectra(
+        spectra=hze_tuple,
+        let_centers=let_centers,
+        particle=Particle.HZE,
+        model=model or HZE_AGGREGATE_LET_MODEL,
+        let_role=LetSpectrumRole.HZE_DIRECT_ION,
     )
 
 
@@ -214,16 +322,24 @@ def combine_proton_and_hze_let_spectra(
             msg = "Combined proton/HZE LET requires HZE LET spectra."
             raise ValueError(msg)
 
-    return combine_let_spectra(
+    combined = combine_let_spectra(
         spectra=(proton_let, *hze_tuple),
         let_centers=let_centers,
-        particle=Particle.HZE,
-        model=model or COMBINED_LET_MODEL,
+        particle=Particle.MIXED_ION,
+        model=model or MIXED_LET_DIAGNOSTIC_MODEL,
+        let_role=LetSpectrumRole.MIXED_DIAGNOSTIC,
+    )
+    return mark_spectrum_incomplete(
+        combined,
+        "mixed proton+HZE LET is not a canonical HZE production product",
     )
 
 
 __all__ = [
     "COMBINED_LET_MODEL",
+    "HZE_AGGREGATE_LET_MODEL",
+    "MIXED_LET_DIAGNOSTIC_MODEL",
+    "combine_hze_let_spectra",
     "combine_let_spectra",
     "combine_proton_and_hze_let_spectra",
     "rebin_let_spectrum_to_grid",

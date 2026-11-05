@@ -44,7 +44,7 @@ _SOLAR_ACTIVITY_TITLES: dict[str, str] = {
 
 _ORBIT_TYPE_TITLES: dict[str, str] = {
     "circular": "круговая",
-    "elliptical": "эллиптическая",
+    "elliptic": "эллиптическая",
 }
 
 _SHIELD_GEOMETRY_TITLES: dict[str, str] = {
@@ -138,7 +138,7 @@ def calculation_protocol_entries(
         ),
         _entry(
             "Методика расчёта",
-            "Учёт протонов при расчёте ЛПЭ",
+            "Диагностический суммарный ЛПЭ протоны+ТЗЧ",
             _bool_title(methodology.include_protons_in_let),
         ),
         _entry(

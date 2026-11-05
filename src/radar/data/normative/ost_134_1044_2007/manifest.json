@@ -3,7 +3,7 @@
   "collection_id": "ost_134_1044_2007",
   "title": "ОСТ 134-1044-2007",
   "document": "ОСТ 134-1044-2007",
-  "status": "partially_transferred",
+  "status": "legacy_table_index; complete integrity coverage is in ../integrity_manifest.json",
   "tables": [
     {
       "table_id": "ost_134_1044_2007_table_g_1_wolf_numbers",

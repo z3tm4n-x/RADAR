@@ -10,6 +10,8 @@ from importlib import resources
 from pathlib import PurePosixPath
 from typing import cast
 
+from radar.data.integrity import validate_normative_resource_integrity
+
 _NORMATIVE_PACKAGE = "radar.data.normative"
 
 
@@ -58,7 +60,10 @@ class NormativeCollectionManifest:
 def _load_json_resource(relative_path: str) -> dict[str, object]:
     """Load JSON resource from normative data package."""
 
-    resource = resources.files(_NORMATIVE_PACKAGE).joinpath(relative_path)
+    resource_path = _safe_normative_path(relative_path, "JSON resource")
+    normalized_path = str(resource_path)
+    validate_normative_resource_integrity(normalized_path)
+    resource = resources.files(_NORMATIVE_PACKAGE).joinpath(normalized_path)
     loaded: object = json.loads(resource.read_text(encoding="utf-8-sig"))
 
     if not isinstance(loaded, dict):
@@ -83,7 +88,9 @@ def _load_csv_resource(relative_path: str) -> tuple[dict[str, str], ...]:
     """Load CSV resource from normative data package."""
 
     resource_path = _safe_normative_path(relative_path, "table")
-    resource = resources.files(_NORMATIVE_PACKAGE).joinpath(str(resource_path))
+    normalized_path = str(resource_path)
+    validate_normative_resource_integrity(normalized_path)
+    resource = resources.files(_NORMATIVE_PACKAGE).joinpath(normalized_path)
     text = resource.read_text(encoding="utf-8-sig")
     reader = csv.DictReader(StringIO(text))
 

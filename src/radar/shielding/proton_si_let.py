@@ -8,8 +8,16 @@ from math import exp, isfinite, log
 from pathlib import Path
 from typing import Mapping
 
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.spectra import Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationSource,
+    SpectrumAxisKind,
+    SpectrumOrdinateBasis,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 
 PROTON_SI_LET_MODEL = "proton_si_let_histogram"
@@ -226,7 +234,12 @@ def proton_energy_spectrum_to_let_spectrum(
         msg = "Proton LET conversion requires an energy grid in MeV."
         raise ValueError(msg)
 
-    energy_edges = _log_edges_from_centers(spectrum.x)
+    energy_edges = (
+        spectrum.bin_edges
+        if spectrum.ordinate_basis is SpectrumOrdinateBasis.BIN_AVERAGE
+        else _log_edges_from_centers(spectrum.x)
+    )
+    assert energy_edges is not None
     let_values = tuple(table.total_let_at_energy(energy) for energy in spectrum.x)
 
     output_centers = let_centers
@@ -251,16 +264,32 @@ def proton_energy_spectrum_to_let_spectrum(
     )
     output_quantity, output_unit = _output_quantity_and_unit(spectrum.quantity)
 
-    return Spectrum1D(
+    output = derive_spectrum(
+        spectrum,
         x=output_centers,
         y=output_values,
         x_unit=Unit.LET,
         y_unit=output_unit,
         quantity=output_quantity,
         particle=Particle.PROTON,
-        source=spectrum.source,
         model=model or f"{spectrum.model}+{PROTON_SI_LET_MODEL}",
+        axis_kind=SpectrumAxisKind.LINEAR_ENERGY_TRANSFER,
+        let_role=LetSpectrumRole.PROTON_DIAGNOSTIC,
+        ordinate_basis=SpectrumOrdinateBasis.BIN_AVERAGE,
+        bin_edges=output_edges,
+        transformation=TransformationStep(
+            name=PROTON_SI_LET_MODEL,
+            version="1",
+            parameters=(("target", "silicon"),),
+        ),
+        additional_dataset_refs=("stopping/proton_si_let.csv",),
     )
+    if output.axis_kind is not None:
+        output = mark_spectrum_incomplete(
+            output,
+            "proton silicon LET dataset release eligibility has not been established",
+        )
+    return output
 
 
 def _required_text(row: Mapping[str, str | None], column: str, line_number: int) -> str:

@@ -1,4 +1,4 @@
-﻿"""GCR shielding and LET product construction."""
+"""GCR shielding and LET product construction."""
 
 from __future__ import annotations
 
@@ -7,16 +7,19 @@ from math import exp, isfinite, log
 from typing import Mapping
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
+from radar.core.spectra import ShieldingDescriptor, Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
 from radar.core.types import (
     Particle,
     RadiationProductKind,
     RadiationSource,
+    SpectrumLocation,
     SpectrumQuantity,
 )
 from radar.shielding.hze_al import HzeAlRangeTable, shield_hze_spectrum_primary_through_al
 from radar.shielding.hze_si_let import HzeSiLetTable, hze_energy_spectrum_to_let_spectrum
 from radar.shielding.let_combined import (
+    combine_hze_let_spectra,
     combine_proton_and_hze_let_spectra,
     rebin_let_spectrum_to_grid,
 )
@@ -46,6 +49,11 @@ GCR_HZE_NUCLEAR_ATTENUATION_NOT_INCLUDED = "heavy_ion_nuclear_attenuation_not_in
 GCR_HZE_FRAGMENTATION_NOT_INCLUDED = "heavy_ion_fragmentation_not_included"
 GCR_SILICON_LET_TARGET = "silicon_let"
 GCR_NO_HIDDEN_4PI = "no_hidden_4pi_factor"
+GCR_LET_ENERGY_DOMAIN_REASON_PREFIX = "GCR LET energy domain incomplete"
+GCR_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON = (
+    "proton nonelastic survival was not included"
+)
+GCR_PROTON_SECONDARY_OMITTED_REASON = "secondary proton production was not included"
 
 
 @dataclass(frozen=True)
@@ -106,7 +114,8 @@ class GcrLetProductsResult:
 
     proton_let: Spectrum1D
     hze_let_by_z: dict[int, Spectrum1D]
-    combined_let: Spectrum1D
+    hze_aggregate_let: Spectrum1D
+    mixed_let_diagnostic: Spectrum1D
     let_centers: tuple[float, ...]
 
     def __post_init__(self) -> None:
@@ -118,8 +127,12 @@ class GcrLetProductsResult:
             msg = "GCR proton LET spectrum must use the common LET grid."
             raise ValueError(msg)
 
-        if self.combined_let.x != self.let_centers:
-            msg = "GCR combined LET spectrum must use the common LET grid."
+        if self.hze_aggregate_let.x != self.let_centers:
+            msg = "GCR HZE aggregate LET spectrum must use the common LET grid."
+            raise ValueError(msg)
+
+        if self.mixed_let_diagnostic.x != self.let_centers:
+            msg = "GCR mixed diagnostic LET spectrum must use the common LET grid."
             raise ValueError(msg)
 
         for spectrum in self.hze_let_by_z.values():
@@ -168,45 +181,115 @@ def _validate_gcr_hze_energy_spectrum(spectrum: Spectrum1D) -> None:
         raise ValueError(msg)
 
 
-def _zero_spectrum_like(spectrum: Spectrum1D, *, model: str) -> Spectrum1D:
-    return Spectrum1D(
-        x=spectrum.x,
+def _zero_spectrum_like(
+    spectrum: Spectrum1D,
+    *,
+    model: str,
+    thickness_g_cm2: float,
+) -> Spectrum1D:
+    return derive_spectrum(
+        spectrum,
         y=tuple(0.0 for _ in spectrum.x),
-        x_unit=spectrum.x_unit,
-        y_unit=spectrum.y_unit,
-        quantity=spectrum.quantity,
-        particle=spectrum.particle,
-        source=spectrum.source,
+        particle=Particle.PROTON,
         model=model,
+        location=SpectrumLocation.BEHIND_SHIELD,
+        shielding=ShieldingDescriptor(
+            material="aluminium",
+            areal_density_g_cm2=thickness_g_cm2,
+        ),
+        transformation=TransformationStep(
+            name="secondary_protons_omitted",
+            version="1",
+            parameters=(("thickness_g_cm2", f"{thickness_g_cm2:.17g}"),),
+        ),
+    )
+
+
+def _restrict_energy_spectrum_to_table_domain(
+    spectrum: Spectrum1D,
+    *,
+    minimum_energy: float,
+    maximum_energy: float,
+    table_name: str,
+) -> Spectrum1D:
+    """Return the tabulated subset and make any truncation explicit."""
+
+    selected = tuple(
+        index
+        for index, energy in enumerate(spectrum.x)
+        if minimum_energy <= energy <= maximum_energy
+    )
+    if len(selected) < 2:
+        msg = (
+            f"{table_name} has fewer than two source-spectrum points within "
+            f"{minimum_energy:g}..{maximum_energy:g} MeV/nucleon."
+        )
+        raise ValueError(msg)
+
+    restricted = derive_spectrum(
+        spectrum,
+        x=tuple(spectrum.x[index] for index in selected),
+        y=tuple(spectrum.y[index] for index in selected),
+        bin_edges=(
+            None
+            if spectrum.bin_edges is None
+            else spectrum.bin_edges[selected[0] : selected[-1] + 2]
+        ),
+        transformation=TransformationStep(
+            name="gcr_let_table_energy_domain_restriction",
+            version="1",
+            parameters=(
+                ("table", table_name),
+                ("minimum_energy", f"{minimum_energy:.17g}"),
+                ("maximum_energy", f"{maximum_energy:.17g}"),
+            ),
+        ),
+    )
+    if selected == tuple(range(len(spectrum.x))):
+        return restricted
+
+    return mark_spectrum_incomplete(
+        restricted,
+        f"{GCR_LET_ENERGY_DOMAIN_REASON_PREFIX}: {table_name} support "
+        f"{minimum_energy:.17g}..{maximum_energy:.17g} MeV/nucleon does not "
+        f"cover source grid {spectrum.x[0]:.17g}..{spectrum.x[-1]:.17g} "
+        "MeV/nucleon",
     )
 
 
 def _gcr_ion_symbol_from_product(product: SpectrumProduct) -> str:
-    parts = product.spectrum.model.split(":")
-
-    if len(parts) < 2:
-        msg = "GCR HZE product model must contain an ion symbol tag."
+    species = product.spectrum.species
+    if species is None and product.spectrum.axis_kind is None:
+        # Compatibility for historical static test fixtures only. Typed
+        # calculation products are forbidden from recovering Z from labels.
+        parts = product.spectrum.model.split(":")
+        if len(parts) < 2:
+            msg = "Legacy GCR HZE product model must contain an ion symbol tag."
+            raise ValueError(msg)
+        symbol = parts[1].split("+", maxsplit=1)[0]
+        parameters = get_gost_gcr_ion_parameters().get(symbol)
+        if parameters is None or parameters.z < 2:
+            msg = "Legacy GCR HZE product model must identify a known heavy ion."
+            raise ValueError(msg)
+        return symbol
+    if species is None or species.is_aggregate:
+        msg = "GCR HZE product requires structured individual-ion metadata."
         raise ValueError(msg)
-
-    symbol = parts[1].split("+", maxsplit=1)[0]
-    parameters = get_gost_gcr_ion_parameters().get(symbol)
-
-    if parameters is None:
-        msg = f"GCR HZE product model contains unknown ion symbol {symbol!r}."
+    if species.atomic_number is None or species.atomic_number < 2:
+        msg = "GCR HZE product structured metadata must identify Z>=2."
         raise ValueError(msg)
-
-    if parameters.z < 2:
-        msg = "GCR HZE product model must identify a heavy ion symbol."
-        raise ValueError(msg)
-
-    return symbol
+    return species.symbol
 
 
 def gcr_hze_charge_number_from_product(product: SpectrumProduct) -> int:
-    """Return charge number Z encoded by a GCR HZE product model string."""
+    """Return charge number Z from structured GCR species metadata."""
 
+    _ = _gcr_ion_symbol_from_product(product)
+    species = product.spectrum.species
+    if species is not None:
+        assert species.atomic_number is not None
+        return species.atomic_number
     symbol = _gcr_ion_symbol_from_product(product)
-
     return get_gost_gcr_ion_parameters()[symbol].z
 
 
@@ -276,8 +359,9 @@ def calculate_gcr_proton_shielding_spectrum(
         )
     else:
         secondary = _zero_spectrum_like(
-            spectrum,
+            primary_survived,
             model=f"{spectrum.model}+{GCR_SECONDARY_PROTONS_NOT_INCLUDED}",
+            thickness_g_cm2=thickness_g_cm2,
         )
 
     total = combine_primary_and_secondary_proton_spectra(
@@ -289,6 +373,14 @@ def calculate_gcr_proton_shielding_spectrum(
             include_secondary_protons=include_secondary_protons,
         ),
     )
+    if thickness_g_cm2 > 0.0:
+        omitted_reasons: list[str] = []
+        if not include_nonelastic_survival:
+            omitted_reasons.append(GCR_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON)
+        if not include_secondary_protons:
+            omitted_reasons.append(GCR_PROTON_SECONDARY_OMITTED_REASON)
+        if omitted_reasons:
+            total = mark_spectrum_incomplete(total, *omitted_reasons)
 
     return GcrProtonShieldingResult(
         primary=primary,
@@ -353,6 +445,42 @@ def _hze_model(*, input_model: str, z: int, symbol: str) -> str:
     )
 
 
+def _zero_hze_identity_without_table(
+    *,
+    z: int,
+    spectrum: Spectrum1D,
+) -> tuple[Spectrum1D, str]:
+    species = spectrum.species
+    if (
+        species is None
+        or species.is_aggregate
+        or species.atomic_number != z
+    ):
+        msg = (
+            "Zero-thickness GCR HZE identity without a range table requires "
+            f"structured individual-ion metadata for Z={z}."
+        )
+        raise ValueError(msg)
+
+    return (
+        derive_spectrum(
+            spectrum,
+            model=f"{spectrum.model}+zero_aluminium_identity",
+            location=SpectrumLocation.BEHIND_SHIELD,
+            shielding=ShieldingDescriptor(
+                material="aluminium",
+                areal_density_g_cm2=0.0,
+            ),
+            transformation=TransformationStep(
+                name="zero_aluminium_identity",
+                version="1",
+                parameters=(("thickness_g_cm2", "0"),),
+            ),
+        ),
+        species.symbol,
+    )
+
+
 def calculate_gcr_hze_shielding_spectrum(
     *,
     z: int,
@@ -365,13 +493,32 @@ def calculate_gcr_hze_shielding_spectrum(
     _validate_thickness(thickness_g_cm2, "GCR HZE shielding thickness")
     _validate_gcr_hze_energy_spectrum(spectrum)
 
-    table = _hze_table_for_z(tables=tables, z=z)
+    table = tables.hze_al_ranges_by_z.get(z)
+    if table is None and thickness_g_cm2 == 0.0:
+        shielded, symbol = _zero_hze_identity_without_table(z=z, spectrum=spectrum)
+        return GcrHzeShieldingResult(
+            z=z,
+            symbol=symbol,
+            spectrum=shielded,
+            thickness_g_cm2=0.0,
+            nuclear_attenuation=False,
+            fragmentation=False,
+        )
+    if table is None:
+        table = _hze_table_for_z(tables=tables, z=z)
     shielded = shield_hze_spectrum_primary_through_al(
         spectrum=spectrum,
         table=table,
         thickness_g_cm2=thickness_g_cm2,
         model=_hze_model(input_model=spectrum.model, z=table.z, symbol=table.symbol),
     )
+    if thickness_g_cm2 > 0.0 and shielded.axis_kind is not None:
+        shielded = mark_spectrum_incomplete(
+            shielded,
+            "heavy-ion nuclear attenuation is not included",
+            "heavy-ion fragmentation is not included",
+            "HZE aluminium range dataset release eligibility has not been established",
+        )
 
     return GcrHzeShieldingResult(
         z=table.z,
@@ -401,8 +548,7 @@ def calculate_gcr_hze_shielding_product(
 
     source_label = product.label or product.kind.value
     label = (
-        f"{source_label} Z={result.z} {result.symbol} "
-        f"behind Al shield {thickness_g_cm2:g} g/cm^2"
+        f"{source_label} Z={result.z} {result.symbol} behind Al shield {thickness_g_cm2:g} g/cm^2"
     )
 
     return SpectrumProduct(
@@ -530,11 +676,18 @@ def _product_kind_from_energy_quantity(quantity: SpectrumQuantity) -> RadiationP
     raise ValueError(msg)
 
 
-def _combined_let_model(input_model: str) -> str:
+def _hze_aggregate_let_model(input_model: str) -> str:
+    return (
+        f"{input_model}+{GCR_LET_PRODUCTS_MODEL}+hze_primary_after_al+"
+        f"{GCR_SILICON_LET_TARGET}+{GCR_NO_HIDDEN_4PI}+hze_direct_ion_only"
+    )
+
+
+def _mixed_let_diagnostic_model(input_model: str) -> str:
     return (
         f"{input_model}+{GCR_LET_PRODUCTS_MODEL}+"
         f"proton_total_after_al+hze_primary_after_al+"
-        f"{GCR_SILICON_LET_TARGET}+{GCR_NO_HIDDEN_4PI}"
+        f"{GCR_SILICON_LET_TARGET}+{GCR_NO_HIDDEN_4PI}+diagnostic_only"
     )
 
 
@@ -565,8 +718,14 @@ def calculate_gcr_let_products(
 
     _validate_energy_quantities_match(proton=proton, hze_by_z=hze_by_z)
 
+    proton_energy_for_let = _restrict_energy_spectrum_to_table_domain(
+        proton.total,
+        minimum_energy=tables.proton_si_let.energy_mev[0],
+        maximum_energy=tables.proton_si_let.energy_mev[-1],
+        table_name="proton silicon LET table",
+    )
     proton_let_raw = proton_energy_spectrum_to_let_spectrum(
-        spectrum=proton.total,
+        spectrum=proton_energy_for_let,
         table=tables.proton_si_let,
     )
 
@@ -574,8 +733,14 @@ def calculate_gcr_let_products(
 
     for z, hze_result in sorted(hze_by_z.items()):
         table = _hze_let_table_for_z(tables=tables, z=z)
+        hze_energy_for_let = _restrict_energy_spectrum_to_table_domain(
+            hze_result.spectrum,
+            minimum_energy=table.energy_mev_per_nucleon[0],
+            maximum_energy=table.energy_mev_per_nucleon[-1],
+            table_name=f"Z={z} HZE silicon LET table",
+        )
         hze_let_raw_by_z[z] = hze_energy_spectrum_to_let_spectrum(
-            spectrum=hze_result.spectrum,
+            spectrum=hze_energy_for_let,
             table=table,
         )
 
@@ -594,17 +759,25 @@ def calculate_gcr_let_products(
         for z, spectrum in hze_let_raw_by_z.items()
     }
 
-    combined_let = combine_proton_and_hze_let_spectra(
-        proton_let=proton_let,
-        hze_let_spectra=tuple(hze_let_by_z[z] for z in sorted(hze_let_by_z)),
+    hze_spectra = tuple(hze_let_by_z[z] for z in sorted(hze_let_by_z))
+    first_hze_model = hze_spectra[0].model
+    hze_aggregate_let = combine_hze_let_spectra(
+        hze_let_spectra=hze_spectra,
         let_centers=output_centers,
-        model=_combined_let_model(proton.total.model),
+        model=_hze_aggregate_let_model(first_hze_model),
+    )
+    mixed_let_diagnostic = combine_proton_and_hze_let_spectra(
+        proton_let=proton_let,
+        hze_let_spectra=hze_spectra,
+        let_centers=output_centers,
+        model=_mixed_let_diagnostic_model(proton.total.model),
     )
 
     return GcrLetProductsResult(
         proton_let=proton_let,
         hze_let_by_z=hze_let_by_z,
-        combined_let=combined_let,
+        hze_aggregate_let=hze_aggregate_let,
+        mixed_let_diagnostic=mixed_let_diagnostic,
         let_centers=output_centers,
     )
 
@@ -618,7 +791,7 @@ def calculate_gcr_combined_let_product(
     product_kind: RadiationProductKind | None = None,
     label: str = "",
 ) -> SpectrumProduct:
-    """Return the combined GCR LET spectrum as a SpectrumProduct."""
+    """Return the mixed proton+HZE diagnostic LET product."""
 
     result = calculate_gcr_let_products(
         proton=proton,
@@ -630,8 +803,35 @@ def calculate_gcr_combined_let_product(
 
     return SpectrumProduct(
         kind=output_kind,
-        spectrum=result.combined_let,
-        label=label or f"GCR combined LET behind Al shield {proton.thickness_g_cm2:g} g/cm^2",
+        spectrum=result.mixed_let_diagnostic,
+        label=label
+        or f"GCR mixed proton+HZE diagnostic LET behind Al shield {proton.thickness_g_cm2:g} g/cm^2",
+    )
+
+
+def calculate_gcr_hze_aggregate_let_product(
+    *,
+    proton: GcrProtonShieldingResult,
+    hze_by_z: Mapping[int, GcrHzeShieldingResult],
+    tables: ShieldingNormativeTables,
+    let_centers: tuple[float, ...] | None = None,
+    product_kind: RadiationProductKind | None = None,
+    label: str = "",
+) -> SpectrumProduct:
+    """Return the HZE-only direct-ion assessment LET product."""
+
+    result = calculate_gcr_let_products(
+        proton=proton,
+        hze_by_z=hze_by_z,
+        tables=tables,
+        let_centers=let_centers,
+    )
+    output_kind = product_kind or _product_kind_from_energy_quantity(proton.total.quantity)
+    return SpectrumProduct(
+        kind=output_kind,
+        spectrum=result.hze_aggregate_let,
+        label=label
+        or f"GCR HZE direct-ion LET behind Al shield {proton.thickness_g_cm2:g} g/cm^2",
     )
 
 
@@ -642,10 +842,13 @@ __all__ = [
     "GCR_LET_PRODUCTS_MODEL",
     "GCR_NO_HIDDEN_4PI",
     "GCR_PROTON_AL_SHIELDING_MODEL",
+    "GCR_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON",
+    "GCR_PROTON_SECONDARY_OMITTED_REASON",
     "GcrHzeShieldingResult",
     "GcrLetProductsResult",
     "GcrProtonShieldingResult",
     "calculate_gcr_combined_let_product",
+    "calculate_gcr_hze_aggregate_let_product",
     "calculate_gcr_hze_shielding_product",
     "calculate_gcr_hze_shielding_spectrum",
     "calculate_gcr_let_products",

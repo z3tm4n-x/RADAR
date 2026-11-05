@@ -92,7 +92,7 @@ def integrate_let_energy_deposition_MeV_per_mg(product: SpectrumProduct) -> floa
     _validate_ion_let_dose_product(product)
 
     spectrum = product.spectrum
-    edges = _log_edges_from_centers(spectrum.x)
+    edges = spectrum.bin_edges or _log_edges_from_centers(spectrum.x)
 
     return sum(
         let_center * fluence_density * (edges[index + 1] - edges[index])

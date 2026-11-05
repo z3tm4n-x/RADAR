@@ -1,5 +1,6 @@
 ﻿{
   "schema_version": "1.0",
+  "integrity_manifest": "integrity_manifest.json",
   "collections": [
     {
       "collection_id": "ost_134_1044_2007",

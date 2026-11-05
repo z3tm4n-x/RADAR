@@ -14,7 +14,7 @@ from radar.core.source_products import (
     validate_products_match_spectra_and_source,
     validate_spectra_match_expected,
 )
-from radar.core.types import RadiationProductKind, RadiationSource
+from radar.core.types import RadiationProductKind, RadiationSource, SpectrumCompleteness
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.spectrum import apply_proton_penetration
 from radar.sep.model import (
@@ -28,6 +28,15 @@ SEP_PROTON_PIPELINE_COMPONENT = "sep_proton_pipeline"
 SEP_MODEL_COMPONENT = "sep_model"
 GEOMAGNETIC_PENETRATION_COMPONENT = "geomagnetic_penetration"
 UNVERSIONED_MODEL = "unversioned"
+
+
+def _spectrum_qualification_reasons(spectrum: Spectrum1D) -> tuple[str, ...]:
+    """Keep diagnostic source/output states visible at this legacy boundary."""
+    if spectrum.incomplete_reasons:
+        return spectrum.incomplete_reasons
+    if spectrum.completeness is SpectrumCompleteness.INCOMPLETE:
+        return ("Spectrum is marked INCOMPLETE without a supplied qualification reason.",)
+    return ()
 
 
 def _sep_mission_fluence_product(
@@ -89,6 +98,10 @@ class SepProtonPipelineResult:
             mismatch_message="SEP penetrated product spectrum must match penetrated spectrum.",
         )
 
+        if raw_product.spectrum.axis_kind is not None:
+            raw_product.validate_calculation_contract()
+            penetrated_product.validate_calculation_contract()
+
         object.__setattr__(self, "raw_product", raw_product)
         object.__setattr__(self, "penetrated_product", penetrated_product)
 
@@ -124,29 +137,34 @@ def calculate_sep_proton_pipeline(
 
     sep_model_input = SepModelInput(mission=config.mission)
     sep_model_result = sep_model.calculate(sep_model_input)
+    source_reasons = _spectrum_qualification_reasons(sep_model_result.spectrum)
 
     calculation_result = calculation_result.set_component_status(
         component=SEP_MODEL_COMPONENT,
-        status=ComponentStatus.COMPLETED,
+        status=ComponentStatus.INCOMPLETE if source_reasons else ComponentStatus.COMPLETED,
     )
 
     calculation_result = calculation_result.set_model_info(
         ModelInfo(
             name=sep_model_result.model,
-            version=UNVERSIONED_MODEL,
-            status="calculated",
+            version=sep_model.metadata.version or UNVERSIONED_MODEL,
+            status="diagnostic" if source_reasons else "calculated",
             source=sep_model_result.document,
         )
     )
 
     calculation_result = calculation_result.add_log_entry(
-        level=LogLevel.INFO,
+        level=LogLevel.WARNING if source_reasons else LogLevel.INFO,
         stage=SEP_MODEL_COMPONENT,
-        message="SEP proton fluence spectrum calculated.",
+        message=(
+            "SEP proton fluence calculated with unresolved qualification."
+            if source_reasons else "SEP proton fluence spectrum calculated."
+        ),
         details={
             "model": sep_model_result.model,
             "document": sep_model_result.document,
             "lifetime_years": str(sep_model_result.lifetime_years),
+            **({"qualification_reasons": "; ".join(source_reasons)} if source_reasons else {}),
         },
     )
 
@@ -154,40 +172,56 @@ def calculate_sep_proton_pipeline(
         spectrum=sep_model_result.spectrum,
         penetration=penetration,
     )
+    qualification_reasons = tuple(dict.fromkeys((
+        *source_reasons,
+        *penetration.incomplete_reasons,
+        *_spectrum_qualification_reasons(penetrated_spectrum),
+    )))
 
     calculation_result = calculation_result.set_component_status(
         component=GEOMAGNETIC_PENETRATION_COMPONENT,
-        status=ComponentStatus.COMPLETED,
+        status=ComponentStatus.INCOMPLETE if qualification_reasons else ComponentStatus.COMPLETED,
     )
 
     calculation_result = calculation_result.set_model_info(
         ModelInfo(
             name=penetration.model,
-            version=UNVERSIONED_MODEL,
-            status="applied",
+            version=penetration.model_version,
+            status="diagnostic" if qualification_reasons else "applied",
             source="geomagnetic penetration",
         )
     )
 
     calculation_result = calculation_result.add_log_entry(
-        level=LogLevel.INFO,
+        level=LogLevel.WARNING if qualification_reasons else LogLevel.INFO,
         stage=GEOMAGNETIC_PENETRATION_COMPONENT,
-        message="Geomagnetic penetration applied to SEP proton spectrum.",
+        message=(
+            "Geomagnetic penetration applied with unresolved qualification."
+            if qualification_reasons else "Geomagnetic penetration applied to SEP proton spectrum."
+        ),
         details={
             "model": penetration.model,
             "kp": str(penetration.kp),
+            "version": penetration.model_version,
+            **({"qualification_reasons": "; ".join(qualification_reasons)}
+               if qualification_reasons else {}),
         },
     )
 
     calculation_result = calculation_result.set_component_status(
         component=SEP_PROTON_PIPELINE_COMPONENT,
-        status=ComponentStatus.COMPLETED,
+        status=ComponentStatus.INCOMPLETE if qualification_reasons else ComponentStatus.COMPLETED,
     )
 
     calculation_result = calculation_result.add_log_entry(
-        level=LogLevel.INFO,
+        level=LogLevel.WARNING if qualification_reasons else LogLevel.INFO,
         stage=SEP_PROTON_PIPELINE_COMPONENT,
-        message="SEP proton pipeline completed.",
+        message=(
+            "SEP proton pipeline calculated with unresolved qualification."
+            if qualification_reasons else "SEP proton pipeline completed."
+        ),
+        details=({"qualification_reasons": "; ".join(qualification_reasons)}
+                 if qualification_reasons else None),
     )
 
     return SepProtonPipelineResult(

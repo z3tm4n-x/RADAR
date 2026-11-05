@@ -8,7 +8,9 @@ from radar.core.display_units import (
 )
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
-from radar.core.types import RadiationProductKind
+from radar.core.spectra import TransformationStep
+from radar.core.spectrum_ops import derive_spectrum
+from radar.core.types import RadiationProductKind, TemporalBasis
 from radar.core.units import Unit
 
 DAILY_DISPLAY_UNITS_BY_PRODUCT_KIND: dict[RadiationProductKind, Unit] = {
@@ -46,18 +48,20 @@ def average_daily_spectrum_for_product(
 
     spectrum = product.spectrum
 
-    return Spectrum1D(
-        x=spectrum.x,
+    return derive_spectrum(
+        spectrum,
         y=accumulated_values_to_average_daily_values(
             values=spectrum.y,
             duration_days=duration_days,
         ),
-        x_unit=spectrum.x_unit,
         y_unit=daily_unit,
-        quantity=spectrum.quantity,
-        particle=spectrum.particle,
-        source=spectrum.source,
-        model=spectrum.model,
+        temporal_basis=TemporalBasis.MEAN_INTERNAL,
+        assessment_mode=None,
+        transformation=TransformationStep(
+            name="average_daily_display_conversion",
+            version="1",
+            parameters=(("duration_days", f"{duration_days:.17g}"),),
+        ),
     )
 
 
@@ -68,7 +72,11 @@ def average_daily_spectrum_for_mission_years(
 ) -> Spectrum1D:
     """Convert accumulated product to average daily display spectrum for SAS years."""
 
+    duration_days = days_for_mission_years(lifetime_years)
+    if product.spectrum.mission_duration_s is not None:
+        duration_days = product.spectrum.mission_duration_s / (24.0 * 60.0 * 60.0)
+
     return average_daily_spectrum_for_product(
         product=product,
-        duration_days=days_for_mission_years(lifetime_years),
+        duration_days=duration_days,
     )

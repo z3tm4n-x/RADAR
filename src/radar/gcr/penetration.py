@@ -6,8 +6,11 @@ from dataclasses import dataclass
 
 from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
-from radar.core.spectra import Spectrum1D
-from radar.core.spectrum_ops import integrate_differential_spectrum_tail_power_law
+from radar.core.spectra import TransformationStep
+from radar.core.spectrum_ops import (
+    derive_spectrum,
+    integrate_differential_spectrum_finite_upper_bound,
+)
 from radar.core.types import Particle, SpectrumQuantity
 from radar.core.units import Unit
 from radar.geomagnetic.ost_penetration import build_ost_penetration_function_for_config
@@ -15,6 +18,7 @@ from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.rigidity import RigidityGrid
 from radar.geomagnetic.spectrum import apply_hze_penetration, apply_proton_penetration
 from radar.gcr.parameters import get_gost_gcr_ion_parameters
+from radar.gcr.products import GCR_FINITE_DOMAIN_INTEGRATION_STEP
 from radar.physics.rigidity import (
     ion_kinetic_energy_per_nucleon_to_rigidity_gv,
     proton_kinetic_energy_to_rigidity_gv,
@@ -99,15 +103,53 @@ def _matching_integral_source_product(
     return candidate
 
 
+def _finite_integral_upper_bound(
+    *,
+    differential_product: SpectrumProduct,
+    source_integral_product: SpectrumProduct | None,
+) -> float:
+    """Recover the declared finite domain of a paired source integral."""
+
+    if source_integral_product is None:
+        return differential_product.spectrum.x[-1]
+
+    for step in reversed(source_integral_product.spectrum.transformation_chain):
+        if step.name != GCR_FINITE_DOMAIN_INTEGRATION_STEP:
+            continue
+
+        parameters = dict(step.parameters)
+        bound_unit = parameters.get("upper_energy_bound_unit")
+        expected_unit = differential_product.spectrum.x_unit.value
+        if bound_unit != expected_unit:
+            msg = (
+                "GCR paired integral finite-domain unit does not match the "
+                "differential spectrum energy unit."
+            )
+            raise ValueError(msg)
+
+        try:
+            return float(parameters["upper_energy_bound"])
+        except (KeyError, ValueError) as error:
+            msg = "GCR paired integral has an invalid finite upper energy bound."
+            raise ValueError(msg) from error
+
+    return differential_product.spectrum.x[-1]
+
+
 def _integral_product_from_differential_product(
     product: SpectrumProduct,
     *,
     source_integral_product: SpectrumProduct | None = None,
 ) -> SpectrumProduct:
     integral_quantity = _GCR_DIFFERENTIAL_TO_INTEGRAL_QUANTITY[product.spectrum.quantity]
-    integral_values = integrate_differential_spectrum_tail_power_law(
+    upper_energy_bound = _finite_integral_upper_bound(
+        differential_product=product,
+        source_integral_product=source_integral_product,
+    )
+    integral_values = integrate_differential_spectrum_finite_upper_bound(
         energies=product.spectrum.x,
         differential_values=product.spectrum.y,
+        upper_energy_bound=upper_energy_bound,
         context="GCR geomagnetic penetration",
     )
     source_model = (
@@ -120,15 +162,21 @@ def _integral_product_from_differential_product(
         if source_integral_product is not None
         else _integral_label_for_product(product)
     )
-    integral_spectrum = Spectrum1D(
-        x=product.spectrum.x,
+    integral_spectrum = derive_spectrum(
+        product.spectrum,
         y=integral_values,
-        x_unit=product.spectrum.x_unit,
         y_unit=_integral_unit_for_quantity(integral_quantity),
         quantity=integral_quantity,
-        particle=product.spectrum.particle,
-        source=product.spectrum.source,
         model=f"{source_model}+derived_from_{product.spectrum.model}",
+        transformation=TransformationStep(
+            name="differential_to_integral_after_geomagnetic_penetration",
+            version="2",
+            parameters=(
+                ("integration", "local_power_law_finite_domain"),
+                ("upper_energy_bound", f"{upper_energy_bound:.17g}"),
+                ("upper_energy_bound_unit", product.spectrum.x_unit.value),
+            ),
+        ),
     )
 
     return SpectrumProduct(
@@ -139,6 +187,15 @@ def _integral_product_from_differential_product(
 
 
 def _gcr_ion_symbol_from_product(product: SpectrumProduct) -> str:
+    species = product.spectrum.species
+    if species is not None and not species.is_aggregate:
+        return species.symbol
+
+    if product.spectrum.axis_kind is not None:
+        msg = "Typed GCR HZE product requires structured individual-ion metadata."
+        raise ValueError(msg)
+
+    # Historical static fixtures only.
     parts = product.spectrum.model.split(":")
 
     if len(parts) < 2:

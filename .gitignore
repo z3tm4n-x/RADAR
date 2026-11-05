@@ -35,3 +35,18 @@ local_data/
 
 # Do not commit normative PDF documents
 *.pdf
+
+# Local research inputs, private documents, native runtimes and transient runs.
+/research/
+/tmp/
+/tmp_manuscript_review/
+/work/
+/logs/
+/.pytest-tmp-*/
+*.docx
+*.doc
+*.exe
+*.dll
+*.zip
+*.7z
+*.tar.gz

@@ -7,8 +7,9 @@ from math import isfinite
 from typing import Mapping
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource
+from radar.core.spectra import ShieldingDescriptor, Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import Particle, RadiationSource, SpectrumLocation
 from radar.shielding.hze_al import HzeAlRangeTable, shield_hze_spectrum_primary_through_al
 from radar.shielding.resources import ShieldingNormativeTables
 
@@ -90,6 +91,42 @@ def _hze_model(*, input_model: str, z: int, symbol: str) -> str:
     )
 
 
+def _zero_hze_identity_without_table(
+    *,
+    z: int,
+    spectrum: Spectrum1D,
+) -> tuple[Spectrum1D, str]:
+    species = spectrum.species
+    if (
+        species is None
+        or species.is_aggregate
+        or species.atomic_number != z
+    ):
+        msg = (
+            "Zero-thickness SEP HZE identity without a range table requires "
+            f"structured individual-ion metadata for Z={z}."
+        )
+        raise ValueError(msg)
+
+    return (
+        derive_spectrum(
+            spectrum,
+            model=f"{spectrum.model}+zero_aluminium_identity",
+            location=SpectrumLocation.BEHIND_SHIELD,
+            shielding=ShieldingDescriptor(
+                material="aluminium",
+                areal_density_g_cm2=0.0,
+            ),
+            transformation=TransformationStep(
+                name="zero_aluminium_identity",
+                version="1",
+                parameters=(("thickness_g_cm2", "0"),),
+            ),
+        ),
+        species.symbol,
+    )
+
+
 def calculate_sep_hze_shielding_spectrum(
     *,
     z: int,
@@ -113,13 +150,32 @@ def calculate_sep_hze_shielding_spectrum(
 
     _validate_sep_hze_spectrum(spectrum)
 
-    table = _table_for_z(tables=tables, z=z)
+    table = tables.hze_al_ranges_by_z.get(z)
+    if table is None and thickness_g_cm2 == 0.0:
+        shielded, symbol = _zero_hze_identity_without_table(z=z, spectrum=spectrum)
+        return SepHzeShieldingResult(
+            z=z,
+            symbol=symbol,
+            spectrum=shielded,
+            thickness_g_cm2=0.0,
+            nuclear_attenuation=False,
+            fragmentation=False,
+        )
+    if table is None:
+        table = _table_for_z(tables=tables, z=z)
     shielded = shield_hze_spectrum_primary_through_al(
         spectrum=spectrum,
         table=table,
         thickness_g_cm2=thickness_g_cm2,
         model=_hze_model(input_model=spectrum.model, z=table.z, symbol=table.symbol),
     )
+    if thickness_g_cm2 > 0.0 and shielded.axis_kind is not None:
+        shielded = mark_spectrum_incomplete(
+            shielded,
+            "heavy-ion nuclear attenuation is not included",
+            "heavy-ion fragmentation is not included",
+            "HZE aluminium range dataset release eligibility has not been established",
+        )
 
     return SepHzeShieldingResult(
         z=table.z,

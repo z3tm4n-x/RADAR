@@ -11,6 +11,7 @@ from radar.core.spectra import Spectrum1D
 from radar.core.types import RadiationProductKind, SpectrumQuantity
 from radar.shielding.hze_si_let import HzeSiLetTable, hze_energy_spectrum_to_let_spectrum
 from radar.shielding.let_combined import (
+    combine_hze_let_spectra,
     combine_proton_and_hze_let_spectra,
     rebin_let_spectrum_to_grid,
 )
@@ -32,7 +33,8 @@ class SepLetProductsResult:
 
     proton_let: Spectrum1D
     hze_let_by_z: dict[int, Spectrum1D]
-    combined_let: Spectrum1D
+    hze_aggregate_let: Spectrum1D
+    mixed_let_diagnostic: Spectrum1D
     let_centers: tuple[float, ...]
 
     def __post_init__(self) -> None:
@@ -44,8 +46,12 @@ class SepLetProductsResult:
             msg = "SEP proton LET spectrum must use the common LET grid."
             raise ValueError(msg)
 
-        if self.combined_let.x != self.let_centers:
-            msg = "SEP combined LET spectrum must use the common LET grid."
+        if self.hze_aggregate_let.x != self.let_centers:
+            msg = "SEP HZE aggregate LET spectrum must use the common LET grid."
+            raise ValueError(msg)
+
+        if self.mixed_let_diagnostic.x != self.let_centers:
+            msg = "SEP mixed diagnostic LET spectrum must use the common LET grid."
             raise ValueError(msg)
 
         for spectrum in self.hze_let_by_z.values():
@@ -129,11 +135,19 @@ def _product_kind_from_energy_quantity(quantity: SpectrumQuantity) -> RadiationP
     raise ValueError(msg)
 
 
-def _combined_model(input_model: str) -> str:
+def _hze_aggregate_model(input_model: str) -> str:
+    return (
+        f"{input_model}+{SEP_LET_PRODUCTS_MODEL}+"
+        f"{SEP_LET_HZE_PRIMARY_AFTER_AL}+{SEP_LET_SILICON_TARGET}+"
+        f"{SEP_LET_NO_HIDDEN_4PI}+hze_direct_ion_only"
+    )
+
+
+def _mixed_diagnostic_model(input_model: str) -> str:
     return (
         f"{input_model}+{SEP_LET_PRODUCTS_MODEL}+"
         f"{SEP_LET_PROTON_TOTAL_AFTER_AL}+{SEP_LET_HZE_PRIMARY_AFTER_AL}+"
-        f"{SEP_LET_SILICON_TARGET}+{SEP_LET_NO_HIDDEN_4PI}"
+        f"{SEP_LET_SILICON_TARGET}+{SEP_LET_NO_HIDDEN_4PI}+diagnostic_only"
     )
 
 
@@ -193,17 +207,24 @@ def calculate_sep_let_products(
         for z, spectrum in hze_let_raw_by_z.items()
     }
 
-    combined_let = combine_proton_and_hze_let_spectra(
-        proton_let=proton_let,
-        hze_let_spectra=tuple(hze_let_by_z[z] for z in sorted(hze_let_by_z)),
+    hze_spectra = tuple(hze_let_by_z[z] for z in sorted(hze_let_by_z))
+    hze_aggregate_let = combine_hze_let_spectra(
+        hze_let_spectra=hze_spectra,
         let_centers=output_centers,
-        model=_combined_model(proton.total.model),
+        model=_hze_aggregate_model(hze_spectra[0].model),
+    )
+    mixed_let_diagnostic = combine_proton_and_hze_let_spectra(
+        proton_let=proton_let,
+        hze_let_spectra=hze_spectra,
+        let_centers=output_centers,
+        model=_mixed_diagnostic_model(proton.total.model),
     )
 
     return SepLetProductsResult(
         proton_let=proton_let,
         hze_let_by_z=hze_let_by_z,
-        combined_let=combined_let,
+        hze_aggregate_let=hze_aggregate_let,
+        mixed_let_diagnostic=mixed_let_diagnostic,
         let_centers=output_centers,
     )
 
@@ -217,7 +238,11 @@ def calculate_sep_combined_let_product(
     product_kind: RadiationProductKind | None = None,
     label: str = "",
 ) -> SpectrumProduct:
-    """Return the combined SEP LET spectrum as a SpectrumProduct."""
+    """Return the mixed proton+HZE diagnostic LET product.
+
+    This compatibility API is intentionally not the canonical direct-ion SEE
+    input.  Use :func:`calculate_sep_hze_aggregate_let_product` for that role.
+    """
 
     result = calculate_sep_let_products(
         proton=proton,
@@ -229,8 +254,35 @@ def calculate_sep_combined_let_product(
 
     return SpectrumProduct(
         kind=output_kind,
-        spectrum=result.combined_let,
-        label=label or f"SEP combined LET behind Al shield {proton.thickness_g_cm2:g} g/cm^2",
+        spectrum=result.mixed_let_diagnostic,
+        label=label
+        or f"SEP mixed proton+HZE diagnostic LET behind Al shield {proton.thickness_g_cm2:g} g/cm^2",
+    )
+
+
+def calculate_sep_hze_aggregate_let_product(
+    *,
+    proton: SepProtonShieldingResult,
+    hze_by_z: Mapping[int, SepHzeShieldingResult],
+    tables: ShieldingNormativeTables,
+    let_centers: tuple[float, ...] | None = None,
+    product_kind: RadiationProductKind | None = None,
+    label: str = "",
+) -> SpectrumProduct:
+    """Return the HZE-only direct-ion assessment LET product."""
+
+    result = calculate_sep_let_products(
+        proton=proton,
+        hze_by_z=hze_by_z,
+        tables=tables,
+        let_centers=let_centers,
+    )
+    output_kind = product_kind or _product_kind_from_energy_quantity(proton.total.quantity)
+    return SpectrumProduct(
+        kind=output_kind,
+        spectrum=result.hze_aggregate_let,
+        label=label
+        or f"SEP HZE direct-ion LET behind Al shield {proton.thickness_g_cm2:g} g/cm^2",
     )
 
 
@@ -242,5 +294,6 @@ __all__ = [
     "SEP_LET_SILICON_TARGET",
     "SepLetProductsResult",
     "calculate_sep_combined_let_product",
+    "calculate_sep_hze_aggregate_let_product",
     "calculate_sep_let_products",
 ]

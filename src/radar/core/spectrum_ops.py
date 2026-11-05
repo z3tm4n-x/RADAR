@@ -3,9 +3,159 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from math import isfinite, log
+from typing import TypeVar, cast
 
-from radar.core.spectra import Spectrum1D
+from radar.core.spectra import (
+    ModelReference,
+    ParticleSpecies,
+    ShieldingDescriptor,
+    Spectrum1D,
+    TransformationStep,
+)
+from radar.core.types import (
+    AssessmentMode,
+    LetSpectrumRole,
+    Particle,
+    SpectrumAxisKind,
+    SpectrumCompleteness,
+    SpectrumLocation,
+    SpectrumOrdinateBasis,
+    SpectrumQuantity,
+    TemporalBasis,
+)
+from radar.core.units import Unit
+
+
+_T = TypeVar("_T")
+_UNCHANGED = object()
+
+
+def _updated_model_reference(
+    spectrum: Spectrum1D,
+    *,
+    model: str,
+    additional_document_refs: tuple[str, ...],
+    additional_dataset_refs: tuple[str, ...],
+) -> ModelReference | None:
+    reference = spectrum.model_reference
+    if reference is None:
+        return None
+
+    return replace(
+        reference,
+        name=model,
+        document_refs=tuple(
+            dict.fromkeys((*reference.document_refs, *additional_document_refs))
+        ),
+        dataset_refs=tuple(
+            dict.fromkeys((*reference.dataset_refs, *additional_dataset_refs))
+        ),
+    )
+
+
+def _value_or_existing(value: _T | object, existing: _T) -> _T:
+    if value is _UNCHANGED:
+        return existing
+    return cast(_T, value)
+
+
+def derive_spectrum(
+    spectrum: Spectrum1D,
+    *,
+    x: tuple[float, ...] | object = _UNCHANGED,
+    y: tuple[float, ...] | object = _UNCHANGED,
+    x_unit: Unit | object = _UNCHANGED,
+    y_unit: Unit | object = _UNCHANGED,
+    quantity: SpectrumQuantity | object = _UNCHANGED,
+    particle: Particle | object = _UNCHANGED,
+    model: str | None = None,
+    axis_kind: SpectrumAxisKind | None | object = _UNCHANGED,
+    temporal_basis: TemporalBasis | None | object = _UNCHANGED,
+    location: SpectrumLocation | None | object = _UNCHANGED,
+    species: ParticleSpecies | None | object = _UNCHANGED,
+    shielding: ShieldingDescriptor | None | object = _UNCHANGED,
+    assessment_mode: AssessmentMode | None | object = _UNCHANGED,
+    mission_duration_s: float | None | object = _UNCHANGED,
+    transformation: TransformationStep | None = None,
+    additional_document_refs: tuple[str, ...] = (),
+    additional_dataset_refs: tuple[str, ...] = (),
+    completeness: SpectrumCompleteness | None | object = _UNCHANGED,
+    incomplete_reasons: tuple[str, ...] | object = _UNCHANGED,
+    let_role: LetSpectrumRole | None | object = _UNCHANGED,
+    ordinate_basis: SpectrumOrdinateBasis | object = _UNCHANGED,
+    bin_edges: tuple[float, ...] | None | object = _UNCHANGED,
+) -> Spectrum1D:
+    """Create a derived spectrum without dropping its physical metadata.
+
+    This is the canonical operation boundary for attenuation, shielding,
+    rebinning and coordinate transforms.  The legacy ``model`` string remains
+    synchronized with ``ModelReference.name`` while the structured
+    transformation chain records how the values were produced.
+    """
+
+    output_model = model or spectrum.model
+    output_chain = spectrum.transformation_chain
+    if transformation is not None:
+        output_chain = (*output_chain, transformation)
+
+    return replace(
+        spectrum,
+        x=_value_or_existing(x, spectrum.x),
+        y=_value_or_existing(y, spectrum.y),
+        x_unit=_value_or_existing(x_unit, spectrum.x_unit),
+        y_unit=_value_or_existing(y_unit, spectrum.y_unit),
+        quantity=_value_or_existing(quantity, spectrum.quantity),
+        particle=_value_or_existing(particle, spectrum.particle),
+        model=output_model,
+        axis_kind=_value_or_existing(axis_kind, spectrum.axis_kind),
+        temporal_basis=_value_or_existing(temporal_basis, spectrum.temporal_basis),
+        location=_value_or_existing(location, spectrum.location),
+        species=_value_or_existing(species, spectrum.species),
+        shielding=_value_or_existing(shielding, spectrum.shielding),
+        assessment_mode=_value_or_existing(
+            assessment_mode,
+            spectrum.assessment_mode,
+        ),
+        mission_duration_s=_value_or_existing(
+            mission_duration_s,
+            spectrum.mission_duration_s,
+        ),
+        model_reference=_updated_model_reference(
+            spectrum,
+            model=output_model,
+            additional_document_refs=additional_document_refs,
+            additional_dataset_refs=additional_dataset_refs,
+        ),
+        transformation_chain=output_chain,
+        completeness=_value_or_existing(completeness, spectrum.completeness),
+        incomplete_reasons=_value_or_existing(
+            incomplete_reasons,
+            spectrum.incomplete_reasons,
+        ),
+        let_role=_value_or_existing(let_role, spectrum.let_role),
+        ordinate_basis=_value_or_existing(ordinate_basis, spectrum.ordinate_basis),
+        bin_edges=_value_or_existing(bin_edges, spectrum.bin_edges),
+    )
+
+
+def mark_spectrum_incomplete(
+    spectrum: Spectrum1D,
+    *reasons: str,
+) -> Spectrum1D:
+    """Return ``spectrum`` explicitly quarantined from production release."""
+
+    merged_reasons = tuple(dict.fromkeys((*spectrum.incomplete_reasons, *reasons)))
+    if not merged_reasons:
+        msg = "At least one incomplete-spectrum reason is required."
+        raise ValueError(msg)
+
+    return derive_spectrum(
+        spectrum,
+        completeness=SpectrumCompleteness.INCOMPLETE,
+        incomplete_reasons=merged_reasons,
+    )
 
 
 def _validate_differential_integration_grid(
@@ -137,6 +287,86 @@ def integrate_differential_spectrum_tail_power_law(
     return tuple(integral_values)
 
 
+def integrate_differential_spectrum_finite_upper_bound(
+    *,
+    energies: Sequence[float],
+    differential_values: Sequence[float],
+    upper_energy_bound: float,
+    context: str = "Spectrum",
+) -> tuple[float, ...]:
+    """Return integral values over a finite, explicitly declared domain.
+
+    Tabulated intervals use the same local power-law interpolation as
+    :func:`integrate_differential_spectrum_tail_power_law`.  When the declared
+    upper boundary is above the final sampled energy, only that finite terminal
+    interval is continued using the slope of the final two samples.  No
+    integration to infinity is performed.
+
+    A positive terminal value requires two positive terminal samples so that
+    the bounded continuation is defined.  A terminal zero contributes no
+    continuation beyond the final sample; callers must separately preserve any
+    incompleteness flag that caused a physical spectrum to be truncated to
+    zero.
+    """
+
+    _validate_differential_integration_grid(
+        energies=energies,
+        differential_values=differential_values,
+        context=context,
+    )
+
+    if not isfinite(upper_energy_bound) or upper_energy_bound <= 0.0:
+        msg = f"{context} finite upper energy bound must be finite and positive."
+        raise ValueError(msg)
+
+    final_energy = energies[-1]
+    if upper_energy_bound < final_energy:
+        msg = (
+            f"{context} finite upper energy bound must not be below the final "
+            "sampled energy."
+        )
+        raise ValueError(msg)
+
+    accumulated = 0.0
+    final_value = differential_values[-1]
+    if upper_energy_bound > final_energy and final_value > 0.0:
+        if len(energies) < 2 or differential_values[-2] <= 0.0:
+            msg = (
+                f"{context} finite terminal interval requires two positive "
+                "terminal differential samples."
+            )
+            raise ValueError(msg)
+
+        previous_energy = energies[-2]
+        previous_value = differential_values[-2]
+        exponent = -log(final_value / previous_value) / log(
+            final_energy / previous_energy
+        )
+        boundary_value = final_value * (upper_energy_bound / final_energy) ** (
+            -exponent
+        )
+        accumulated = _power_law_interval_integral(
+            lower_energy=final_energy,
+            upper_energy=upper_energy_bound,
+            lower_value=final_value,
+            upper_value=boundary_value,
+        )
+
+    integral_values = [0.0 for _ in differential_values]
+    integral_values[-1] = accumulated
+
+    for index in range(len(energies) - 2, -1, -1):
+        accumulated += _power_law_interval_integral(
+            lower_energy=energies[index],
+            upper_energy=energies[index + 1],
+            lower_value=differential_values[index],
+            upper_value=differential_values[index + 1],
+        )
+        integral_values[index] = accumulated
+
+    return tuple(integral_values)
+
+
 def _check_same_grid(left: Spectrum1D, right: Spectrum1D) -> None:
     if left.x != right.x:
         msg = "Spectra must have the same grid."
@@ -163,6 +393,24 @@ def _check_compatible_metadata(left: Spectrum1D, right: Spectrum1D) -> None:
     if left.source is not right.source:
         msg = "Spectra must have the same radiation source."
         raise ValueError(msg)
+
+    structured_semantics = (
+        "axis_kind",
+        "angular_basis",
+        "temporal_basis",
+        "location",
+        "species",
+        "shielding",
+        "assessment_mode",
+        "mission_duration_s",
+        "let_role",
+        "ordinate_basis",
+        "bin_edges",
+    )
+    for field_name in structured_semantics:
+        if getattr(left, field_name) != getattr(right, field_name):
+            msg = f"Spectra must have the same {field_name}."
+            raise ValueError(msg)
 
 
 def check_spectra_compatible(left: Spectrum1D, right: Spectrum1D) -> None:
@@ -192,15 +440,15 @@ def scale_spectrum(
     if output_model is None:
         output_model = f"{spectrum.model}*{factor:g}"
 
-    return Spectrum1D(
-        x=spectrum.x,
+    return derive_spectrum(
+        spectrum,
         y=tuple(value * factor for value in spectrum.y),
-        x_unit=spectrum.x_unit,
-        y_unit=spectrum.y_unit,
-        quantity=spectrum.quantity,
-        particle=spectrum.particle,
-        source=spectrum.source,
         model=output_model,
+        transformation=TransformationStep(
+            name="scale_spectrum",
+            version="1",
+            parameters=(("factor", f"{factor:.17g}"),),
+        ),
     )
 
 
@@ -218,13 +466,31 @@ def add_spectra(
     if output_model is None:
         output_model = f"{left.model}+{right.model}"
 
-    return Spectrum1D(
-        x=left.x,
+    completeness = left.completeness
+    incomplete_reasons = left.incomplete_reasons
+    if right.completeness is SpectrumCompleteness.INCOMPLETE:
+        completeness = SpectrumCompleteness.INCOMPLETE
+        incomplete_reasons = tuple(
+            dict.fromkeys((*incomplete_reasons, *right.incomplete_reasons))
+        )
+
+    additional_document_refs: tuple[str, ...] = ()
+    additional_dataset_refs: tuple[str, ...] = ()
+    if right.model_reference is not None:
+        additional_document_refs = right.model_reference.document_refs
+        additional_dataset_refs = right.model_reference.dataset_refs
+
+    return derive_spectrum(
+        left,
         y=tuple(left_value + right_value for left_value, right_value in zip(left.y, right.y)),
-        x_unit=left.x_unit,
-        y_unit=left.y_unit,
-        quantity=left.quantity,
-        particle=left.particle,
-        source=left.source,
         model=output_model,
+        transformation=TransformationStep(
+            name="pointwise_spectrum_sum",
+            version="1",
+            parameters=(("right_model", right.model),),
+        ),
+        additional_document_refs=additional_document_refs,
+        additional_dataset_refs=additional_dataset_refs,
+        completeness=completeness,
+        incomplete_reasons=incomplete_reasons,
     )

@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from math import isfinite
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource
+from radar.core.spectra import ShieldingDescriptor, Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import Particle, RadiationSource, SpectrumLocation
 from radar.shielding.proton_al import shield_proton_spectrum_primary_through_al
 from radar.shielding.proton_al_secondary import (
     calculate_secondary_proton_spectrum_through_al,
@@ -58,16 +59,27 @@ def _validate_sep_proton_spectrum(spectrum: Spectrum1D) -> None:
         raise ValueError(msg)
 
 
-def _zero_spectrum_like(spectrum: Spectrum1D, *, model: str) -> Spectrum1D:
-    return Spectrum1D(
-        x=spectrum.x,
+def _zero_spectrum_like(
+    spectrum: Spectrum1D,
+    *,
+    model: str,
+    thickness_g_cm2: float,
+) -> Spectrum1D:
+    return derive_spectrum(
+        spectrum,
         y=tuple(0.0 for _ in spectrum.x),
-        x_unit=spectrum.x_unit,
-        y_unit=spectrum.y_unit,
-        quantity=spectrum.quantity,
         particle=Particle.PROTON,
-        source=spectrum.source,
         model=model,
+        location=SpectrumLocation.BEHIND_SHIELD,
+        shielding=ShieldingDescriptor(
+            material="aluminium",
+            areal_density_g_cm2=thickness_g_cm2,
+        ),
+        transformation=TransformationStep(
+            name="secondary_protons_omitted",
+            version="1",
+            parameters=(("thickness_g_cm2", f"{thickness_g_cm2:.17g}"),),
+        ),
     )
 
 
@@ -148,8 +160,9 @@ def calculate_sep_proton_shielding_spectrum(
         )
     else:
         secondary = _zero_spectrum_like(
-            spectrum,
+            primary_survived,
             model=f"{spectrum.model}+secondary_protons_not_included",
+            thickness_g_cm2=thickness_g_cm2,
         )
 
     total = combine_primary_and_secondary_proton_spectra(
@@ -161,6 +174,19 @@ def calculate_sep_proton_shielding_spectrum(
             include_secondary_protons=include_secondary_protons,
         ),
     )
+
+    incomplete_reasons: list[str] = []
+    if thickness_g_cm2 > 0.0:
+        if not include_nonelastic_survival:
+            incomplete_reasons.append("proton nonelastic survival was not included")
+        if not include_secondary_protons:
+            incomplete_reasons.append("secondary proton production was not included")
+        if total.axis_kind is not None:
+            incomplete_reasons.append(
+                "shielding dataset release eligibility has not been established"
+            )
+    if incomplete_reasons:
+        total = mark_spectrum_incomplete(total, *incomplete_reasons)
 
     return SepProtonShieldingResult(
         primary=primary,

@@ -121,8 +121,10 @@ def sample_erb_orbit_grid(
 ) -> ErbOrbitGrid:
     """Sample an orbit over mean anomaly and RAAN.
 
-    Mean-anomaly sampling is used so elliptical orbits are sampled uniformly in
-    time to first order, matching the ERB reference model workflow.
+    Mean anomaly increases linearly with time in the two-body orbit, so its
+    equally spaced nodes have equal time weights. RAAN is sampled independently
+    as an orientation ensemble; this grid is not a time-propagated trajectory
+    over the approximately ten revolutions described in OST Appendix E.1.
     """
 
     _validate_orbit_inputs(

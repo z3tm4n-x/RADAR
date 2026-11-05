@@ -3,25 +3,32 @@
 from __future__ import annotations
 
 from radar.core.log import LogLevel
+from radar.core.profiles import MethodologyProfile
 from radar.core.project import CalculationConfig
-from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
-from radar.core.types import Particle, RadiationSource
+from radar.core.result import (
+    NORMATIVE_RELEASE_COMPONENT,
+    CalculationResult,
+    ComponentStatus,
+    InputDataInfo,
+    ModelInfo,
+)
+from radar.core.types import AssessmentMode, Particle, RadiationSource
 from radar.core.units import Unit
 from radar.model_registry import SourceModelRegistration, source_model_bundle_for_selection
 from radar.pipelines.dose import (
+    DosePipelineIncompleteError,
     DosePipelineResult,
     calculate_dose_pipeline_from_pipeline_results,
 )
-from radar.pipelines.erb import ErbPipelineResult
+from radar.pipelines.erb import ERB_PIPELINE_COMPONENT, ErbPipelineResult
 from radar.pipelines.execution import (
     calculate_erb_pipeline_for_config,
     calculate_gcr_pipeline_for_config,
     calculate_sep_pipeline_for_config,
 )
-from radar.pipelines.gcr import GcrPipelineResult
-from radar.pipelines.sep import SepPipelineResult
-from radar.solar_activity.model import build_mission_solar_activity
-from radar.solar_activity.ost import ost_wolf_number_cycle_table
+from radar.pipelines.gcr import GCR_PIPELINE_COMPONENT, GcrPipelineResult
+from radar.pipelines.sep import SEP_PIPELINE_COMPONENT, SepPipelineResult
+from radar.solar_activity.model import build_calculation_solar_activity
 from radar.output_tables import (
     OutputTable,
     OutputTableColumn,
@@ -46,6 +53,8 @@ _SOURCE_COMPONENT_TITLES: dict[RadiationSource, str] = {
     RadiationSource.GCR: "ГКЛ",
     RadiationSource.ERB: "ЕРПЗ",
 }
+
+SINGLE_EVENT_EFFECTS_COMPONENT = "single_event_effects"
 
 
 def _source_component_title(source: RadiationSource) -> str:
@@ -93,7 +102,6 @@ def _set_placeholder_source_state(
     )
 
 
-
 def _merge_calculation_result(
     result: CalculationResult,
     additional: CalculationResult,
@@ -138,16 +146,20 @@ def _set_sep_pipeline_source_state(
         result=result,
         additional=pipeline_result.calculation_result,
     )
+    pipeline_status = pipeline_result.calculation_result.component_status(
+        SEP_PIPELINE_COMPONENT
+    )
     result = result.set_component_status(
         component=_source_component_title(RadiationSource.SEP),
-        status=ComponentStatus.COMPLETED,
+        status=pipeline_status,
     )
 
     result = result.add_log_entry(
         LogLevel.INFO,
         _source_component_title(RadiationSource.SEP),
-        "\u0420\u0430\u0441\u0447\u0451\u0442 \u0421\u041a\u041b \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u043b\u043d\u044b\u0439 pipeline.",
+        "SEP pipeline finished execution.",
         {
+            "status": pipeline_status.value,
             "source_products": str(len(pipeline_result.source_products)),
             "on_orbit_products": str(len(pipeline_result.on_orbit_products)),
             "shielded_products": str(len(pipeline_result.shielded_products)),
@@ -170,16 +182,20 @@ def _set_gcr_pipeline_source_state(
         result=result,
         additional=pipeline_result.calculation_result,
     )
+    pipeline_status = pipeline_result.calculation_result.component_status(
+        GCR_PIPELINE_COMPONENT
+    )
     result = result.set_component_status(
         component=_source_component_title(RadiationSource.GCR),
-        status=ComponentStatus.COMPLETED,
+        status=pipeline_status,
     )
 
     result = result.add_log_entry(
         LogLevel.INFO,
         _source_component_title(RadiationSource.GCR),
-        "\u0420\u0430\u0441\u0447\u0451\u0442 \u0413\u041a\u041b \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d \u0447\u0435\u0440\u0435\u0437 \u043f\u043e\u043b\u043d\u044b\u0439 pipeline.",
+        "GCR pipeline finished execution.",
         {
+            "status": pipeline_status.value,
             "source_products": str(len(pipeline_result.source_products)),
             "on_orbit_products": str(len(pipeline_result.on_orbit_products)),
             "shielded_products": str(len(pipeline_result.shielded_products)),
@@ -210,24 +226,26 @@ def _set_erb_pipeline_source_state(
     )
 
     electron_shielding_status = (
-        "calculated_primary_csda"
-        if electron_shielded_products
-        else "not_calculated"
+        "calculated_primary_csda" if electron_shielded_products else "not_calculated"
     )
 
     result = _merge_calculation_result(
         result=result,
         additional=pipeline_result.calculation_result,
     )
+    pipeline_status = pipeline_result.calculation_result.component_status(
+        ERB_PIPELINE_COMPONENT
+    )
     result = result.set_component_status(
         component=_source_component_title(RadiationSource.ERB),
-        status=ComponentStatus.COMPLETED,
+        status=pipeline_status,
     )
     result = result.add_log_entry(
         LogLevel.INFO,
         _source_component_title(RadiationSource.ERB),
-        "\u0420\u0430\u0441\u0447\u0451\u0442 \u0415\u0420\u041f\u0417 \u0432\u044b\u043f\u043e\u043b\u043d\u0435\u043d \u0447\u0435\u0440\u0435\u0437 ERB pipeline.",
+        "ERB pipeline finished execution.",
         {
+            "status": pipeline_status.value,
             "on_orbit_products": str(len(pipeline_result.on_orbit_products)),
             "shielded_products": str(len(pipeline_result.shielded_products)),
             "electron_on_orbit_products": str(len(electron_on_orbit_products)),
@@ -248,12 +266,8 @@ def _set_erb_pipeline_source_state(
             ),
             {
                 "electron_shielding_status": electron_shielding_status,
-                "bremsstrahlung_transport_status": (
-                    "not_included_in_spectrum_transport"
-                ),
-                "electron_dose_status": (
-                    "calculated_by_shieldose2_in_dose_pipeline"
-                ),
+                "bremsstrahlung_transport_status": ("not_included_in_spectrum_transport"),
+                "electron_dose_status": ("calculated_by_shieldose2_in_dose_pipeline"),
                 "single_event_effects_status": "not_calculated",
             },
         )
@@ -267,12 +281,7 @@ def _set_solar_activity_state(
 ) -> CalculationResult:
     """Add OST solar activity data used by this calculation."""
 
-    solar_cycle_table = ost_wolf_number_cycle_table(config.mission.solar_activity_level)
-    solar_activity = build_mission_solar_activity(
-        mission=config.mission,
-        cycle_table=solar_cycle_table,
-        reference_start_year=config.mission.launch_year,
-    )
+    solar_activity = build_calculation_solar_activity(config)
 
     result = result.set_input_data_info(
         InputDataInfo(
@@ -289,6 +298,11 @@ def _set_solar_activity_state(
                     "wolf_numbers",
                     ", ".join(f"{value:g}" for value in solar_activity.wolf_numbers),
                 ),
+                ("reference_start_year", str(solar_activity.reference_start_year)),
+                ("reference_cycle_number", str(solar_activity.reference_cycle_number)),
+                ("wolf_number_version", solar_activity.wolf_number_version),
+                ("monthly_policy", solar_activity.monthly_policy),
+                ("anchor_basis", solar_activity.anchor_basis),
             ),
         )
     )
@@ -304,6 +318,12 @@ def _set_solar_activity_state(
             "cycle_years": ", ".join(str(year) for year in solar_activity.cycle_years),
             "level": config.mission.solar_activity_level.value,
             "table": solar_activity.table_id,
+            "reference_start_year": str(solar_activity.reference_start_year),
+            "reference_cycle_number": str(solar_activity.reference_cycle_number),
+            "wolf_number_version": solar_activity.wolf_number_version,
+            "monthly_policy": solar_activity.monthly_policy,
+            "anchor_basis": solar_activity.anchor_basis,
+            "mission_month_count": str(solar_activity.mission_month_count),
         },
     )
 
@@ -375,16 +395,9 @@ def _dose_by_thickness_table(
             "model": dose_result.model,
             "version": dose_result.version,
             "included_components": ",".join(
-                sorted(
-                    {
-                        component.component
-                        for component in dose_result.included_components
-                    }
-                )
+                sorted({component.component for component in dose_result.included_components})
             ),
-            "optional_let_dose_calculated": str(
-                bool(dose_result.optional_components)
-            ).lower(),
+            "optional_let_dose_calculated": str(bool(dose_result.optional_components)).lower(),
             "optional_let_dose_included_in_total": "false",
         },
     )
@@ -532,12 +545,37 @@ def _set_dose_pipeline_state(
     component = "dose_pipeline"
     result = result.set_component_status(component, ComponentStatus.NOT_STARTED)
 
-    dose_result = calculate_dose_pipeline_from_pipeline_results(
-        config=config,
-        sep_result=sep_pipeline_result,
-        gcr_result=gcr_pipeline_result,
-        erb_result=erb_pipeline_result,
-    )
+    if config.assessment_mode is AssessmentMode.PEAK:
+        result = result.set_component_status(component, ComponentStatus.SKIPPED)
+        return result.add_log_entry(
+            LogLevel.WARNING,
+            component,
+            "Расчёт мощности дозы не выполнен: пиковый dose-rate backend ещё не реализован.",
+            {
+                "assessment_mode": config.assessment_mode.value,
+                "status": "explicitly_unavailable",
+                "safety_rule": "mission_fluence_is_never_relabelled_as_rad_per_second",
+            },
+        )
+
+    try:
+        dose_result = calculate_dose_pipeline_from_pipeline_results(
+            config=config,
+            sep_result=sep_pipeline_result,
+            gcr_result=gcr_pipeline_result,
+            erb_result=erb_pipeline_result,
+        )
+    except DosePipelineIncompleteError as exc:
+        result = result.set_component_status(component, ComponentStatus.INCOMPLETE)
+        return result.add_log_entry(
+            LogLevel.WARNING,
+            component,
+            "Dose pipeline did not emit a partial result because an input domain is unsupported.",
+            {
+                "status": "incomplete",
+                "reasons": "; ".join(exc.incomplete_reasons),
+            },
+        )
 
     result = result.set_model_info(
         ModelInfo(
@@ -559,9 +597,7 @@ def _set_dose_pipeline_state(
             dose_result=dose_result,
         )
     )
-    result = result.set_output_table(
-        _dose_components_table(dose_result=dose_result)
-    )
+    result = result.set_output_table(_dose_components_table(dose_result=dose_result))
     result = result.set_component_status(component, ComponentStatus.COMPLETED)
 
     return result.add_log_entry(
@@ -602,6 +638,104 @@ def _placeholder_single_event_effects_table(config: CalculationConfig) -> Output
         metadata={
             "status": "placeholder",
         },
+    )
+
+
+def _set_normative_release_state(
+    *,
+    result: CalculationResult,
+    profile: MethodologyProfile,
+    sep_pipeline_result: SepPipelineResult | None,
+    gcr_pipeline_result: GcrPipelineResult | None,
+    erb_pipeline_result: ErbPipelineResult | None,
+) -> CalculationResult:
+    """Validate whether the complete calculation may be issued normatively."""
+
+    reasons: list[str] = []
+
+    if profile is not MethodologyProfile.OST_134_1044_2007:
+        reasons.append(
+            f"methodology profile {profile.value} is experimental and is not "
+            "approved for normative release"
+        )
+    else:
+        from radar.data.audit import (
+            AuditSeverity,
+            DataAuditScope,
+            audit_normative_resources,
+        )
+
+        try:
+            audit_report = audit_normative_resources(
+                strict=True,
+                scope=DataAuditScope.for_profile(profile),
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            reasons.append(f"normative-resource audit could not be completed: {exc}")
+        else:
+            if not audit_report.release_ready:
+                blocking_paths = ", ".join(
+                    dict.fromkeys(
+                        finding.path
+                        for finding in audit_report.findings
+                        if finding.severity is AuditSeverity.ERROR
+                    )
+                )
+                reasons.append(
+                    "normative-resource audit for profile "
+                    f"{profile.value} failed with {audit_report.error_count} error(s)"
+                    + (f": {blocking_paths}" if blocking_paths else "")
+                )
+
+    pipelines = (
+        ("SEP", sep_pipeline_result),
+        ("GCR", gcr_pipeline_result),
+        ("ERB", erb_pipeline_result),
+    )
+
+    for source, pipeline_result in pipelines:
+        if pipeline_result is None:
+            reasons.append(f"{source} pipeline result is absent")
+            continue
+
+        try:
+            release_products = pipeline_result.production_release_products()
+        except ValueError as exc:
+            reasons.append(f"{source}: {exc}")
+            continue
+
+        if not release_products:
+            reasons.append(f"{source}: no release products were selected")
+
+    if result.component_status("dose_pipeline") is not ComponentStatus.COMPLETED:
+        reasons.append("dose calculation is not complete for the selected assessment mode")
+
+    if (
+        result.component_status(SINGLE_EVENT_EFFECTS_COMPONENT)
+        is not ComponentStatus.COMPLETED
+    ):
+        reasons.append("single-event-effect calculation is a placeholder")
+
+    if reasons:
+        result = result.set_component_status(
+            NORMATIVE_RELEASE_COMPONENT,
+            ComponentStatus.INCOMPLETE,
+        )
+        return result.add_log_entry(
+            LogLevel.WARNING,
+            NORMATIVE_RELEASE_COMPONENT,
+            "Calculation is diagnostic only and is not eligible for normative release.",
+            {"reasons": " | ".join(dict.fromkeys(reasons))},
+        )
+
+    result = result.set_component_status(
+        NORMATIVE_RELEASE_COMPONENT,
+        ComponentStatus.COMPLETED,
+    )
+    return result.add_log_entry(
+        LogLevel.INFO,
+        NORMATIVE_RELEASE_COMPONENT,
+        "Normative-release validation completed.",
     )
 
 
@@ -664,15 +798,26 @@ def execute_calculation(config: CalculationConfig) -> CalculationResult:
         erb_pipeline_result=erb_pipeline_result,
     )
     result = result.set_output_table(_placeholder_single_event_effects_table(config))
+    result = result.set_component_status(
+        SINGLE_EVENT_EFFECTS_COMPONENT,
+        ComponentStatus.INCOMPLETE,
+    )
+    result = _set_normative_release_state(
+        result=result,
+        profile=config.methodology.profile,
+        sep_pipeline_result=sep_pipeline_result,
+        gcr_pipeline_result=gcr_pipeline_result,
+        erb_pipeline_result=erb_pipeline_result,
+    )
 
+    dose_pipeline_status = result.component_status("dose_pipeline")
     return result.add_log_entry(
         LogLevel.WARNING,
         "\u0432\u044b\u0445\u043e\u0434\u043d\u044b\u0435 \u0442\u0430\u0431\u043b\u0438\u0446\u044b",
-        "\u0421\u0444\u043e\u0440\u043c\u0438\u0440\u043e\u0432\u0430\u043d\u044b \u0440\u0430\u0441\u0441\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0435 \u0442\u0430\u0431\u043b\u0438\u0446\u044b \u0434\u043e\u0437\u044b \u0438 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u0430\u044f \u0442\u0430\u0431\u043b\u0438\u0446\u0430 \u043e\u0434\u0438\u043d\u043e\u0447\u043d\u044b\u0445 \u044d\u0444\u0444\u0435\u043a\u0442\u043e\u0432.",
+        "Available output tables and the temporary single-event-effects table were produced.",
         {
             "tables": str(len(result.output_tables)),
+            "dose_pipeline_status": dose_pipeline_status.value,
             "single_event_effects_status": "placeholder",
         },
     )
-
-

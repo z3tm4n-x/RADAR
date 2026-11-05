@@ -1,4 +1,4 @@
-﻿"""GCR kinematics and unit-conversion helpers."""
+"""GCR kinematics and unit-conversion helpers."""
 
 from __future__ import annotations
 
@@ -14,9 +14,7 @@ OMNIDIRECTIONAL_4PI_FACTOR: Final[float] = 4.0 * pi
 MAIN_GCR_DIRECTIONAL_M2_GEV_TO_OMNI_CM2_MEV_FACTOR: Final[float] = (
     OMNIDIRECTIONAL_4PI_FACTOR * 1.0e-7
 )
-LOW_ENERGY_DIRECTIONAL_CM2_MEV_TO_OMNI_CM2_MEV_FACTOR: Final[float] = (
-    OMNIDIRECTIONAL_4PI_FACTOR
-)
+LOW_ENERGY_DIRECTIONAL_CM2_MEV_TO_OMNI_CM2_MEV_FACTOR: Final[float] = OMNIDIRECTIONAL_4PI_FACTOR
 
 
 def _validate_non_negative_finite(
@@ -118,10 +116,7 @@ def main_gcr_directional_m2_gev_to_omnidirectional_cm2_mev(
         name="Main GCR differential flux",
     )
 
-    return (
-        differential_flux_m2_sr_s_gev
-        * MAIN_GCR_DIRECTIONAL_M2_GEV_TO_OMNI_CM2_MEV_FACTOR
-    )
+    return differential_flux_m2_sr_s_gev * MAIN_GCR_DIRECTIONAL_M2_GEV_TO_OMNI_CM2_MEV_FACTOR
 
 
 def low_energy_directional_cm2_mev_to_omnidirectional_cm2_mev(
@@ -143,10 +138,7 @@ def low_energy_directional_cm2_mev_to_omnidirectional_cm2_mev(
         name="Low-energy GCR differential flux",
     )
 
-    return (
-        differential_flux_cm2_sr_s_mev
-        * LOW_ENERGY_DIRECTIONAL_CM2_MEV_TO_OMNI_CM2_MEV_FACTOR
-    )
+    return differential_flux_cm2_sr_s_mev * LOW_ENERGY_DIRECTIONAL_CM2_MEV_TO_OMNI_CM2_MEV_FACTOR
 
 
 __all__ = [

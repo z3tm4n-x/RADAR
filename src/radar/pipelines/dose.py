@@ -8,7 +8,7 @@ from typing import Mapping
 
 from radar.core.products import SpectrumProduct
 from radar.core.project import CalculationConfig
-from radar.core.types import RadiationSource
+from radar.core.types import AssessmentMode, RadiationSource
 from radar.dose.electron_shieldose2 import Shieldose2ElectronDatabase
 from radar.dose.erb_electron import (
     ERB_ELECTRON_SHIELDOSE2_DOSE_MODEL,
@@ -16,12 +16,13 @@ from radar.dose.erb_electron import (
 )
 from radar.dose.inputs import (
     select_erb_electron_shieldose2_inputs,
-    select_hze_let_dose_inputs,
+    select_mixed_ion_let_dose_inputs,
     select_proton_dose_inputs,
 )
 from radar.dose.ion_let import ION_LET_DOSE_MODEL, calculate_ion_let_dose_from_fluence
 from radar.dose.proton import (
     PROTON_SHIELDED_DOSE_MODEL,
+    ProtonDoseDomainError,
     calculate_proton_dose_from_shielded_fluence,
 )
 from radar.pipelines.erb import ErbPipelineResult
@@ -31,6 +32,21 @@ from radar.shielding.proton_si_let import ProtonSiLetTable
 
 DOSE_PIPELINE_MODEL = "radar_dose_pipeline"
 DOSE_PIPELINE_MODEL_VERSION = "dose_components_v1"
+
+
+class DosePipelineIncompleteError(ValueError):
+    """Typed refusal to emit a partial dose result."""
+
+    incomplete_reasons: tuple[str, ...]
+
+    def __init__(self, *reasons: str) -> None:
+        self.incomplete_reasons = tuple(dict.fromkeys(reasons))
+        if not self.incomplete_reasons:
+            msg = "Dose pipeline incomplete error requires at least one reason."
+            raise ValueError(msg)
+        super().__init__(
+            "Dose pipeline is incomplete: " + "; ".join(self.incomplete_reasons)
+        )
 
 
 @dataclass(frozen=True)
@@ -103,7 +119,7 @@ def _component_name_for_proton_source(source: RadiationSource) -> str:
 
 
 def _component_name_for_let_source(source: RadiationSource) -> str:
-    return f"{source.value}_combined_let_optional"
+    return f"{source.value}_mixed_let_diagnostic_optional"
 
 
 def _components_for_erb_electrons(
@@ -152,11 +168,16 @@ def _components_for_shielded_protons(
 
     for thickness, products in shielded_products_by_thickness.items():
         for product in select_proton_dose_inputs(products):
-            result = calculate_proton_dose_from_shielded_fluence(
-                product,
-                table=proton_si_let_table,
-            )
             source = product.spectrum.source
+            try:
+                result = calculate_proton_dose_from_shielded_fluence(
+                    product,
+                    table=proton_si_let_table,
+                )
+            except ProtonDoseDomainError as exc:
+                raise DosePipelineIncompleteError(
+                    f"source={source.value}, shielding={float(thickness):.17g} g/cm^2: {exc}"
+                ) from exc
 
             components.append(
                 DoseComponent(
@@ -180,7 +201,7 @@ def _components_for_optional_let_dose(
     components: list[DoseComponent] = []
 
     for thickness, products in let_products_by_thickness.items():
-        for product in select_hze_let_dose_inputs(products):
+        for product in select_mixed_ion_let_dose_inputs(products):
             result = calculate_ion_let_dose_from_fluence(product)
             source = product.spectrum.source
 
@@ -357,6 +378,31 @@ def let_products_by_thickness_from_pipeline_results(
     return _freeze_product_mapping(grouped)
 
 
+def diagnostic_let_products_by_thickness_from_pipeline_results(
+    *,
+    sep_result: SepPipelineResult | None = None,
+    gcr_result: GcrPipelineResult | None = None,
+) -> dict[float, tuple[SpectrumProduct, ...]]:
+    """Collect non-assessment LET controls from SEP/GCR pipelines."""
+
+    grouped: dict[float, list[SpectrumProduct]] = {}
+    if sep_result is not None:
+        for sep_shielding_result in sep_result.shielding_let_by_thickness:
+            _append_products(
+                grouped,
+                thickness_g_cm2=sep_shielding_result.thickness_g_cm2,
+                products=sep_shielding_result.diagnostic_let_products,
+            )
+    if gcr_result is not None:
+        for gcr_shielding_result in gcr_result.shielding_let_by_thickness:
+            _append_products(
+                grouped,
+                thickness_g_cm2=gcr_shielding_result.thickness_g_cm2,
+                products=gcr_shielding_result.diagnostic_let_products,
+            )
+    return _freeze_product_mapping(grouped)
+
+
 def calculate_dose_pipeline_from_pipeline_results(
     *,
     config: CalculationConfig,
@@ -368,6 +414,16 @@ def calculate_dose_pipeline_from_pipeline_results(
     electron_n_energy_points: int = 1001,
 ) -> DosePipelineResult:
     """Calculate dose from already executed SEP/GCR/ERB pipelines."""
+
+    if (
+        getattr(config, "assessment_mode", AssessmentMode.CUMULATIVE)
+        is AssessmentMode.PEAK
+    ):
+        msg = (
+            "Peak dose-rate calculation is not implemented; mission fluence "
+            "products must not be relabelled as rad/s."
+        )
+        raise NotImplementedError(msg)
 
     erb_on_orbit_products: tuple[SpectrumProduct, ...] = ()
     if erb_result is not None:
@@ -381,7 +437,7 @@ def calculate_dose_pipeline_from_pipeline_results(
             gcr_result=gcr_result,
             erb_result=erb_result,
         ),
-        let_products_by_thickness=let_products_by_thickness_from_pipeline_results(
+        let_products_by_thickness=diagnostic_let_products_by_thickness_from_pipeline_results(
             sep_result=sep_result,
             gcr_result=gcr_result,
         ),
@@ -395,10 +451,12 @@ __all__ = [
     "DOSE_PIPELINE_MODEL",
     "DOSE_PIPELINE_MODEL_VERSION",
     "DoseComponent",
+    "DosePipelineIncompleteError",
     "DosePipelineResult",
     "DoseTotalByThickness",
     "calculate_dose_pipeline_from_pipeline_results",
     "calculate_dose_pipeline_from_products",
+    "diagnostic_let_products_by_thickness_from_pipeline_results",
     "let_products_by_thickness_from_pipeline_results",
     "shielded_products_by_thickness_from_pipeline_results",
 ]

@@ -16,13 +16,44 @@ from radar.geomagnetic.ost import EARTH_RADIUS_KM
 OST_GRAVITATIONAL_PARAMETER_KM3_S2 = 398600.4418
 OST_EARTH_ROTATION_RATE_RAD_S = 7.2921159e-5
 OST_SECULAR_PRECESSION_PARAMETER = 4.1378e5
+OST_ORBIT_SAMPLING_MODEL_VERSION = "bounded_orbit_cells_v1"
+OST_ORBIT_TIME_ORIGIN_MODEL_VERSION = "global_sample_index_v1"
 SECONDS_PER_DAY = 86400.0
 TWO_PI = 2.0 * math.pi
 
 
+def _time_block_bounds(
+    start_sample_index: int, sample_count: int, step_s: float,
+) -> tuple[float, float]:
+    """Validate global cell times before allocating or evaluating positions."""
+    if (
+        isinstance(start_sample_index, bool)
+        or not isinstance(start_sample_index, int)
+        or start_sample_index < 0
+    ):
+        raise ValueError("OST orbit start sample index must be a non-negative integer.")
+    try:
+        start_s = start_sample_index * step_s
+        end_s = (start_sample_index + sample_count) * step_s
+        next_s = (start_sample_index + 1) * step_s
+        final_s = (start_sample_index + sample_count - 1) * step_s
+    except OverflowError as error:
+        raise ValueError("OST orbit block times cannot be represented as finite numbers.") from error
+    if not all(math.isfinite(value) for value in (start_s, end_s, next_s, final_s)):
+        raise ValueError("OST orbit block times must be finite.")
+    # An ULP larger than a cell cannot preserve every requested temporal cell.
+    # Reject before the loop rather than generating repeated/quantized times.
+    if (
+        math.ulp(end_s) > step_s
+        or next_s <= start_s or final_s >= end_s or end_s <= start_s
+    ):
+        raise ValueError("OST orbit global time resolution cannot preserve the requested cell step.")
+    return start_s, end_s
+
+
 @dataclass(frozen=True)
 class OstOrbitSample:
-    """One sampled geographic orbit point for OST geomagnetic calculations."""
+    """One orbit point: ``index`` is block-local, ``time_s`` is global."""
 
     index: int
     time_s: float
@@ -83,6 +114,10 @@ class OstOrbitTrace:
     step_s: float
     node_precession_rad_s: float
     perigee_precession_rad_s: float
+    requested_window_s: float | None = None
+    minimum_orbits: int = 10
+    sampling_policy: str = "unspecified"
+    start_sample_index: int = 0
 
     def __post_init__(self) -> None:
         if not self.samples:
@@ -123,6 +158,41 @@ class OstOrbitTrace:
             msg = "OST orbit sampling step must be positive."
             raise ValueError(msg)
 
+        if (
+            isinstance(self.minimum_orbits, bool)
+            or not isinstance(self.minimum_orbits, int)
+            or self.minimum_orbits < 1
+        ):
+            raise ValueError("OST orbit minimum orbit count must be a positive integer.")
+        if not isinstance(self.sampling_policy, str) or not self.sampling_policy.strip():
+            raise ValueError("OST orbit sampling policy must not be blank.")
+        if self.requested_window_s is not None:
+            if (
+                isinstance(self.requested_window_s, bool)
+                or not math.isfinite(self.requested_window_s)
+                or self.requested_window_s <= 0.0
+            ):
+                raise ValueError("OST orbit requested window must be positive and finite.")
+            if self.requested_window_s > self.window_s + 8.0 * math.ulp(self.window_s):
+                raise ValueError("OST orbit actual window must cover the requested window.")
+        _time_block_bounds(self.start_sample_index, len(self.samples), self.step_s)
+        if self.sampling_policy == OST_ORBIT_SAMPLING_MODEL_VERSION and any(
+            sample.index != index
+            or sample.time_s != (self.start_sample_index + index) * self.step_s
+            for index, sample in enumerate(self.samples)
+        ):
+            raise ValueError("OST orbit samples must match their declared global cell indices.")
+
+    @property
+    def start_time_s(self) -> float:
+        """Global left boundary, referenced to the initial orbit phase."""
+        return self.start_sample_index * self.step_s
+
+    @property
+    def end_time_s(self) -> float:
+        """Exclusive global right boundary computed from the integer cell index."""
+        return (self.start_sample_index + len(self.samples)) * self.step_s
+
     def altitudes_km(self) -> tuple[float, ...]:
         """Return sampled altitudes."""
 
@@ -143,18 +213,30 @@ def _validate_sampling_inputs(
     *,
     raan_deg: float,
     min_days: float,
+    min_orbits: int,
+    start_sample_index: int,
     steps_per_orbit: int,
     max_samples: int,
 ) -> None:
-    if not math.isfinite(raan_deg):
+    if isinstance(raan_deg, bool) or not math.isfinite(raan_deg):
         msg = "RAAN must be finite."
         raise ValueError(msg)
 
-    if not math.isfinite(min_days) or min_days <= 0.0:
+    if isinstance(min_days, bool) or not math.isfinite(min_days) or min_days <= 0.0:
         msg = "OST orbit sampling minimum window must be positive and finite."
         raise ValueError(msg)
 
-    if not isinstance(steps_per_orbit, int):
+    if isinstance(min_orbits, bool) or not isinstance(min_orbits, int) or min_orbits < 1:
+        raise ValueError("OST orbit minimum orbit count must be a positive integer.")
+
+    if (
+        isinstance(start_sample_index, bool)
+        or not isinstance(start_sample_index, int)
+        or start_sample_index < 0
+    ):
+        raise ValueError("OST orbit start sample index must be a non-negative integer.")
+
+    if isinstance(steps_per_orbit, bool) or not isinstance(steps_per_orbit, int):
         msg = "OST orbit steps per orbit must be an integer."
         raise ValueError(msg)
 
@@ -162,7 +244,7 @@ def _validate_sampling_inputs(
         msg = "OST orbit steps per orbit must be at least 4."
         raise ValueError(msg)
 
-    if not isinstance(max_samples, int):
+    if isinstance(max_samples, bool) or not isinstance(max_samples, int):
         msg = "OST orbit maximum sample count must be an integer."
         raise ValueError(msg)
 
@@ -219,19 +301,37 @@ def sample_ost_orbit(
     *,
     raan_deg: float = 0.0,
     min_days: float = 16.0,
+    min_orbits: int = 10,
+    start_sample_index: int = 0,
     steps_per_orbit: int = 60,
     max_samples: int = 400000,
 ) -> OstOrbitTrace:
     """Sample an OST geographic orbit trace.
 
-    The window is at least ``min_days``. For elliptic orbits with non-zero
-    secular perigee drift, the window is expanded to cover 2.5 perigee-drift
-    periods, matching the reference implementation strategy.
+    The requested window is the larger of ``min_days`` and ``min_orbits``
+    orbital periods, independent of the secular precession period. Appendix
+    Zh.2 says about ten orbits usually suffice; this is a starting sampling
+    policy, not a proof of mission representativeness or numerical convergence.
+
+    The fixed step is ``orbital_period_s / steps_per_orbit``. Round the window
+    up to whole temporal cells and return their left endpoints, so equal
+    quadrature weights cover ``window_s`` exactly. The extra covered time is
+    less than one cell, apart from floating-point roundoff. If the requested
+    cells exceed ``max_samples``, fail before allocating or evaluating samples;
+    never coarsen the step or silently shorten the window to fit a budget.
+
+    ``start_sample_index`` selects a block on the same global temporal grid.
+    Every position uses ``(start_sample_index + index) * step_s`` for mean
+    anomaly, secular angles and Earth rotation; phases never restart per block.
+    This relative time origin assumes perigee passage and zero Earth-rotation
+    phase at t=0. It is not an independently established civil launch epoch.
     """
 
     _validate_sampling_inputs(
         raan_deg=raan_deg,
         min_days=min_days,
+        min_orbits=min_orbits,
+        start_sample_index=start_sample_index,
         steps_per_orbit=steps_per_orbit,
         max_samples=max_samples,
     )
@@ -239,15 +339,24 @@ def sample_ost_orbit(
     apogee_radius_km = EARTH_RADIUS_KM + config.apogee_altitude_km
     perigee_radius_km = EARTH_RADIUS_KM + config.perigee_altitude_km
     semi_major_axis_km = 0.5 * (apogee_radius_km + perigee_radius_km)
+    if not math.isfinite(semi_major_axis_km) or semi_major_axis_km <= 0.0:
+        raise ValueError("OST orbit derived semi-major axis must be positive and finite.")
     eccentricity = (apogee_radius_km - perigee_radius_km) / (
         apogee_radius_km + perigee_radius_km
     )
     inclination_rad = math.radians(config.inclination_deg)
+    if not 0.0 <= eccentricity < 1.0:
+        raise ValueError("OST orbit derived eccentricity must be in the range [0, 1).")
 
-    mean_motion_rad_s = math.sqrt(
-        OST_GRAVITATIONAL_PARAMETER_KM3_S2 / semi_major_axis_km**3,
-    )
-    orbital_period_s = TWO_PI / mean_motion_rad_s
+    try:
+        mean_motion_rad_s = math.sqrt(
+            OST_GRAVITATIONAL_PARAMETER_KM3_S2 / semi_major_axis_km**3,
+        )
+        orbital_period_s = TWO_PI / mean_motion_rad_s
+    except (OverflowError, ZeroDivisionError) as error:
+        raise ValueError("OST orbit period cannot be represented as a finite number.") from error
+    if not math.isfinite(orbital_period_s) or orbital_period_s <= 0.0:
+        raise ValueError("OST orbit period must be positive and finite.")
 
     drift_denominator = semi_major_axis_km**2 * (1.0 - eccentricity**2) ** 2
     node_drift_per_orbit = (
@@ -266,27 +375,46 @@ def sample_ost_orbit(
     node_precession_rad_s = node_drift_per_orbit / orbital_period_s
     perigee_precession_rad_s = perigee_drift_per_orbit / orbital_period_s
 
-    window_s = min_days * SECONDS_PER_DAY
-
-    if eccentricity > 1e-4 and abs(perigee_precession_rad_s) > 0.0:
-        window_s = max(
-            window_s,
-            2.5 * TWO_PI / abs(perigee_precession_rad_s),
+    minimum_orbit_samples = min_orbits * steps_per_orbit
+    if minimum_orbit_samples > max_samples:
+        raise ValueError(
+            "OST orbit sample budget exceeded: minimum orbit count requires "
+            f"{minimum_orbit_samples} samples, limit is {max_samples}; "
+            "requested temporal resolution is not reduced."
         )
-
-    step_s = orbital_period_s / steps_per_orbit
-
-    if window_s / step_s > max_samples:
-        step_s = window_s / max_samples
-
-    sample_count = max(1, int(math.ceil(window_s / step_s)))
+    try:
+        step_s = orbital_period_s / steps_per_orbit
+        minimum_day_window_s = min_days * SECONDS_PER_DAY
+        requested_window_s = max(minimum_day_window_s, min_orbits * orbital_period_s)
+        day_cell_count = minimum_day_window_s / step_s
+    except (OverflowError, ZeroDivisionError) as error:
+        raise ValueError("OST orbit sampling window or step cannot be represented.") from error
+    if (
+        not math.isfinite(step_s) or step_s <= 0.0
+        or not math.isfinite(requested_window_s) or requested_window_s <= 0.0
+        or not math.isfinite(day_cell_count)
+    ):
+        raise ValueError("OST orbit sampling window and step must be positive and finite.")
+    # The orbital lower bound is an exact integer product, avoiding a spurious
+    # 601st cell from roundoff when requesting ten 60-cell orbits.
+    sample_count = max(minimum_orbit_samples, math.ceil(day_cell_count))
+    if sample_count > max_samples:
+        raise ValueError(
+            "OST orbit sample budget exceeded: requested window requires "
+            f"{sample_count} samples at step {step_s:.17g} s, limit is {max_samples}; "
+            "requested temporal resolution is not reduced."
+        )
+    window_s = sample_count * step_s
+    if not math.isfinite(window_s):
+        raise ValueError("OST orbit actual sampling window must be finite.")
+    _time_block_bounds(start_sample_index, sample_count, step_s)
 
     samples: list[OstOrbitSample] = []
     raan_rad = math.radians(raan_deg)
     argument_of_perigee_rad = math.radians(config.argument_of_perigee_deg)
 
     for index in range(sample_count):
-        time_s = index * step_s
+        time_s = (start_sample_index + index) * step_s
         mean_anomaly_rad = mean_motion_rad_s * time_s
         eccentric_anomaly_rad = _solve_kepler_elliptic(
             mean_anomaly_rad,
@@ -348,4 +476,8 @@ def sample_ost_orbit(
         step_s=step_s,
         node_precession_rad_s=node_precession_rad_s,
         perigee_precession_rad_s=perigee_precession_rad_s,
+        requested_window_s=requested_window_s,
+        minimum_orbits=min_orbits,
+        sampling_policy=OST_ORBIT_SAMPLING_MODEL_VERSION,
+        start_sample_index=start_sample_index,
     )

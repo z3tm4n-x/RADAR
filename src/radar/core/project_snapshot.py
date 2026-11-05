@@ -9,6 +9,10 @@ from typing import cast
 from radar.core.profiles import MethodologyProfile, SourceModelFamily
 from radar.core.project import (
     CalculationConfig,
+    DEFAULT_SOLAR_ACTIVITY_MONTHLY_POLICY,
+    DEFAULT_SOLAR_ACTIVITY_WOLF_VERSION,
+    DEFAULT_SOLAR_CYCLE_REFERENCE_NUMBER,
+    DEFAULT_SOLAR_CYCLE_REFERENCE_START_YEAR,
     MethodologyConfig,
     MissionConfig,
     OrbitConfig,
@@ -16,6 +20,7 @@ from radar.core.project import (
     SourceModelSelectionConfig,
 )
 from radar.core.types import (
+    AssessmentMode,
     DoseQuantity,
     OrbitType,
     ShieldGeometry,
@@ -84,6 +89,10 @@ def methodology_config_snapshot(methodology: MethodologyConfig) -> dict[str, obj
         "calculate_gcr_electrons": methodology.calculate_gcr_electrons,
         "include_bremsstrahlung": methodology.include_bremsstrahlung,
         "include_protons_in_let": methodology.include_protons_in_let,
+        "solar_cycle_reference_start_year": (methodology.solar_cycle_reference_start_year),
+        "solar_cycle_reference_number": methodology.solar_cycle_reference_number,
+        "solar_activity_wolf_version": methodology.solar_activity_wolf_version,
+        "solar_activity_monthly_policy": methodology.solar_activity_monthly_policy,
         "source_model_selection": source_model_selection_snapshot(
             methodology.source_model_selection,
         ),
@@ -102,6 +111,7 @@ def calculation_config_snapshot(config: CalculationConfig) -> dict[str, object]:
             config.source_model_selection,
         ),
         "kp": config.kp,
+        "assessment_mode": config.assessment_mode.value,
         "dose": {
             "quantity": config.dose_quantity.value,
             "unit": config.dose_unit.value,
@@ -117,6 +127,7 @@ def calculation_config_snapshot_json(config: CalculationConfig) -> str:
         ensure_ascii=False,
         sort_keys=True,
     )
+
 
 def _required_value(data: Mapping[str, object], key: str) -> object:
     """Return required value from mapping."""
@@ -207,6 +218,22 @@ def _required_float_tuple(data: Mapping[str, object], key: str) -> tuple[float, 
     return tuple(result)
 
 
+def _optional_int(data: Mapping[str, object], key: str, default: int) -> int:
+    """Return optional integer value, preserving compatibility with old files."""
+
+    if key not in data:
+        return default
+    return _required_int(data, key)
+
+
+def _optional_str(data: Mapping[str, object], key: str, default: str) -> str:
+    """Return optional string value, preserving compatibility with old files."""
+
+    if key not in data:
+        return default
+    return _required_str(data, key)
+
+
 def _methodology_profile(value: str) -> MethodologyProfile:
     """Return methodology profile parsed from saved value."""
 
@@ -264,6 +291,16 @@ def _dose_quantity(value: str) -> DoseQuantity:
         return DoseQuantity(value)
     except ValueError as exc:
         msg = f"Unknown dose quantity: {value}"
+        raise ValueError(msg) from exc
+
+
+def _assessment_mode(value: str) -> AssessmentMode:
+    """Return assessment mode parsed from saved value."""
+
+    try:
+        return AssessmentMode(value)
+    except ValueError as exc:
+        msg = f"Unknown assessment mode: {value}"
         raise ValueError(msg) from exc
 
 
@@ -335,6 +372,26 @@ def methodology_config_from_snapshot(data: Mapping[str, object]) -> MethodologyC
         calculate_gcr_electrons=_required_bool(data, "calculate_gcr_electrons"),
         include_bremsstrahlung=_required_bool(data, "include_bremsstrahlung"),
         include_protons_in_let=_required_bool(data, "include_protons_in_let"),
+        solar_cycle_reference_start_year=_optional_int(
+            data,
+            "solar_cycle_reference_start_year",
+            DEFAULT_SOLAR_CYCLE_REFERENCE_START_YEAR,
+        ),
+        solar_cycle_reference_number=_optional_int(
+            data,
+            "solar_cycle_reference_number",
+            DEFAULT_SOLAR_CYCLE_REFERENCE_NUMBER,
+        ),
+        solar_activity_wolf_version=_optional_str(
+            data,
+            "solar_activity_wolf_version",
+            DEFAULT_SOLAR_ACTIVITY_WOLF_VERSION,
+        ),
+        solar_activity_monthly_policy=_optional_str(
+            data,
+            "solar_activity_monthly_policy",
+            DEFAULT_SOLAR_ACTIVITY_MONTHLY_POLICY,
+        ),
     )
 
     saved_selection_data = _optional_mapping(data, "source_model_selection")
@@ -358,6 +415,11 @@ def calculation_config_from_snapshot(data: Mapping[str, object]) -> CalculationC
             _required_mapping(data, "methodology"),
         ),
         kp=_required_int(data, "kp"),
+        assessment_mode=(
+            _assessment_mode(_required_str(data, "assessment_mode"))
+            if "assessment_mode" in data
+            else AssessmentMode.CUMULATIVE
+        ),
         dose_quantity=_dose_quantity(
             _required_str(_required_mapping(data, "dose"), "quantity"),
         ),

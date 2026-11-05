@@ -7,7 +7,7 @@ calculated accumulated quantities or rates to engineering display units.
 from __future__ import annotations
 
 SECONDS_PER_DAY = 86_400.0
-DAYS_PER_YEAR = 365.0
+DAYS_PER_YEAR = 365.25
 SECONDS_PER_YEAR = SECONDS_PER_DAY * DAYS_PER_YEAR
 
 

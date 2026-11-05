@@ -15,16 +15,24 @@ from radar.core.profiles import (
 )
 from radar.core.source_products import validate_product_allowed_for_source
 from radar.core.project import CalculationConfig, MissionConfig
-from radar.core.spectra import Spectrum1D
+from radar.core.spectra import ModelReference, ParticleSpecies, Spectrum1D, TransformationStep
 from radar.core.types import (
+    AngularBasis,
+    AssessmentMode,
     Particle,
     RadiationProductKind,
     RadiationSource,
     SolarActivityLevel,
+    SpectrumAxisKind,
+    SpectrumCompleteness,
+    SpectrumLocation,
     SpectrumQuantity,
+    TemporalBasis,
 )
 from radar.core.units import Unit
 from radar.erb.appendix_e import (
+    OST_ERB_DIFFERENTIAL_ERRATA_STATUS,
+    OST_ERB_ELECTRON_DIFFERENTIAL_POLICY,
     OstErbApproximationFitQuality,
     OstErbElectronIntegralApproximation,
     OstErbProtonIntegralApproximation,
@@ -32,8 +40,12 @@ from radar.erb.appendix_e import (
     fit_ost_erb_proton_integral_approximation,
     integrate_differential_flux_tail_power_law,
 )
-from radar.erb.constants import DEFAULT_IGRF_EPOCH, ERB_SECONDS_PER_YEAR
-from radar.erb.field import ErbFieldLineSample, trace_l_shell_b_over_b0_for_orbit
+from radar.erb.constants import DEFAULT_IGRF_EPOCH, EARTH_REFERENCE_RADIUS_KM, ERB_SECONDS_PER_YEAR
+from radar.erb.field import (
+    ErbFieldLineSample,
+    ost_l_shell_b_over_b0_for_orbit,
+    trace_l_shell_b_over_b0_for_orbit,
+)
 from radar.erb.igrf import IgrfCoefficients
 from radar.erb.orbit import sample_erb_orbit_grid
 from radar.erb.ost_tables import (
@@ -45,6 +57,8 @@ from radar.erb.ost_tables import (
 from radar.erb.radbelt import RADBELT_LOG_BIN_RATIO, RadbeltAscMap
 from radar.erb.resources import load_ae8_ap8_radbelt_maps, load_igrf14_coefficients
 from radar.solar_activity.model import (
+    MissionSolarActivity,
+    build_calculation_solar_activity,
     build_mission_solar_activity,
     mission_solar_activity_monthly_wolf_numbers,
 )
@@ -56,6 +70,30 @@ OST_ERB_APPENDIX_E_REFERENCE = "OST 134-1044-2007 Appendix E orbit-averaged ERB 
 AE8_AP8_RADBELT_REFERENCE = AE8_AP8_RADBELT_DOCUMENT
 AE8_AP8_PROTON_ENERGIES_MEV = tuple(0.1 * 10.0 ** (index / 10.0) for index in range(38))
 AE8_AP8_ELECTRON_ENERGIES_MEV = tuple(0.05 * 10.0 ** (index / 10.0) for index in range(24))
+
+ERB_IGRF_DATASET_REF = "erb/igrf14coeffs.txt"
+ERB_WOLF_DATASET_REF = "ost_134_1044_2007/table_g_1_wolf_numbers.csv"
+OST_ERB_TABLE_DATASET_REF = "erb/ost_appendix_a_tables.json"
+AE8_AP8_MAP_DATASET_REFS = {
+    Particle.PROTON: ("erb/ap8min.asc", "erb/ap8max.asc"),
+    Particle.ELECTRON: ("erb/ae8min.asc", "erb/ae8max.asc"),
+}
+AE8_AP8_PROVISIONAL_REASON = (
+    "AE8/AP8 RADBELT maps have no retained immutable upstream provenance"
+)
+OST_ERB_ORBIT_SAMPLING_CONVERGENCE_REASON = (
+    "OST ERB orbit sampling convergence below 1% has not been established "
+    "for every reported energy node"
+)
+OST_ERB_ORBIT_TRAJECTORY_REASON = (
+    "OST ERB independent mean-anomaly/RAAN ensemble has not been validated "
+    "against the time-propagated orbit trajectory required by Appendix E.1"
+)
+
+OST_ERB_MAGNETIC_REGION_SELECTION_REASON = (
+    "OST D.2.6 region preclassification by shifted-dipole L is an implementation "
+    "convention pending boundary validation"
+)
 
 ERB_ALLOWED_PARTICLES = (
     Particle.PROTON,
@@ -135,6 +173,12 @@ class ErbModelInput:
     """Input parameters passed to an ERB model."""
 
     config: CalculationConfig
+    solar_activity: MissionSolarActivity | None = None
+
+    def __post_init__(self) -> None:
+        if self.solar_activity is None:
+            return
+        self.solar_activity.validate_for_mission(self.config.mission)
 
     @property
     def lifetime_years(self) -> int:
@@ -185,10 +229,7 @@ class ErbIntegralSpectrum:
             msg = "ERB integral spectrum energy grid values must be unique."
             raise ValueError(msg)
 
-        if any(
-            not math.isfinite(value) or value < 0.0
-            for value in self.integral_flux_gt_e
-        ):
+        if any(not math.isfinite(value) or value < 0.0 for value in self.integral_flux_gt_e):
             msg = "ERB integral spectrum flux values must be finite and non-negative."
             raise ValueError(msg)
 
@@ -395,8 +436,10 @@ class StaticErbModel:
             document=self.document,
         )
 
+
 OstErbPeakState = Literal["worst", "cycle", "maxofstates"]
 Ae8Ap8SolarMode = Literal["cosrad", "ost"]
+
 
 def _clamp_unit_interval(value: float) -> float:
     return min(max(value, 0.0), 1.0)
@@ -406,13 +449,15 @@ def _ost_erb_solar_max_fraction(
     *,
     mission: MissionConfig,
     reference_start_year: int,
+    solar_activity: MissionSolarActivity | None = None,
 ) -> float:
     cycle_table = ost_wolf_number_cycle_table(mission.solar_activity_level)
-    solar_activity = build_mission_solar_activity(
-        mission=mission,
-        cycle_table=cycle_table,
-        reference_start_year=reference_start_year,
-    )
+    if solar_activity is None:
+        solar_activity = build_mission_solar_activity(
+            mission=mission,
+            cycle_table=cycle_table,
+            reference_start_year=reference_start_year,
+        )
     monthly_wolf_numbers = mission_solar_activity_monthly_wolf_numbers(solar_activity)
 
     mean_wolf_number = sum(monthly_wolf_numbers) / len(monthly_wolf_numbers)
@@ -430,11 +475,13 @@ def _ae8_ap8_solar_max_fraction(
     mission: MissionConfig,
     solar_mode: Ae8Ap8SolarMode,
     reference_start_year: int,
+    solar_activity: MissionSolarActivity | None = None,
 ) -> float:
     if solar_mode == "ost":
         return _ost_erb_solar_max_fraction(
             mission=mission,
             reference_start_year=reference_start_year,
+            solar_activity=solar_activity,
         )
 
     if mission.solar_activity_level is SolarActivityLevel.MINIMUM:
@@ -444,6 +491,36 @@ def _ae8_ap8_solar_max_fraction(
         return 1.0
 
     return 0.5
+
+
+def _erb_solar_activity(
+    *,
+    model_input: ErbModelInput,
+    configured: MissionSolarActivity | None,
+    reference_start_year_override: int | None,
+) -> MissionSolarActivity:
+    """Resolve the shared timeline, retaining the legacy explicit-anchor hook."""
+
+    if reference_start_year_override is not None:
+        methodology = model_input.config.methodology
+        return build_mission_solar_activity(
+            mission=model_input.config.mission,
+            cycle_table=ost_wolf_number_cycle_table(
+                model_input.config.mission.solar_activity_level,
+            ),
+            reference_start_year=reference_start_year_override,
+            reference_cycle_number=methodology.solar_cycle_reference_number,
+            wolf_number_version=methodology.solar_activity_wolf_version,
+            monthly_policy=methodology.solar_activity_monthly_policy,
+            anchor_basis=("explicit ERB model override; not specified by OST 134-1044-2007"),
+        )
+
+    solar_activity = configured or model_input.solar_activity
+    if solar_activity is None:
+        solar_activity = build_calculation_solar_activity(model_input.config)
+
+    solar_activity.validate_for_mission(model_input.config.mission)
+    return solar_activity
 
 
 def _field_line_coverage_metadata(
@@ -482,7 +559,9 @@ def _max_vector(
     left: tuple[float, ...],
     right: tuple[float, ...],
 ) -> tuple[float, ...]:
-    return tuple(max(left_value, right_value) for left_value, right_value in zip(left, right, strict=True))
+    return tuple(
+        max(left_value, right_value) for left_value, right_value in zip(left, right, strict=True)
+    )
 
 
 def _add_to_vector(
@@ -521,28 +600,56 @@ def _sample_fraction(
     return f"{count / total:.12g}"
 
 
-def _table_coverage_metadata(
+@dataclass(frozen=True)
+class _OstErbTableCoverage:
+    total_samples: int
+    valid_samples: int
+    invalid_samples: int
+    l_below_table: int
+    l_above_table: int
+    bb0_above_nearest_shell: int
+    bb0_above_interpolation_stencil: int
+    bb0_above_interpolation_stencil_shells: int
+
+    @property
+    def unsupported_valid_samples(self) -> int:
+        return (
+            self.l_below_table
+            + self.l_above_table
+            + self.bb0_above_interpolation_stencil
+        )
+
+    @property
+    def support_complete(self) -> bool:
+        return self.invalid_samples == 0 and self.unsupported_valid_samples == 0
+
+
+def _table_coverage(
     *,
-    prefix: str,
     table: OstErbFluxTable,
     field_line_samples: tuple[ErbFieldLineSample, ...],
-) -> tuple[tuple[str, str], ...]:
+) -> _OstErbTableCoverage:
     total_samples = len(field_line_samples)
     valid_samples = sum(1 for sample in field_line_samples if sample.valid)
     invalid_samples = total_samples - valid_samples
     l_below_table = 0
     l_above_table = 0
     bb0_above_nearest_shell = 0
+    bb0_above_interpolation_stencil = 0
+    bb0_above_interpolation_stencil_shells = 0
 
     for sample in field_line_samples:
         if not sample.valid:
             continue
 
-        if sample.l_shell < table.l_grid[0]:
+        support = table.interpolation_support(
+            l_shell=sample.l_shell,
+            b_over_b0=sample.b_over_b0,
+        )
+        if support.l_below_table:
             l_below_table += 1
             continue
-
-        if sample.l_shell > table.l_grid[-1]:
+        if support.l_above_table:
             l_above_table += 1
             continue
 
@@ -550,41 +657,145 @@ def _table_coverage_metadata(
             table.shells,
             key=lambda shell: abs(shell.l_shell - sample.l_shell),
         )
-
         if sample.b_over_b0 > nearest_shell.b_over_b0[-1] * (1.0 + 1.0e-12):
             bb0_above_nearest_shell += 1
 
-    valid_divisor = max(valid_samples, 1)
+        if support.b_over_b0_above_shell_indices:
+            bb0_above_interpolation_stencil += 1
+            bb0_above_interpolation_stencil_shells += len(
+                support.b_over_b0_above_shell_indices
+            )
+
+    return _OstErbTableCoverage(
+        total_samples=total_samples,
+        valid_samples=valid_samples,
+        invalid_samples=invalid_samples,
+        l_below_table=l_below_table,
+        l_above_table=l_above_table,
+        bb0_above_nearest_shell=bb0_above_nearest_shell,
+        bb0_above_interpolation_stencil=bb0_above_interpolation_stencil,
+        bb0_above_interpolation_stencil_shells=(
+            bb0_above_interpolation_stencil_shells
+        ),
+    )
+
+
+def _table_coverage_metadata(
+    *,
+    prefix: str,
+    table: OstErbFluxTable,
+    field_line_samples: tuple[ErbFieldLineSample, ...],
+) -> tuple[tuple[str, str], ...]:
+    coverage = _table_coverage(table=table, field_line_samples=field_line_samples)
+    valid_divisor = max(coverage.valid_samples, 1)
 
     return (
-        (f"{prefix}_total_samples", str(total_samples)),
-        (f"{prefix}_valid_samples", str(valid_samples)),
-        (f"{prefix}_invalid_samples", str(invalid_samples)),
-        (f"{prefix}_l_below_table_samples", str(l_below_table)),
-        (f"{prefix}_l_above_table_samples", str(l_above_table)),
+        (f"{prefix}_total_samples", str(coverage.total_samples)),
+        (f"{prefix}_valid_samples", str(coverage.valid_samples)),
+        (f"{prefix}_invalid_samples", str(coverage.invalid_samples)),
+        (f"{prefix}_l_below_table_samples", str(coverage.l_below_table)),
+        (f"{prefix}_l_above_table_samples", str(coverage.l_above_table)),
         (
             f"{prefix}_bb0_above_nearest_shell_samples",
-            str(bb0_above_nearest_shell),
+            str(coverage.bb0_above_nearest_shell),
+        ),
+        (
+            f"{prefix}_bb0_above_interpolation_stencil_samples",
+            str(coverage.bb0_above_interpolation_stencil),
+        ),
+        (
+            f"{prefix}_bb0_above_interpolation_stencil_shells",
+            str(coverage.bb0_above_interpolation_stencil_shells),
+        ),
+        (
+            f"{prefix}_unsupported_valid_samples",
+            str(coverage.unsupported_valid_samples),
         ),
         (
             f"{prefix}_valid_sample_fraction",
-            _sample_fraction(count=valid_samples, total=total_samples),
+            _sample_fraction(
+                count=coverage.valid_samples,
+                total=coverage.total_samples,
+            ),
         ),
         (
             f"{prefix}_l_below_table_fraction",
-            _sample_fraction(count=l_below_table, total=valid_divisor),
+            _sample_fraction(count=coverage.l_below_table, total=valid_divisor),
         ),
         (
             f"{prefix}_l_above_table_fraction",
-            _sample_fraction(count=l_above_table, total=valid_divisor),
+            _sample_fraction(count=coverage.l_above_table, total=valid_divisor),
         ),
         (
             f"{prefix}_bb0_above_nearest_shell_fraction",
-            _sample_fraction(count=bb0_above_nearest_shell, total=valid_divisor),
+            _sample_fraction(
+                count=coverage.bb0_above_nearest_shell,
+                total=valid_divisor,
+            ),
         ),
+        (
+            f"{prefix}_bb0_above_interpolation_stencil_fraction",
+            _sample_fraction(
+                count=coverage.bb0_above_interpolation_stencil,
+                total=valid_divisor,
+            ),
+        ),
+        (f"{prefix}_support_complete", str(coverage.support_complete).lower()),
         (f"{prefix}_table_l_min", f"{table.l_grid[0]:.12g}"),
         (f"{prefix}_table_l_max", f"{table.l_grid[-1]:.12g}"),
     )
+
+
+def _table_support_reason(
+    *,
+    table: OstErbFluxTable,
+    coverage: _OstErbTableCoverage,
+) -> str | None:
+    if coverage.unsupported_valid_samples == 0:
+        return None
+
+    return (
+        f"OST ERB Appendix A table {table.name} interpolation support is "
+        f"incomplete for {coverage.unsupported_valid_samples}/"
+        f"{coverage.valid_samples} valid orbit samples: "
+        f"L below={coverage.l_below_table}, L above={coverage.l_above_table}, "
+        "B/B0 above at least one selected interpolation shell="
+        f"{coverage.bb0_above_interpolation_stencil}"
+    )
+
+
+def _ost_erb_product_incomplete_reasons(
+    *,
+    tables: tuple[OstErbFluxTable, ...],
+    field_line_samples: tuple[ErbFieldLineSample, ...],
+    common_reasons: tuple[str, ...],
+) -> tuple[str, ...]:
+    reasons = [
+        *common_reasons,
+        OST_ERB_ORBIT_SAMPLING_CONVERGENCE_REASON,
+        OST_ERB_ORBIT_TRAJECTORY_REASON,
+        OST_ERB_MAGNETIC_REGION_SELECTION_REASON,
+    ]
+    reasons.extend(reason for sample in field_line_samples for reason in sample.incomplete_reasons)
+    invalid_samples = sum(1 for sample in field_line_samples if not sample.valid)
+    if invalid_samples:
+        reasons.append(
+            "OST ERB magnetic-coordinate tracing is incomplete for "
+            f"{invalid_samples}/{len(field_line_samples)} orbit samples"
+        )
+
+    for table in dict.fromkeys(tables):
+        reason = _table_support_reason(
+            table=table,
+            coverage=_table_coverage(
+                table=table,
+                field_line_samples=field_line_samples,
+            ),
+        )
+        if reason is not None:
+            reasons.append(reason)
+
+    return tuple(dict.fromkeys(reasons))
 
 
 def _erb_spectrum(
@@ -595,7 +806,36 @@ def _erb_spectrum(
     y_unit: Unit,
     particle: Particle,
     model: str,
+    product_kind: RadiationProductKind,
+    mission_seconds: float,
+    version: str,
+    document_refs: tuple[str, ...],
+    dataset_refs: tuple[str, ...],
+    transformation_name: str,
+    completeness: SpectrumCompleteness,
+    incomplete_reasons: tuple[str, ...],
 ) -> Spectrum1D:
+    if product_kind is RadiationProductKind.MEAN_FLUX:
+        temporal_basis = TemporalBasis.MEAN_INTERNAL
+        assessment_mode = None
+        mission_duration_s = None
+    elif product_kind is RadiationProductKind.MAXIMUM_FLUX:
+        temporal_basis = TemporalBasis.SOURCE_MAXIMUM
+        assessment_mode = AssessmentMode.PEAK
+        mission_duration_s = None
+    elif product_kind is RadiationProductKind.MISSION_FLUENCE:
+        temporal_basis = TemporalBasis.MISSION_TOTAL
+        assessment_mode = AssessmentMode.CUMULATIVE
+        mission_duration_s = mission_seconds
+    else:
+        msg = f"Unsupported ERB product kind for typed spectrum: {product_kind.value}."
+        raise ValueError(msg)
+
+    species = (
+        ParticleSpecies(symbol="p", atomic_number=1, mass_number=1)
+        if particle is Particle.PROTON
+        else ParticleSpecies(symbol="e-")
+    )
     return Spectrum1D(
         x=energies_mev,
         y=values,
@@ -605,6 +845,32 @@ def _erb_spectrum(
         particle=particle,
         source=RadiationSource.ERB,
         model=model,
+        axis_kind=SpectrumAxisKind.KINETIC_ENERGY,
+        angular_basis=AngularBasis.OMNIDIRECTIONAL_4PI,
+        temporal_basis=temporal_basis,
+        location=SpectrumLocation.ON_ORBIT,
+        species=species,
+        assessment_mode=assessment_mode,
+        mission_duration_s=mission_duration_s,
+        model_reference=ModelReference(
+            name=model,
+            version=version,
+            document_refs=document_refs,
+            dataset_refs=dataset_refs,
+        ),
+        transformation_chain=(
+            TransformationStep(
+                name=transformation_name,
+                version=version,
+                parameters=(
+                    ("particle", particle.value),
+                    ("product_kind", product_kind.value),
+                    ("angular_basis", "omnidirectional_4pi"),
+                ),
+            ),
+        ),
+        completeness=completeness,
+        incomplete_reasons=incomplete_reasons,
     )
 
 
@@ -697,11 +963,7 @@ def _appendix_e_fit_quality_metadata(
     integral_spectrum: ErbIntegralSpectrum,
     approximation_fits: tuple[ErbIntegralSpectrumApproximationFit, ...],
 ) -> tuple[tuple[str, str], ...]:
-    positive_sample_count = sum(
-        1
-        for value in integral_spectrum.integral_flux_gt_e
-        if value > 0.0
-    )
+    positive_sample_count = sum(1 for value in integral_spectrum.integral_flux_gt_e if value > 0.0)
 
     if not approximation_fits:
         return (
@@ -738,13 +1000,14 @@ class Ae8Ap8ErbModel:
 
     model: str = "ae8_ap8_radbelt_model"
     document: str = AE8_AP8_RADBELT_REFERENCE
-    version: str = "ae8_ap8_radbelt_asc_v1"
+    version: str = "ae8_ap8_radbelt_asc_v2"
     solar_mode: Ae8Ap8SolarMode = "cosrad"
     peak_state: OstErbPeakState = "worst"
     anomaly_samples: int = 48
     node_samples: int = 36
     igrf_epoch: float = DEFAULT_IGRF_EPOCH
     solar_reference_start_year: int | None = None
+    solar_activity: MissionSolarActivity | None = None
     maps: dict[str, RadbeltAscMap] | None = None
     igrf_coefficients: IgrfCoefficients | None = None
 
@@ -897,6 +1160,20 @@ class Ae8Ap8ErbModel:
 
         particle_label = particle.value
         model_prefix = f"{self.model}:{particle_label}"
+        incomplete_reasons = [AE8_AP8_PROVISIONAL_REASON]
+        if self.maps is not None:
+            incomplete_reasons.append(
+                "caller-supplied RADBELT maps are not tied to the bundled integrity manifest"
+            )
+        if self.igrf_coefficients is not None:
+            incomplete_reasons.append(
+                "caller-supplied IGRF coefficients are not tied to the bundled integrity manifest"
+            )
+        dataset_refs = (
+            *AE8_AP8_MAP_DATASET_REFS[particle],
+            ERB_IGRF_DATASET_REF,
+            ERB_WOLF_DATASET_REF,
+        )
 
         mean_spectrum = _erb_spectrum(
             energies_mev=energies_mev,
@@ -905,6 +1182,14 @@ class Ae8Ap8ErbModel:
             y_unit=Unit.DIFFERENTIAL_FLUX,
             particle=particle,
             model=f"{model_prefix}:mean_flux",
+            product_kind=RadiationProductKind.MEAN_FLUX,
+            mission_seconds=mission_seconds,
+            version=self.version,
+            document_refs=(self.document,),
+            dataset_refs=dataset_refs,
+            transformation_name="ae8_ap8_orbit_spectrum",
+            completeness=SpectrumCompleteness.INCOMPLETE,
+            incomplete_reasons=tuple(incomplete_reasons),
         )
         maximum_spectrum = _erb_spectrum(
             energies_mev=energies_mev,
@@ -913,6 +1198,14 @@ class Ae8Ap8ErbModel:
             y_unit=Unit.DIFFERENTIAL_FLUX,
             particle=particle,
             model=f"{model_prefix}:maximum_flux",
+            product_kind=RadiationProductKind.MAXIMUM_FLUX,
+            mission_seconds=mission_seconds,
+            version=self.version,
+            document_refs=(self.document,),
+            dataset_refs=dataset_refs,
+            transformation_name="ae8_ap8_orbit_spectrum",
+            completeness=SpectrumCompleteness.INCOMPLETE,
+            incomplete_reasons=tuple(incomplete_reasons),
         )
         fluence_spectrum = _erb_spectrum(
             energies_mev=energies_mev,
@@ -921,6 +1214,14 @@ class Ae8Ap8ErbModel:
             y_unit=Unit.DIFFERENTIAL_FLUENCE,
             particle=particle,
             model=f"{model_prefix}:mission_fluence",
+            product_kind=RadiationProductKind.MISSION_FLUENCE,
+            mission_seconds=mission_seconds,
+            version=self.version,
+            document_refs=(self.document,),
+            dataset_refs=dataset_refs,
+            transformation_name="ae8_ap8_orbit_spectrum",
+            completeness=SpectrumCompleteness.INCOMPLETE,
+            incomplete_reasons=tuple(incomplete_reasons),
         )
         mean_integral_spectrum = ErbIntegralSpectrum(
             energies_mev=energies_mev,
@@ -961,11 +1262,17 @@ class Ae8Ap8ErbModel:
         maps = self._maps()
         field_line_samples = self._field_line_samples(model_input)
 
-        solar_reference_start_year = self._solar_reference_start_year(model_input)
+        solar_activity = _erb_solar_activity(
+            model_input=model_input,
+            configured=self.solar_activity,
+            reference_start_year_override=self.solar_reference_start_year,
+        )
+        solar_reference_start_year = solar_activity.reference_start_year
         fraction_max = _ae8_ap8_solar_max_fraction(
             mission=model_input.config.mission,
             solar_mode=self.solar_mode,
             reference_start_year=solar_reference_start_year,
+            solar_activity=solar_activity,
         )
         mission_seconds = model_input.config.mission.lifetime_years * ERB_SECONDS_PER_YEAR
 
@@ -1020,14 +1327,17 @@ class Ae8Ap8ErbModel:
                     "integral_bin_difference_over_energy_width",
                 ),
                 ("radbelt_energy_grid", "lower_bin_edges_10_per_decade"),
+                ("magnetic_coordinate_solver", "igrf_rk4_refined_minimum_b_polar_limit_v2"),
                 ("solar_mode", self.solar_mode),
                 ("solar_reference_start_year", str(solar_reference_start_year)),
                 ("solar_fraction_max", f"{fraction_max:.12g}"),
                 ("anomaly_samples", str(self.anomaly_samples)),
                 ("node_samples", str(self.node_samples)),
-                ("igrf_epoch", f"{self.igrf_epoch:g}"),
+                ("igrf_epoch", f"{self._igrf_coefficients().epoch:g}"),
+                ("igrf_configured_epoch", f"{self.igrf_epoch:g}"),
                 ("peak_state", self.peak_state),
                 ("radbelt_log_bin_ratio", f"{RADBELT_LOG_BIN_RATIO:.12g}"),
+                *solar_activity.metadata,
                 *field_line_metadata,
             ),
         )
@@ -1039,13 +1349,14 @@ class OstErbModel:
 
     model: str = "ost_erb_model"
     document: str = OST_134_1044_2007_DOCUMENT
-    version: str = "ost_appendix_a_v1"
+    version: str = "ost_appendix_a_v3"
     interpolation: OstErbInterpolationMode = OstErbInterpolationMode.STRICT
     peak_state: OstErbPeakState = "worst"
     anomaly_samples: int = 48
     node_samples: int = 36
     igrf_epoch: float = DEFAULT_IGRF_EPOCH
     solar_reference_start_year: int | None = None
+    solar_activity: MissionSolarActivity | None = None
     tables: OstErbTableSet | None = None
     igrf_coefficients: IgrfCoefficients | None = None
 
@@ -1125,7 +1436,7 @@ class OstErbModel:
             node_samples=self.node_samples,
         )
 
-        return trace_l_shell_b_over_b0_for_orbit(
+        return ost_l_shell_b_over_b0_for_orbit(
             grid.samples,
             self._igrf_coefficients(),
         )
@@ -1145,10 +1456,12 @@ class OstErbModel:
         tuple[ErbIntegralSpectrum, ...],
         tuple[ErbIntegralSpectrumApproximationFit, ...],
     ]:
+        if not field_line_samples:
+            msg = "OST Appendix E.3 orbit average requires a nonempty time grid."
+            raise ValueError(msg)
         energy_count = len(minimum_table.energies_mev)
         mean_accumulator = [0.0 for _ in range(energy_count)]
         maximum_flux = tuple(0.0 for _ in range(energy_count))
-        valid_count = 0
 
         for field_line_sample in field_line_samples:
             if not field_line_sample.valid:
@@ -1184,13 +1497,46 @@ class OstErbModel:
                 peak_flux = _max_vector(minimum_flux, maximum_state_flux)
 
             maximum_flux = _max_vector(maximum_flux, peak_flux)
-            valid_count += 1
 
-        mean_flux = _divide_vector(mean_accumulator, valid_count)
+        # E.3 divides by the whole sampled duration.  Failed magnetic traces
+        # leave an unknown contribution, not a shorter mission.  Retain only
+        # the computed contribution over that full duration and mark every
+        # product INCOMPLETE below; never renormalize to the valid subset.
+        mean_flux = _divide_vector(mean_accumulator, len(field_line_samples))
         fluence = _multiply_vector(mean_flux, mission_seconds)
 
         particle_label = particle.value
         model_prefix = f"{self.model}:{particle_label}"
+        common_incomplete_reasons: list[str] = []
+        if self.tables is not None:
+            common_incomplete_reasons.append(
+                "caller-supplied OST ERB tables are not tied to the bundled integrity manifest"
+            )
+        if self.igrf_coefficients is not None:
+            common_incomplete_reasons.append(
+                "caller-supplied IGRF coefficients are not tied to the bundled integrity manifest"
+            )
+        common_reasons = tuple(common_incomplete_reasons)
+        mean_incomplete_reasons = _ost_erb_product_incomplete_reasons(
+            tables=(minimum_table, maximum_table),
+            field_line_samples=field_line_samples,
+            common_reasons=common_reasons,
+        )
+        peak_tables: tuple[OstErbFluxTable, ...]
+        if self.peak_state == "worst":
+            peak_tables = (worst_table,)
+        else:
+            peak_tables = (minimum_table, maximum_table)
+        maximum_incomplete_reasons = _ost_erb_product_incomplete_reasons(
+            tables=peak_tables,
+            field_line_samples=field_line_samples,
+            common_reasons=common_reasons,
+        )
+        dataset_refs = (
+            OST_ERB_TABLE_DATASET_REF,
+            ERB_IGRF_DATASET_REF,
+            ERB_WOLF_DATASET_REF,
+        )
 
         mean_spectrum = _erb_spectrum(
             energies_mev=minimum_table.energies_mev,
@@ -1199,6 +1545,14 @@ class OstErbModel:
             y_unit=Unit.DIFFERENTIAL_FLUX,
             particle=particle,
             model=f"{model_prefix}:mean_flux",
+            product_kind=RadiationProductKind.MEAN_FLUX,
+            mission_seconds=mission_seconds,
+            version=self.version,
+            document_refs=(self.document,),
+            dataset_refs=dataset_refs,
+            transformation_name="ost_erb_appendix_a_orbit_spectrum",
+            completeness=SpectrumCompleteness.INCOMPLETE,
+            incomplete_reasons=mean_incomplete_reasons,
         )
         maximum_spectrum = _erb_spectrum(
             energies_mev=minimum_table.energies_mev,
@@ -1207,6 +1561,14 @@ class OstErbModel:
             y_unit=Unit.DIFFERENTIAL_FLUX,
             particle=particle,
             model=f"{model_prefix}:maximum_flux",
+            product_kind=RadiationProductKind.MAXIMUM_FLUX,
+            mission_seconds=mission_seconds,
+            version=self.version,
+            document_refs=(self.document,),
+            dataset_refs=dataset_refs,
+            transformation_name="ost_erb_appendix_a_orbit_spectrum",
+            completeness=SpectrumCompleteness.INCOMPLETE,
+            incomplete_reasons=maximum_incomplete_reasons,
         )
         fluence_spectrum = _erb_spectrum(
             energies_mev=minimum_table.energies_mev,
@@ -1215,6 +1577,14 @@ class OstErbModel:
             y_unit=Unit.DIFFERENTIAL_FLUENCE,
             particle=particle,
             model=f"{model_prefix}:mission_fluence",
+            product_kind=RadiationProductKind.MISSION_FLUENCE,
+            mission_seconds=mission_seconds,
+            version=self.version,
+            document_refs=(self.document,),
+            dataset_refs=dataset_refs,
+            transformation_name="ost_erb_appendix_a_orbit_spectrum",
+            completeness=SpectrumCompleteness.INCOMPLETE,
+            incomplete_reasons=mean_incomplete_reasons,
         )
         mean_integral_spectrum = ErbIntegralSpectrum(
             energies_mev=minimum_table.energies_mev,
@@ -1263,10 +1633,16 @@ class OstErbModel:
         tables = self._tables()
         field_line_samples = self._field_line_samples(model_input)
 
-        solar_reference_start_year = self._solar_reference_start_year(model_input)
+        solar_activity = _erb_solar_activity(
+            model_input=model_input,
+            configured=self.solar_activity,
+            reference_start_year_override=self.solar_reference_start_year,
+        )
+        solar_reference_start_year = solar_activity.reference_start_year
         fraction_max = _ost_erb_solar_max_fraction(
             mission=model_input.config.mission,
             reference_start_year=solar_reference_start_year,
+            solar_activity=solar_activity,
         )
         mission_seconds = model_input.config.mission.lifetime_years * ERB_SECONDS_PER_YEAR
 
@@ -1320,6 +1696,16 @@ class OstErbModel:
             table=tables.electron_min,
             field_line_samples=field_line_samples,
         )
+        proton_max_coverage_metadata = _table_coverage_metadata(
+            prefix="proton_max",
+            table=tables.proton_max,
+            field_line_samples=field_line_samples,
+        )
+        electron_max_coverage_metadata = _table_coverage_metadata(
+            prefix="electron_max",
+            table=tables.electron_max,
+            field_line_samples=field_line_samples,
+        )
         proton_fit_metadata = _appendix_e_fit_quality_metadata(
             prefix="proton",
             integral_spectrum=proton_integral_spectra[0],
@@ -1344,27 +1730,97 @@ class OstErbModel:
                 ("ost_appendices", "A,D,E"),
                 ("appendix_a_reference", OST_ERB_APPENDIX_A_REFERENCE),
                 ("appendix_d_reference", OST_ERB_APPENDIX_D_REFERENCE),
+                ("appendix_d_inner_field", "igrf_rk4_minimum_b_then_d32"),
+                ("magnetic_coordinate_solver", "ost_two_region_igrf_rk4_shifted_dipole_v3"),
+                ("appendix_d_outer_field", "shifted_dipole_d21_d24"),
+                ("appendix_d_region_selection", "L_shifted_dipole_gt_5.5_outer_else_inner"),
+                ("appendix_d_boundary_policy_status", "implementation_convention_pending_validation"),
+                ("appendix_d_outer_igrf_crosscheck_band", "5_le_L_shifted_dipole_le_6"),
+                ("appendix_d_boundary_smoothing", "none"),
+                ("appendix_d_outer_moment_scale", "1_reference_convention_cancels_in_B_over_B0"),
+                ("appendix_d_igrf_synthesis", "negative_gradient_of_IGRF_potential"),
+                ("appendix_d_igrf_formula_status", "printed_d25_d27_inconsistency_not_official_errata"),
+                ("appendix_d_trace_step_km", f"{0.06 * EARTH_REFERENCE_RADIUS_KM:g}"),
+                ("appendix_d_inner_samples", str(sum(
+                    sample.method == "igrf_rk4_minimum_b" for sample in field_line_samples
+                ))),
+                ("appendix_d_outer_samples", str(sum(
+                    sample.method == "ost_shifted_dipole_d21_d24" for sample in field_line_samples
+                ))),
+                ("appendix_d_diagnostic_samples", str(sum(
+                    bool(sample.incomplete_reasons) for sample in field_line_samples
+                ))),
+                ("appendix_d_candidate_comparisons", str(sum(
+                    sample.valid and sample.alternative_l_shell is not None
+                    for sample in field_line_samples
+                ))),
+                ("appendix_d_max_candidate_l_difference", "{:.12g}".format(max((
+                    abs(sample.l_shell - sample.alternative_l_shell)
+                    for sample in field_line_samples
+                    if sample.valid and sample.alternative_l_shell is not None
+                ), default=0.0))),
+                *_field_line_coverage_metadata(prefix="magnetic", field_line_samples=field_line_samples),
                 ("appendix_e_reference", OST_ERB_APPENDIX_E_REFERENCE),
                 ("appendix_e_integral_spectrum", "tail_power_law_numeric_quadrature"),
+                (
+                    "appendix_e_approximation_use",
+                    "diagnostic_fit_not_source_for_production_spectra",
+                ),
+                (
+                    "appendix_e_differential_definition",
+                    "negative_derivative_of_integral_flux_above_threshold",
+                ),
+                (
+                    "appendix_e_electron_differential_policy",
+                    OST_ERB_ELECTRON_DIFFERENTIAL_POLICY,
+                ),
+                ("appendix_e_formula_errata_status", OST_ERB_DIFFERENTIAL_ERRATA_STATUS),
                 (
                     "appendix_e_approximation_fit_objective",
                     "sum_squared_relative_integral_flux_residuals",
                 ),
                 ("appendix_e_interpolation", "three_point_lagrange_with_log_positive_flux_values"),
+                (
+                    "appendix_e_zero_node_interpolation_policy",
+                    "lagrange_on_linear_flux_then_clamp_negative_to_zero",
+                ),
                 ("appendix_e_averaging", "equal_weight_mean_anomaly_samples"),
+                (
+                    "appendix_e_trajectory_assumption",
+                    "independent_mean_anomaly_raan_ensemble_not_time_propagated_track",
+                ),
+                ("appendix_e_average_denominator", "all_orbit_time_samples"),
+                (
+                    "appendix_e_failed_trace_policy",
+                    "computed_contribution_over_full_duration_incomplete_if_any_trace_failed",
+                ),
                 (
                     "appendix_e_time_weighting_status",
                     "approximated_by_uniform_mean_anomaly_sampling",
                 ),
                 ("solar_reference_start_year", str(solar_reference_start_year)),
                 ("solar_fraction_max", f"{fraction_max:.12g}"),
+                ("solar_interpolation", "linear_ost_appendix_e_5"),
+                (
+                    "solar_time_aggregation",
+                    "mean_of_calendar_month_fractions_equivalent_by_linearity",
+                ),
                 ("anomaly_samples", str(self.anomaly_samples)),
                 ("node_samples", str(self.node_samples)),
-                ("igrf_epoch", f"{self.igrf_epoch:g}"),
+                (
+                    "orbit_sampling_convergence_status",
+                    "not_established_below_1_percent_for_every_energy_node",
+                ),
+                ("orbit_sampling_convergence_release_eligible", "false"),
+                ("igrf_epoch", f"{self._igrf_coefficients().epoch:g}"),
+                ("igrf_configured_epoch", f"{self.igrf_epoch:g}"),
                 ("interpolation", self.interpolation.value),
                 ("peak_state", self.peak_state),
+                *solar_activity.metadata,
                 *proton_coverage_metadata,
                 *electron_coverage_metadata,
+                *proton_max_coverage_metadata,
+                *electron_max_coverage_metadata,
                 *proton_fit_metadata,
                 *electron_fit_metadata,
             ),

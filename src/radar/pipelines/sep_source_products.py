@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from importlib import resources
 
 from radar.core.log import LogLevel
-from radar.core.products import SpectrumProduct
+from radar.core.products import SpectrumProduct, select_products_for_assessment_mode
 from radar.core.profiles import (
     profile_uses_ost_134_1044_2007,
     validate_source_model_metadata_for_profile,
@@ -15,7 +15,11 @@ from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.source_products import validate_products_match_spectra_and_source
 from radar.core.types import Particle, RadiationSource
-from radar.geomagnetic.ost_penetration import build_ost_penetration_function_for_config
+from radar.data.integrity import validate_normative_resource_integrity
+from radar.geomagnetic.ost_penetration import (
+    OST_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
+    build_ost_penetration_function_for_config,
+)
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.rigidity import RigidityGrid
 from radar.geomagnetic.spectrum import apply_hze_penetration, apply_proton_penetration
@@ -39,7 +43,7 @@ SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT = "sep_source_products_pipeline"
 SEP_SOURCE_MODEL_COMPONENT = "sep_source_model"
 SEP_GEOMAGNETIC_PENETRATION_COMPONENT = "sep_geomagnetic_penetration"
 UNVERSIONED_MODEL = "unversioned"
-SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION = "appendix_zh_mlt_average_v1"
+SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION = OST_GEOMAGNETIC_PENETRATION_MODEL_VERSION
 SEP_GEOMAGNETIC_PENETRATION_DOCUMENT = "OST 134-1044-2007 Appendix Zh"
 
 
@@ -67,6 +71,12 @@ def _same_spectrum_domain_and_semantics(
         and spectrum.quantity is source_spectrum.quantity
         and spectrum.particle is source_spectrum.particle
         and spectrum.source is source_spectrum.source
+        and spectrum.axis_kind is source_spectrum.axis_kind
+        and spectrum.angular_basis is source_spectrum.angular_basis
+        and spectrum.temporal_basis is source_spectrum.temporal_basis
+        and spectrum.species == source_spectrum.species
+        and spectrum.assessment_mode is source_spectrum.assessment_mode
+        and spectrum.mission_duration_s == source_spectrum.mission_duration_s
     )
 
 
@@ -93,16 +103,23 @@ def _validate_pipeline_products_derived_from_model_products(
         if product == model_product:
             continue
 
-        expected_model_prefix = f"{model_product.spectrum.model}+"
-        if not product.spectrum.model.startswith(expected_model_prefix):
+        source_chain = model_product.spectrum.transformation_chain
+        derived_chain = product.spectrum.transformation_chain
+        preserves_chain = (
+            bool(derived_chain)
+            if not source_chain
+            else derived_chain[: len(source_chain)] == source_chain
+        )
+        if not preserves_chain:
             msg = (
-                "SEP pipeline derived product spectra must identify their source "
-                "model in the spectrum model string."
+                "SEP pipeline derived product spectra must preserve the structured "
+                "source transformation chain."
             )
             raise ValueError(msg)
 
 
 def _load_ost_sep_hze_ion_records_for_penetration() -> tuple[OstSepHzeIonRecord, ...]:
+    validate_normative_resource_integrity(OST_SEP_HZE_B9_RESOURCE)
     resource = resources.files("radar.data.normative").joinpath(
         OST_SEP_HZE_B9_RESOURCE,
     )
@@ -112,31 +129,14 @@ def _load_ost_sep_hze_ion_records_for_penetration() -> tuple[OstSepHzeIonRecord,
 
 
 def _hze_charge_number_from_product(product: SpectrumProduct) -> int:
-    parts = product.spectrum.model.split(":")
-
-    try:
-        hze_index = parts.index("hze")
-    except ValueError as exc:
-        msg = "SEP HZE product model must contain an hze ion tag."
-        raise ValueError(msg) from exc
-
-    if hze_index + 1 >= len(parts):
-        msg = "SEP HZE product model must contain an ion tag after hze."
+    species = product.spectrum.species
+    if species is None or species.is_aggregate or species.atomic_number is None:
+        msg = "SEP HZE product requires structured species metadata with Z and A."
         raise ValueError(msg)
-
-    ion_tag = parts[hze_index + 1]
-
-    if not ion_tag.startswith("z"):
-        msg = "SEP HZE ion tag must start with z."
+    if species.atomic_number < 2:
+        msg = "SEP HZE product structured species must have Z >= 2."
         raise ValueError(msg)
-
-    charge_text = ion_tag[1:].split("_", maxsplit=1)[0]
-
-    try:
-        return int(charge_text)
-    except ValueError as exc:
-        msg = "SEP HZE ion tag must contain an integer charge number."
-        raise ValueError(msg) from exc
+    return species.atomic_number
 
 
 def _hze_ion_record_for_product(
@@ -287,6 +287,13 @@ class SepSourceProductsPipelineResult:
             mismatch_message="SEP source product spectra must match source spectra.",
         )
 
+        carries_production_metadata = any(
+            product.spectrum.axis_kind is not None for product in products
+        )
+        if carries_production_metadata:
+            for product in products:
+                product.validate_calculation_contract()
+
         object.__setattr__(self, "products", products)
 
     @property
@@ -371,41 +378,57 @@ def calculate_sep_source_products_pipeline(
             products=products,
         )
         products = penetration_output.products
+        qualification_reasons = tuple(dict.fromkeys(
+            reason
+            for product in select_products_for_assessment_mode(products, config.assessment_mode)
+            for reason in product.spectrum.incomplete_reasons
+        ))
 
         calculation_result = calculation_result.set_model_info(
             ModelInfo(
                 name=penetration_output.penetration.model,
                 version=SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
-                status="calculated",
+                status="diagnostic" if qualification_reasons else "calculated",
                 source=SEP_GEOMAGNETIC_PENETRATION_DOCUMENT,
             )
         )
         calculation_result = calculation_result.set_component_status(
             component=SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
-            status=ComponentStatus.COMPLETED,
+            status=ComponentStatus.INCOMPLETE if qualification_reasons else ComponentStatus.COMPLETED,
         )
         calculation_result = calculation_result.add_log_entry(
-            level=LogLevel.INFO,
+            level=LogLevel.WARNING if qualification_reasons else LogLevel.INFO,
             stage=SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
-            message="SEP geomagnetic penetration completed.",
+            message=(
+                "SEP geomagnetic penetration calculated with unresolved qualification."
+                if qualification_reasons else "SEP geomagnetic penetration completed."
+            ),
             details={
                 "products": str(len(products)),
                 "penetration_model": penetration_output.penetration.model,
                 "penetration_version": SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION,
+                "qualification_reasons": "; ".join(qualification_reasons),
                 "rigidity_grid_points": str(
                     len(penetration_output.rigidity_grid.values_gv)
                 ),
             },
         )
 
+    selected_incomplete = any(
+        product.spectrum.incomplete_reasons
+        for product in select_products_for_assessment_mode(products, config.assessment_mode)
+    )
     calculation_result = calculation_result.set_component_status(
         component=SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT,
-        status=ComponentStatus.COMPLETED,
+        status=ComponentStatus.INCOMPLETE if selected_incomplete else ComponentStatus.COMPLETED,
     )
     calculation_result = calculation_result.add_log_entry(
-        level=LogLevel.INFO,
+        level=LogLevel.WARNING if selected_incomplete else LogLevel.INFO,
         stage=SEP_SOURCE_PRODUCTS_PIPELINE_COMPONENT,
-        message="SEP source-products pipeline completed.",
+        message=(
+            "SEP source-products pipeline calculated with unresolved qualification."
+            if selected_incomplete else "SEP source-products pipeline completed."
+        ),
     )
 
     return SepSourceProductsPipelineResult(

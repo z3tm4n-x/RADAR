@@ -27,6 +27,7 @@ from radar.core.profiles import (
     validate_source_model_family_for_profile,
 )
 from radar.core.types import (
+    AssessmentMode,
     DoseQuantity,
     OrbitType,
     RadiationSource,
@@ -34,6 +35,16 @@ from radar.core.types import (
     SolarActivityLevel,
 )
 from radar.core.units import Unit
+
+
+# The standards provide a synthetic 11-year activity-cycle table, but they do
+# not attach that table to a particular civil year or numbered solar cycle.
+# These values are therefore an explicit, user-overridable RADAR scenario
+# anchor rather than normative constants from OST 134-1044-2007.
+DEFAULT_SOLAR_CYCLE_REFERENCE_START_YEAR = 2020
+DEFAULT_SOLAR_CYCLE_REFERENCE_NUMBER = 25
+DEFAULT_SOLAR_ACTIVITY_WOLF_VERSION = "1.0"
+DEFAULT_SOLAR_ACTIVITY_MONTHLY_POLICY = "ost_g1_annual_step_12_months"
 
 
 @dataclass(frozen=True)
@@ -204,6 +215,7 @@ class SourceModelSelectionConfig:
             model_family=self.erb_model_family,
         )
 
+
 @dataclass(frozen=True)
 class MethodologyConfig:
     """Methodology switches fixed for the first RADAR version."""
@@ -212,6 +224,10 @@ class MethodologyConfig:
     calculate_gcr_electrons: bool = False
     include_bremsstrahlung: bool = True
     include_protons_in_let: bool = True
+    solar_cycle_reference_start_year: int = DEFAULT_SOLAR_CYCLE_REFERENCE_START_YEAR
+    solar_cycle_reference_number: int = DEFAULT_SOLAR_CYCLE_REFERENCE_NUMBER
+    solar_activity_wolf_version: str = DEFAULT_SOLAR_ACTIVITY_WOLF_VERSION
+    solar_activity_monthly_policy: str = DEFAULT_SOLAR_ACTIVITY_MONTHLY_POLICY
 
     @property
     def profile_spec(self) -> MethodologyProfileSpec:
@@ -231,6 +247,17 @@ class MethodologyConfig:
 
         return SourceModelSelectionConfig.from_methodology(self)
 
+    @property
+    def include_mixed_let_diagnostic(self) -> bool:
+        """Return whether the legacy proton+HZE LET control is requested.
+
+        ``include_protons_in_let`` is retained in project snapshots for
+        compatibility.  It does not alter the canonical HZE-only direct-ion
+        assessment spectrum or the separate proton Bendel input path.
+        """
+
+        return self.include_protons_in_let
+
     def __post_init__(self) -> None:
         if self.calculate_gcr_electrons:
             msg = "GCR electrons are not calculated in the first version."
@@ -240,8 +267,30 @@ class MethodologyConfig:
             msg = "Bremsstrahlung accounting is required."
             raise ValueError(msg)
 
-        if not self.include_protons_in_let:
-            msg = "Protons must be included in LET calculation for SEE."
+        if not isinstance(self.include_protons_in_let, bool):
+            msg = "Mixed proton+HZE diagnostic LET switch must be boolean."
+            raise ValueError(msg)
+
+        if not isinstance(self.solar_cycle_reference_start_year, int):
+            msg = "Solar-cycle reference start year must be an integer."
+            raise ValueError(msg)
+
+        if not isinstance(self.solar_cycle_reference_number, int):
+            msg = "Solar-cycle reference number must be an integer."
+            raise ValueError(msg)
+
+        if self.solar_cycle_reference_number < 1:
+            msg = "Solar-cycle reference number must be positive."
+            raise ValueError(msg)
+
+        if self.solar_activity_wolf_version != DEFAULT_SOLAR_ACTIVITY_WOLF_VERSION:
+            msg = "The current OST table G.1 timeline supports only Wolf-number version 1.0."
+            raise ValueError(msg)
+
+        if self.solar_activity_monthly_policy != DEFAULT_SOLAR_ACTIVITY_MONTHLY_POLICY:
+            msg = (
+                "The current OST table G.1 timeline supports only the annual-step 12-month policy."
+            )
             raise ValueError(msg)
 
 
@@ -256,6 +305,7 @@ class CalculationConfig:
     kp: int = DEFAULT_KP
     dose_quantity: DoseQuantity = DEFAULT_DOSE_QUANTITY
     dose_unit: Unit = DEFAULT_DOSE_UNIT
+    assessment_mode: AssessmentMode = AssessmentMode.CUMULATIVE
 
     @property
     def source_model_selection(self) -> SourceModelSelectionConfig:
@@ -264,6 +314,10 @@ class CalculationConfig:
         return self.methodology.source_model_selection
 
     def __post_init__(self) -> None:
+        if not isinstance(self.assessment_mode, AssessmentMode):
+            msg = "Assessment mode must be peak or cumulative."
+            raise ValueError(msg)
+
         if not isinstance(self.kp, int):
             msg = "Kp must be an integer."
             raise ValueError(msg)
@@ -276,3 +330,18 @@ class CalculationConfig:
             dose_quantity=self.dose_quantity,
             dose_unit=self.dose_unit,
         )
+
+        if self.assessment_mode is AssessmentMode.CUMULATIVE:
+            if self.dose_quantity is not DoseQuantity.ACCUMULATED_DOSE:
+                msg = "Cumulative assessment mode requires accumulated dose."
+                raise ValueError(msg)
+            if self.dose_unit is not Unit.RAD:
+                msg = "Cumulative assessment mode requires dose unit rad."
+                raise ValueError(msg)
+        elif self.assessment_mode is AssessmentMode.PEAK:
+            if self.dose_quantity is not DoseQuantity.DOSE_RATE:
+                msg = "Peak assessment mode requires dose rate."
+                raise ValueError(msg)
+            if self.dose_unit is not Unit.RAD_PER_SECOND:
+                msg = "Peak assessment mode requires dose unit rad/s."
+                raise ValueError(msg)

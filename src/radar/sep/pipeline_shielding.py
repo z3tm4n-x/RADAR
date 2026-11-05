@@ -7,8 +7,14 @@ from math import exp, isfinite, log
 from typing import Mapping
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, SpectrumQuantity
+from radar.core.spectra import ShieldingDescriptor, Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    SpectrumLocation,
+    SpectrumQuantity,
+)
 from radar.gcr.shielding import (
     GCR_AL_CENTERED_SPHERICAL_SHELL,
     GCR_HZE_FRAGMENTATION_NOT_INCLUDED,
@@ -18,6 +24,7 @@ from radar.gcr.shielding import (
 from radar.shielding.hze_al import HzeAlRangeTable, shield_hze_spectrum_primary_through_al
 from radar.shielding.hze_si_let import HzeSiLetTable, hze_energy_spectrum_to_let_spectrum
 from radar.shielding.let_combined import (
+    combine_hze_let_spectra,
     combine_proton_and_hze_let_spectra,
     rebin_let_spectrum_to_grid,
 )
@@ -31,6 +38,7 @@ from radar.shielding.sep_proton import (
 SEP_HZE_AL_SHIELDING_MODEL = "sep_hze_al_shielding_primary_csda"
 SEP_LET_PRODUCTS_MODEL = "sep_shielded_let_products"
 SEP_SILICON_LET_TARGET = "silicon_let"
+SEP_LET_ENERGY_DOMAIN_REASON_PREFIX = "SEP LET energy domain incomplete"
 
 SEP_SHIELDING_LET_PRODUCT_KIND_ORDER: tuple[RadiationProductKind, ...] = (
     RadiationProductKind.PEAK_FLUX,
@@ -93,7 +101,8 @@ class SepLetProductsResult:
 
     proton_let: Spectrum1D
     hze_let_by_z: dict[int, Spectrum1D]
-    combined_let: Spectrum1D
+    hze_aggregate_let: Spectrum1D
+    mixed_let_diagnostic: Spectrum1D
     let_centers: tuple[float, ...]
 
     def __post_init__(self) -> None:
@@ -105,8 +114,12 @@ class SepLetProductsResult:
             msg = "SEP proton LET spectrum must use the common LET grid."
             raise ValueError(msg)
 
-        if self.combined_let.x != self.let_centers:
-            msg = "SEP combined LET spectrum must use the common LET grid."
+        if self.hze_aggregate_let.x != self.let_centers:
+            msg = "SEP HZE aggregate LET spectrum must use the common LET grid."
+            raise ValueError(msg)
+
+        if self.mixed_let_diagnostic.x != self.let_centers:
+            msg = "SEP mixed diagnostic LET spectrum must use the common LET grid."
             raise ValueError(msg)
 
         for spectrum in self.hze_let_by_z.values():
@@ -124,10 +137,12 @@ class SepShieldingLetPipelineProducts:
     hze_by_kind: dict[RadiationProductKind, dict[int, SepHzeShieldingResult]]
     shielded_products: tuple[SpectrumProduct, ...]
     let_products: tuple[SpectrumProduct, ...]
+    diagnostic_let_products: tuple[SpectrumProduct, ...] = ()
     let_results_by_kind: dict[
         RadiationProductKind,
         SepLetProductsResult,
     ] = field(default_factory=dict)
+    incomplete_reasons: tuple[str, ...] = ()
 
     @property
     def products(self) -> tuple[SpectrumProduct, ...]:
@@ -140,6 +155,10 @@ class SepShieldingLetPipelineProducts:
 
         if not self.shielded_products:
             msg = "SEP pipeline shielding must produce at least one shielded product."
+            raise ValueError(msg)
+
+        if any(not reason.strip() for reason in self.incomplete_reasons):
+            msg = "SEP shielding incomplete reasons must not contain empty values."
             raise ValueError(msg)
 
 
@@ -186,7 +205,19 @@ def _let_label(
     thickness_g_cm2: float,
 ) -> str:
     return (
-        f"SEP {product_kind.value} combined LET "
+        f"SEP {product_kind.value} HZE direct-ion LET "
+        f"behind Al shield {thickness_g_cm2:g} g/cm^2"
+    )
+
+
+def _diagnostic_let_label(
+    *,
+    product_kind: RadiationProductKind,
+    component: str,
+    thickness_g_cm2: float,
+) -> str:
+    return (
+        f"SEP {product_kind.value} {component} diagnostic LET "
         f"behind Al shield {thickness_g_cm2:g} g/cm^2"
     )
 
@@ -211,6 +242,63 @@ def _shielded_product(
     )
 
 
+def _zero_aluminium_identity_spectrum(spectrum: Spectrum1D) -> Spectrum1D:
+    return derive_spectrum(
+        spectrum,
+        model=f"{spectrum.model}+zero_aluminium_identity",
+        location=SpectrumLocation.BEHIND_SHIELD,
+        shielding=ShieldingDescriptor(
+            material="aluminium",
+            areal_density_g_cm2=0.0,
+        ),
+        transformation=TransformationStep(
+            name="zero_aluminium_identity",
+            version="1",
+            parameters=(("thickness_g_cm2", "0"),),
+        ),
+    )
+
+
+def _zero_aluminium_identity_product(
+    source_product: SpectrumProduct,
+) -> SpectrumProduct:
+    """Represent a zero-thickness shield without requiring transport data."""
+
+    spectrum = _zero_aluminium_identity_spectrum(source_product.spectrum)
+    return SpectrumProduct(
+        kind=source_product.kind,
+        spectrum=spectrum,
+        label=_shielded_label(product=source_product, thickness_g_cm2=0.0),
+    )
+
+
+def _zero_hze_identity_result_without_table(
+    *,
+    z: int,
+    spectrum: Spectrum1D,
+) -> SepHzeShieldingResult:
+    species = spectrum.species
+    if (
+        species is None
+        or species.is_aggregate
+        or species.atomic_number != z
+    ):
+        msg = (
+            "Zero-thickness SEP HZE identity without a range table requires "
+            f"structured individual-ion metadata for Z={z}."
+        )
+        raise ValueError(msg)
+    shielded = _zero_aluminium_identity_spectrum(spectrum)
+    return SepHzeShieldingResult(
+        z=z,
+        symbol=species.symbol,
+        spectrum=shielded,
+        thickness_g_cm2=0.0,
+        nuclear_attenuation=False,
+        fragmentation=False,
+    )
+
+
 def _is_supported_energy_product(product: SpectrumProduct) -> bool:
     return (
         product.kind in SEP_SHIELDING_LET_PRODUCT_KIND_ORDER
@@ -219,31 +307,14 @@ def _is_supported_energy_product(product: SpectrumProduct) -> bool:
 
 
 def _sep_hze_charge_number_from_product(product: SpectrumProduct) -> int:
-    parts = product.spectrum.model.split(":")
-
-    if len(parts) < 3 or parts[1] != "hze":
-        msg = "SEP HZE product model must contain an hze ion tag."
+    species = product.spectrum.species
+    if species is None or species.is_aggregate or species.atomic_number is None:
+        msg = "SEP HZE product requires structured species metadata with Z and A."
         raise ValueError(msg)
-
-    tag = parts[2]
-
-    if not tag.startswith("z"):
-        msg = "SEP HZE product ion tag must start with 'z'."
+    if species.atomic_number < 2:
+        msg = "SEP HZE product structured species must have Z >= 2."
         raise ValueError(msg)
-
-    digits: list[str] = []
-
-    for character in tag[1:]:
-        if not character.isdigit():
-            break
-
-        digits.append(character)
-
-    if not digits:
-        msg = "SEP HZE product ion tag must contain a charge number."
-        raise ValueError(msg)
-
-    return int("".join(digits))
+    return species.atomic_number
 
 
 def _hze_table_for_z(
@@ -270,6 +341,55 @@ def _hze_let_table_for_z(
         raise ValueError(msg) from exc
 
 
+def _restrict_energy_spectrum_to_table_domain(
+    spectrum: Spectrum1D,
+    *,
+    minimum_energy: float,
+    maximum_energy: float,
+    table_name: str,
+) -> Spectrum1D:
+    """Return the tabulated subset and explicitly quarantine truncation."""
+
+    selected = tuple(
+        index
+        for index, energy in enumerate(spectrum.x)
+        if minimum_energy <= energy <= maximum_energy
+    )
+    if len(selected) < 2:
+        msg = (
+            f"{table_name} has fewer than two source-spectrum points within "
+            f"{minimum_energy:g}..{maximum_energy:g} MeV."
+        )
+        raise ValueError(msg)
+    restricted = derive_spectrum(
+        spectrum,
+        x=tuple(spectrum.x[index] for index in selected),
+        y=tuple(spectrum.y[index] for index in selected),
+        bin_edges=(
+            None
+            if spectrum.bin_edges is None
+            else spectrum.bin_edges[selected[0] : selected[-1] + 2]
+        ),
+        transformation=TransformationStep(
+            name="sep_let_table_energy_domain_restriction",
+            version="1",
+            parameters=(
+                ("table", table_name),
+                ("minimum_energy", f"{minimum_energy:.17g}"),
+                ("maximum_energy", f"{maximum_energy:.17g}"),
+            ),
+        ),
+    )
+    if selected == tuple(range(len(spectrum.x))):
+        return restricted
+    return mark_spectrum_incomplete(
+        restricted,
+        f"{SEP_LET_ENERGY_DOMAIN_REASON_PREFIX}: {table_name} support "
+        f"{minimum_energy:.17g}..{maximum_energy:.17g} does not cover source "
+        f"grid {spectrum.x[0]:.17g}..{spectrum.x[-1]:.17g} MeV",
+    )
+
+
 def _hze_model(*, input_model: str, z: int, symbol: str) -> str:
     return (
         f"{input_model}+Z{z}_{symbol}+{SEP_HZE_AL_SHIELDING_MODEL}+"
@@ -291,13 +411,24 @@ def calculate_sep_hze_shielding_spectrum(
     _validate_thickness(thickness_g_cm2, "SEP HZE shielding thickness")
     _validate_sep_hze_energy_spectrum(spectrum)
 
-    table = _hze_table_for_z(tables=tables, z=z)
+    table = tables.hze_al_ranges_by_z.get(z)
+    if table is None and thickness_g_cm2 == 0.0:
+        return _zero_hze_identity_result_without_table(z=z, spectrum=spectrum)
+    if table is None:
+        table = _hze_table_for_z(tables=tables, z=z)
     shielded = shield_hze_spectrum_primary_through_al(
         spectrum=spectrum,
         table=table,
         thickness_g_cm2=thickness_g_cm2,
         model=_hze_model(input_model=spectrum.model, z=table.z, symbol=table.symbol),
     )
+    if thickness_g_cm2 > 0.0 and shielded.axis_kind is not None:
+        shielded = mark_spectrum_incomplete(
+            shielded,
+            "heavy-ion nuclear attenuation is not included",
+            "heavy-ion fragmentation is not included",
+            "HZE aluminium range dataset release eligibility has not been established",
+        )
 
     return SepHzeShieldingResult(
         z=table.z,
@@ -363,11 +494,18 @@ def _validate_energy_quantities_match(
             raise ValueError(msg)
 
 
-def _combined_let_model(input_model: str) -> str:
+def _hze_aggregate_let_model(input_model: str) -> str:
+    return (
+        f"{input_model}+{SEP_LET_PRODUCTS_MODEL}+hze_primary_after_al+"
+        f"{SEP_SILICON_LET_TARGET}+{GCR_NO_HIDDEN_4PI}+hze_direct_ion_only"
+    )
+
+
+def _mixed_let_diagnostic_model(input_model: str) -> str:
     return (
         f"{input_model}+{SEP_LET_PRODUCTS_MODEL}+"
         f"proton_total_after_al+hze_primary_after_al+"
-        f"{SEP_SILICON_LET_TARGET}+{GCR_NO_HIDDEN_4PI}"
+        f"{SEP_SILICON_LET_TARGET}+{GCR_NO_HIDDEN_4PI}+diagnostic_only"
     )
 
 
@@ -386,8 +524,14 @@ def calculate_sep_let_products(
 
     _validate_energy_quantities_match(proton=proton, hze_by_z=hze_by_z)
 
+    proton_energy_for_let = _restrict_energy_spectrum_to_table_domain(
+        proton.total,
+        minimum_energy=tables.proton_si_let.energy_mev[0],
+        maximum_energy=tables.proton_si_let.energy_mev[-1],
+        table_name="proton silicon LET table",
+    )
     proton_let_raw = proton_energy_spectrum_to_let_spectrum(
-        spectrum=proton.total,
+        spectrum=proton_energy_for_let,
         table=tables.proton_si_let,
     )
 
@@ -395,8 +539,14 @@ def calculate_sep_let_products(
 
     for z, hze_result in sorted(hze_by_z.items()):
         table = _hze_let_table_for_z(tables=tables, z=z)
+        hze_energy_for_let = _restrict_energy_spectrum_to_table_domain(
+            hze_result.spectrum,
+            minimum_energy=table.energy_mev_per_nucleon[0],
+            maximum_energy=table.energy_mev_per_nucleon[-1],
+            table_name=f"Z={z} HZE silicon LET table",
+        )
         hze_let_raw_by_z[z] = hze_energy_spectrum_to_let_spectrum(
-            spectrum=hze_result.spectrum,
+            spectrum=hze_energy_for_let,
             table=table,
         )
 
@@ -415,17 +565,25 @@ def calculate_sep_let_products(
         for z, spectrum in hze_let_raw_by_z.items()
     }
 
-    combined_let = combine_proton_and_hze_let_spectra(
-        proton_let=proton_let,
-        hze_let_spectra=tuple(hze_let_by_z[z] for z in sorted(hze_let_by_z)),
+    hze_spectra = tuple(hze_let_by_z[z] for z in sorted(hze_let_by_z))
+    first_hze_model = hze_spectra[0].model
+    hze_aggregate_let = combine_hze_let_spectra(
+        hze_let_spectra=hze_spectra,
         let_centers=output_centers,
-        model=_combined_let_model(proton.total.model),
+        model=_hze_aggregate_let_model(first_hze_model),
+    )
+    mixed_let_diagnostic = combine_proton_and_hze_let_spectra(
+        proton_let=proton_let,
+        hze_let_spectra=hze_spectra,
+        let_centers=output_centers,
+        model=_mixed_let_diagnostic_model(proton.total.model),
     )
 
     return SepLetProductsResult(
         proton_let=proton_let,
         hze_let_by_z=hze_let_by_z,
-        combined_let=combined_let,
+        hze_aggregate_let=hze_aggregate_let,
+        mixed_let_diagnostic=mixed_let_diagnostic,
         let_centers=output_centers,
     )
 
@@ -439,6 +597,7 @@ def calculate_sep_shielding_let_products_for_thickness(
     include_secondary_protons: bool = True,
     survival_integration_steps: int = 64,
     secondary_depth_steps: int = 24,
+    include_mixed_let_diagnostic: bool = True,
 ) -> SepShieldingLetPipelineProducts:
     """Calculate SEP shielding and combined LET products for one thickness."""
 
@@ -449,6 +608,7 @@ def calculate_sep_shielding_let_products_for_thickness(
     proton_by_kind: dict[RadiationProductKind, SepProtonShieldingResult] = {}
     hze_by_kind: dict[RadiationProductKind, dict[int, SepHzeShieldingResult]] = {}
     shielded_products: list[SpectrumProduct] = []
+    incomplete_reasons: list[str] = []
 
     for product in products:
         if not _is_supported_energy_product(product):
@@ -465,6 +625,7 @@ def calculate_sep_shielding_let_products_for_thickness(
                 secondary_depth_steps=secondary_depth_steps,
             )
             proton_by_kind[product.kind] = proton_result
+            incomplete_reasons.extend(proton_result.total.incomplete_reasons)
             shielded_products.append(
                 _shielded_product(
                     source_product=product,
@@ -477,6 +638,12 @@ def calculate_sep_shielding_let_products_for_thickness(
             z = _sep_hze_charge_number_from_product(product)
 
             if z not in tables.hze_al_ranges_by_z:
+                if thickness_g_cm2 == 0.0:
+                    shielded_products.append(_zero_aluminium_identity_product(product))
+                    continue
+                incomplete_reasons.append(
+                    f"no HZE aluminium range table is available for Z={z}"
+                )
                 continue
 
             hze_result = calculate_sep_hze_shielding_spectrum(
@@ -498,6 +665,7 @@ def calculate_sep_shielding_let_products_for_thickness(
         raise ValueError(msg)
 
     let_products: list[SpectrumProduct] = []
+    diagnostic_let_products: list[SpectrumProduct] = []
     let_results_by_kind: dict[RadiationProductKind, SepLetProductsResult] = {}
 
     for product_kind in SEP_SHIELDING_LET_PRODUCT_KIND_ORDER:
@@ -505,9 +673,19 @@ def calculate_sep_shielding_let_products_for_thickness(
         if proton_for_let is None:
             continue
 
+        hze_inputs = hze_by_kind.get(product_kind, {})
+        missing_let_tables = tuple(
+            z for z in sorted(hze_inputs) if z not in tables.hze_si_let_by_z
+        )
+        if missing_let_tables:
+            incomplete_reasons.append(
+                "no HZE silicon LET table is available for Z="
+                + ",".join(str(z) for z in missing_let_tables)
+                + f" ({product_kind.value})"
+            )
         hze_for_let = {
             z: result
-            for z, result in hze_by_kind.get(product_kind, {}).items()
+            for z, result in hze_inputs.items()
             if z in tables.hze_si_let_by_z
         }
 
@@ -524,13 +702,36 @@ def calculate_sep_shielding_let_products_for_thickness(
         let_products.append(
             SpectrumProduct(
                 kind=_SEP_LET_KIND_BY_ENERGY_PRODUCT_KIND[product_kind],
-                spectrum=let_result.combined_let,
+                spectrum=let_result.hze_aggregate_let,
                 label=_let_label(
                     product_kind=product_kind,
                     thickness_g_cm2=thickness_g_cm2,
                 ),
             )
         )
+        if include_mixed_let_diagnostic:
+            diagnostic_let_products.extend(
+                (
+                SpectrumProduct(
+                    kind=_SEP_LET_KIND_BY_ENERGY_PRODUCT_KIND[product_kind],
+                    spectrum=let_result.proton_let,
+                    label=_diagnostic_let_label(
+                        product_kind=product_kind,
+                        component="proton",
+                        thickness_g_cm2=thickness_g_cm2,
+                    ),
+                ),
+                SpectrumProduct(
+                    kind=_SEP_LET_KIND_BY_ENERGY_PRODUCT_KIND[product_kind],
+                    spectrum=let_result.mixed_let_diagnostic,
+                    label=_diagnostic_let_label(
+                        product_kind=product_kind,
+                        component="mixed proton+HZE",
+                        thickness_g_cm2=thickness_g_cm2,
+                    ),
+                ),
+                )
+            )
 
     return SepShieldingLetPipelineProducts(
         thickness_g_cm2=thickness_g_cm2,
@@ -538,7 +739,9 @@ def calculate_sep_shielding_let_products_for_thickness(
         hze_by_kind=hze_by_kind,
         shielded_products=tuple(shielded_products),
         let_products=tuple(let_products),
+        diagnostic_let_products=tuple(diagnostic_let_products),
         let_results_by_kind=let_results_by_kind,
+        incomplete_reasons=tuple(dict.fromkeys(incomplete_reasons)),
     )
 
 
@@ -551,6 +754,7 @@ def calculate_sep_shielding_let_products(
     include_secondary_protons: bool = True,
     survival_integration_steps: int = 64,
     secondary_depth_steps: int = 24,
+    include_mixed_let_diagnostic: bool = True,
 ) -> tuple[SepShieldingLetPipelineProducts, ...]:
     """Calculate SEP shielding and LET products for all configured thicknesses."""
 
@@ -567,6 +771,7 @@ def calculate_sep_shielding_let_products(
             include_secondary_protons=include_secondary_protons,
             survival_integration_steps=survival_integration_steps,
             secondary_depth_steps=secondary_depth_steps,
+            include_mixed_let_diagnostic=include_mixed_let_diagnostic,
         )
         for thickness_g_cm2 in thicknesses_g_cm2
     )

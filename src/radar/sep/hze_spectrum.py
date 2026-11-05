@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Mapping
 
@@ -15,11 +16,23 @@ from radar.sep.proton_spectrum import (
 OST_SEP_HZE_COEFFICIENT_MODEL = "ost_134_1044_2007"
 OST_SEP_HZE_B9_RESOURCE = "sep_hze/ost_134_1044_2007_b9.csv"
 
-# Appendix B.5 uses 1.34. Appendix B.6 is treated with the known printed
-# OST correction: gamma2(z) = 1.68 * gamma2(p)**0.62.
+# Appendix B formula B.6 prints 1.34 for the gamma2 multiplier.  That value is
+# a known typographical error for the RADAR/COSRAD application profile: the
+# corrected multiplier is 1.68.  Keep the printed value named so the literal
+# text can still be reproduced explicitly during diagnostics and comparison.
 OST_SEP_HZE_GAMMA1_MULTIPLIER = 1.34
 OST_SEP_HZE_GAMMA1_EXPONENT = 0.57
-OST_SEP_HZE_GAMMA2_MULTIPLIER = 1.68
+OST_SEP_HZE_GAMMA2_PRINTED_MULTIPLIER = 1.34
+OST_SEP_HZE_GAMMA2_CORRECTED_MULTIPLIER = 1.68
+OST_SEP_HZE_GAMMA2_MULTIPLIER = OST_SEP_HZE_GAMMA2_CORRECTED_MULTIPLIER
+# Backward-compatible alias for code written before the correction was made
+# the default.  New code should use ``..._CORRECTED_MULTIPLIER``.
+OST_SEP_HZE_GAMMA2_ENGINEERING_MULTIPLIER = (
+    OST_SEP_HZE_GAMMA2_CORRECTED_MULTIPLIER
+)
+OST_SEP_HZE_GAMMA2_CORRECTION_POLICY = (
+    "corrected_1.68; OST_B.6_printed_1.34_typographical_error"
+)
 OST_SEP_HZE_GAMMA2_EXPONENT = 0.62
 OST_SEP_HZE_REFERENCE_ENERGY_MEV_PER_NUCLEON = 30.0
 
@@ -159,12 +172,19 @@ def ost_sep_hze_coefficients_from_proton(
     *,
     proton_coefficients: SepProtonSpectrumCoefficients,
     ion: OstSepHzeIonRecord,
+    gamma2_multiplier: float = OST_SEP_HZE_GAMMA2_MULTIPLIER,
 ) -> OstSepHzeSpectrumCoefficients:
     """Return HZE spectrum coefficients from proton coefficients.
 
-    Implements Appendix B formulas B.3--B.6, with the corrected B.6 multiplier
-    for gamma2(z).
+    Implements Appendix B formulas B.3--B.6 using the corrected 1.68
+    multiplier by default.  ``gamma2_multiplier`` remains explicit so the
+    literal printed value 1.34 or another comparison value can be selected
+    deliberately and recorded by the caller.
     """
+
+    if not isfinite(gamma2_multiplier) or gamma2_multiplier <= 0.0:
+        msg = "OST SEP HZE gamma2 multiplier must be positive and finite."
+        raise ValueError(msg)
 
     proton_c = 10.0**proton_coefficients.log10_c
     proton_break_energy = proton_coefficients.break_energy_mev
@@ -172,7 +192,7 @@ def ost_sep_hze_coefficients_from_proton(
     gamma1 = OST_SEP_HZE_GAMMA1_MULTIPLIER * (
         proton_coefficients.gamma1**OST_SEP_HZE_GAMMA1_EXPONENT
     )
-    gamma2 = OST_SEP_HZE_GAMMA2_MULTIPLIER * (
+    gamma2 = gamma2_multiplier * (
         proton_coefficients.gamma2**OST_SEP_HZE_GAMMA2_EXPONENT
     )
     break_energy = proton_break_energy / ion.mass_to_charge

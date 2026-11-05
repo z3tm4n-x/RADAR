@@ -14,5 +14,11 @@
     "8"
   ],
   "description": "Параметры протонных спектров СКЛ по ГОСТ 2025.",
-  "validation_status": "checked"
+  "validation_status": "verified_against_draft",
+  "verification_method": "full_cell_comparison",
+  "verified_cells": 560,
+  "mismatches": 0,
+  "pdf_pages": "9-12",
+  "printed_pages": "7-10",
+  "note": "The supplied title page identifies the document as a final draft with year 202X; 2025 is a RADAR dataset identifier, not a confirmed publication year."
 }

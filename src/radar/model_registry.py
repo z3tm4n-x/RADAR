@@ -21,10 +21,10 @@ from radar.erb.model import Ae8Ap8ErbModel, OstErbModel
 from radar.gcr.model import GostGcrModel, OstGcrModel
 from radar.sep.model import GostSepModel, OstSepModel
 from radar.solar_activity.model import (
-    build_mission_solar_activity,
+    MissionSolarActivity,
+    build_calculation_solar_activity,
     mission_solar_activity_monthly_wolf_numbers,
 )
-from radar.solar_activity.ost import ost_wolf_number_cycle_table
 
 
 @dataclass(frozen=True)
@@ -100,10 +100,7 @@ REGISTERED_SOURCE_MODELS: tuple[SourceModelRegistration, ...] = (
 _SOURCE_MODEL_REGISTRY: dict[
     tuple[RadiationSource, SourceModelFamily],
     SourceModelRegistration,
-] = {
-    registration.key: registration
-    for registration in REGISTERED_SOURCE_MODELS
-}
+] = {registration.key: registration for registration in REGISTERED_SOURCE_MODELS}
 
 
 def registered_source_model_families(
@@ -261,30 +258,24 @@ def _ost_sep_kwargs_from_config(
     *,
     sep_energy_grid_mev: tuple[float, ...],
     sep_hze_energy_grid_mev_per_nucleon: tuple[float, ...] | None = None,
+    solar_activity: MissionSolarActivity | None = None,
 ) -> dict[str, Any]:
     """Return constructor kwargs for configured OST/GOST SEP proton source models."""
 
-    solar_activity = build_mission_solar_activity(
-        mission=config.mission,
-        cycle_table=ost_wolf_number_cycle_table(config.mission.solar_activity_level),
-        reference_start_year=config.mission.launch_year,
-    )
+    if solar_activity is None:
+        solar_activity = build_calculation_solar_activity(config)
 
     kwargs: dict[str, Any] = {
         "energy_grid_mev": _normalized_sep_energy_grid_mev(sep_energy_grid_mev),
         "monthly_smoothed_wolf_numbers": mission_solar_activity_monthly_wolf_numbers(
             solar_activity,
         ),
-        "version": "protons_only_v1",
     }
 
     if sep_hze_energy_grid_mev_per_nucleon is not None:
-        kwargs["hze_energy_grid_mev_per_nucleon"] = (
-            _normalized_sep_hze_energy_grid_mev_per_nucleon(
-                sep_hze_energy_grid_mev_per_nucleon,
-            )
+        kwargs["hze_energy_grid_mev_per_nucleon"] = _normalized_sep_hze_energy_grid_mev_per_nucleon(
+            sep_hze_energy_grid_mev_per_nucleon,
         )
-        kwargs["version"] = "protons_hze_v1"
 
     return kwargs
 
@@ -304,6 +295,8 @@ def source_model_instances_for_config(
 
     sep_kwargs: dict[str, Any] | None = None
     gcr_kwargs: dict[str, Any] | None = None
+    erb_kwargs: dict[str, Any] | None = None
+    solar_activity = build_calculation_solar_activity(config)
 
     if gcr_energy_grid_mev_per_nucleon is not None:
         gcr_kwargs = {
@@ -312,38 +305,52 @@ def source_model_instances_for_config(
                     gcr_energy_grid_mev_per_nucleon,
                 )
             ),
+            "solar_activity": solar_activity,
         }
+    elif config.source_model_selection.gcr_model_family in (
+        SourceModelFamily.OST_134_1044_2007,
+        SourceModelFamily.GOST_GCR,
+    ):
+        gcr_kwargs = {"solar_activity": solar_activity}
+
+    if config.source_model_selection.erb_model_family in (
+        SourceModelFamily.OST_134_1044_2007,
+        SourceModelFamily.AE8_AP8,
+    ):
+        erb_kwargs = {"solar_activity": solar_activity}
+        if config.source_model_selection.erb_model_family is SourceModelFamily.AE8_AP8:
+            # Production AE8/AP8 blending follows the same explicit OST G.1
+            # calendar as SEP/GCR.  The model's legacy ``cosrad`` default is
+            # retained for direct external-regression use.
+            erb_kwargs["solar_mode"] = "ost"
 
     if sep_hze_energy_grid_mev_per_nucleon is not None and sep_energy_grid_mev is None:
         msg = "SEP HZE energy grid requires SEP proton energy grid."
         raise ValueError(msg)
 
-    if (
-        sep_energy_grid_mev is not None
-        and config.source_model_selection.sep_model_family
-        in (SourceModelFamily.OST_134_1044_2007, SourceModelFamily.GOST_SEP)
+    if sep_energy_grid_mev is not None and config.source_model_selection.sep_model_family in (
+        SourceModelFamily.OST_134_1044_2007,
+        SourceModelFamily.GOST_SEP,
     ):
         sep_kwargs = _ost_sep_kwargs_from_config(
             config,
             sep_energy_grid_mev=sep_energy_grid_mev,
-            sep_hze_energy_grid_mev_per_nucleon=(
-                sep_hze_energy_grid_mev_per_nucleon
-            ),
+            sep_hze_energy_grid_mev_per_nucleon=(sep_hze_energy_grid_mev_per_nucleon),
+            solar_activity=solar_activity,
         )
 
     return source_model_instances_for_selection(
         config.source_model_selection,
         sep_kwargs=sep_kwargs,
         gcr_kwargs=gcr_kwargs,
+        erb_kwargs=erb_kwargs,
     )
 
 
 def source_model_instances_for_pipeline_config(
     config: CalculationConfig,
     *,
-    sep_energy_grid_mev: tuple[float, ...] | None = (
-        DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV
-    ),
+    sep_energy_grid_mev: tuple[float, ...] | None = (DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV),
     sep_hze_energy_grid_mev_per_nucleon: tuple[float, ...] | None = (
         DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
     ),
@@ -372,6 +379,7 @@ def source_model_classes_for_profile(
         bundle.gcr.model_class,
         bundle.erb.model_class,
     )
+
 
 def source_model_bundle_for_selection(
     selection: SourceModelSelectionConfig,

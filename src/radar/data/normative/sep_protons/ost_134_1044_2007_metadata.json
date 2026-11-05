@@ -14,5 +14,10 @@
     "Б.8"
   ],
   "description": "Параметры протонных спектров СКЛ по приложению Б.",
-  "validation_status": "checked"
+  "validation_status": "verified_source_exact",
+  "verification_method": "full_cell_comparison",
+  "verified_cells": 560,
+  "mismatches": 0,
+  "pdf_pages": "101-105",
+  "printed_pages": "95-99"
 }

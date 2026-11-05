@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from radar.core.log import LogLevel
-from radar.core.products import SpectrumProduct
+from radar.core.products import SpectrumProduct, select_products_for_assessment_mode
 from radar.core.profiles import (
     profile_uses_ost_134_1044_2007,
     validate_source_model_metadata_for_profile,
@@ -14,7 +14,7 @@ from radar.core.project import CalculationConfig
 from radar.core.result import CalculationResult, ComponentStatus, ModelInfo
 from radar.core.spectra import Spectrum1D
 from radar.core.source_products import validate_products_match_spectra_and_source
-from radar.core.types import Particle, RadiationProductKind, RadiationSource
+from radar.core.types import AssessmentMode, Particle, RadiationProductKind, RadiationSource
 from radar.erb.model import (
     ErbModelInput,
     ErbModelProtocol,
@@ -34,15 +34,33 @@ from radar.erb.shielding import (
 )
 from radar.output_tables import OutputTable
 from radar.shielding.resources import load_normative_shielding_tables
+from radar.solar_activity.model import build_calculation_solar_activity
 
 ERB_PIPELINE_COMPONENT = "erb_pipeline"
 ERB_MODEL_COMPONENT = "erb_model"
 ERB_SHIELDING_COMPONENT = "erb_shielding"
 ERB_OUTPUT_TABLES_COMPONENT = "erb_output_tables"
-UNVERSIONED_MODEL = "unversioned"
 ERB_SHIELDING_MODEL = "erb_al_shielding"
 ERB_SHIELDING_MODEL_VERSION = "al_spherical_csda_proton_secondary_electron_primary_v1"
 ERB_SHIELDING_DOCUMENT = "RADAR shielding normative tables"
+
+
+def _incomplete_reasons_from_products(
+    products: tuple[SpectrumProduct, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            reason
+            for product in products
+            for reason in product.spectrum.incomplete_reasons
+        )
+    )
+
+
+def _merge_incomplete_reasons(
+    *reason_groups: tuple[str, ...],
+) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(reason for group in reason_groups for reason in group))
 
 
 def _table_id_float_token(value: float) -> str:
@@ -54,10 +72,7 @@ def _prefixed_output_tables(
     prefix: str,
     tables: tuple[OutputTable, ...],
 ) -> tuple[OutputTable, ...]:
-    return tuple(
-        replace(table, table_id=f"{prefix}_{table.table_id}")
-        for table in tables
-    )
+    return tuple(replace(table, table_id=f"{prefix}_{table.table_id}") for table in tables)
 
 
 def _shielding_table_prefix(
@@ -65,10 +80,17 @@ def _shielding_table_prefix(
     thickness_g_cm2: float,
     product_kind: RadiationProductKind,
 ) -> str:
-    return (
-        f"erb_t{_table_id_float_token(thickness_g_cm2)}_"
-        f"{product_kind.value}"
-    )
+    return f"erb_t{_table_id_float_token(thickness_g_cm2)}_{product_kind.value}"
+
+
+def _structured_chain_derives_from(
+    spectrum: Spectrum1D,
+    source_spectrum: Spectrum1D,
+) -> bool:
+    source_chain = source_spectrum.transformation_chain
+    if not source_chain:
+        return bool(spectrum.transformation_chain)
+    return spectrum.transformation_chain[: len(source_chain)] == source_chain
 
 
 def _validate_pipeline_spectra_derived_from_model_result(
@@ -84,14 +106,12 @@ def _validate_pipeline_spectra_derived_from_model_result(
         msg = "ERB pipeline spectra must match or derive from ERB model result spectra."
         raise ValueError(msg)
 
-    model_names = tuple(spectrum.model for spectrum in model_spectra)
-
     for spectrum in spectra[len(model_spectra) :]:
         validate_erb_energy_spectrum(spectrum)
 
         if any(
-            spectrum.model.startswith(f"{model_name}+")
-            for model_name in model_names
+            _structured_chain_derives_from(spectrum, model_spectrum)
+            for model_spectrum in model_spectra
         ):
             continue
 
@@ -151,10 +171,7 @@ def _calculate_erb_shielding_by_thickness(
             shielded_product = SpectrumProduct(
                 kind=product.kind,
                 spectrum=shielded_spectrum,
-                label=(
-                    f"{source_label} behind Al shield "
-                    f"{thickness_g_cm2:g} g/cm^2"
-                ),
+                label=(f"{source_label} behind Al shield {thickness_g_cm2:g} g/cm^2"),
             )
             shielding_results.append(
                 ErbShieldingPipelineProduct(
@@ -172,10 +189,21 @@ def _erb_pipeline_output_tables(
     *,
     on_orbit_products: tuple[SpectrumProduct, ...],
     shielding_by_thickness: tuple[ErbShieldingPipelineProduct, ...],
+    assessment_mode: AssessmentMode,
 ) -> tuple[OutputTable, ...]:
-    tables: list[OutputTable] = list(erb_product_output_tables(on_orbit_products))
+    selected_on_orbit = select_products_for_assessment_mode(
+        on_orbit_products,
+        assessment_mode,
+        allow_untyped_legacy_diagnostics=True,
+    )
+    if not selected_on_orbit:
+        return ()
+    allowed_kinds = {product.kind for product in selected_on_orbit}
+    tables: list[OutputTable] = list(erb_product_output_tables(selected_on_orbit))
 
     for shielding_result in shielding_by_thickness:
+        if shielding_result.source_product.kind not in allowed_kinds:
+            continue
         prefix = _shielding_table_prefix(
             thickness_g_cm2=shielding_result.thickness_g_cm2,
             product_kind=shielding_result.source_product.kind,
@@ -225,6 +253,7 @@ class ErbPipelineResult:
     on_orbit_products: tuple[SpectrumProduct, ...] = ()
     shielding_by_thickness: tuple[ErbShieldingPipelineProduct, ...] = ()
     shielded_products: tuple[SpectrumProduct, ...] = ()
+    assessment_products: tuple[SpectrumProduct, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.spectra:
@@ -250,6 +279,22 @@ class ErbPipelineResult:
             msg = "ERB pipeline result must contain at least one radiation product."
             raise ValueError(msg)
 
+        if any(product.spectrum.axis_kind is not None for product in on_orbit_products):
+            for product in on_orbit_products:
+                product.validate_calculation_contract()
+
+        assessment_products = self.assessment_products or select_products_for_assessment_mode(
+            products,
+            self.calculation_result.config.assessment_mode,
+            allow_untyped_legacy_diagnostics=True,
+        )
+        if not assessment_products:
+            msg = (
+                "ERB pipeline produced no products for assessment mode "
+                f"{self.calculation_result.config.assessment_mode.value}."
+            )
+            raise ValueError(msg)
+
         validate_products_match_spectra_and_source(
             products=products,
             spectra=self.spectra,
@@ -259,6 +304,33 @@ class ErbPipelineResult:
 
         object.__setattr__(self, "products", products)
         object.__setattr__(self, "on_orbit_products", on_orbit_products)
+        object.__setattr__(self, "assessment_products", assessment_products)
+
+    def production_release_products(self) -> tuple[SpectrumProduct, ...]:
+        """Return selected products only after strict production validation."""
+
+        assessment_mode = self.calculation_result.config.assessment_mode
+        selected_on_orbit_products = select_products_for_assessment_mode(
+            self.on_orbit_products,
+            assessment_mode,
+        )
+        selected_shielded_products = select_products_for_assessment_mode(
+            self.shielded_products,
+            assessment_mode,
+        )
+        incomplete_reasons = _merge_incomplete_reasons(
+            _incomplete_reasons_from_products(selected_on_orbit_products),
+            _incomplete_reasons_from_products(selected_shielded_products),
+        )
+        if incomplete_reasons:
+            msg = "ERB pipeline is incomplete: " + "; ".join(incomplete_reasons)
+            raise ValueError(msg)
+
+        return select_products_for_assessment_mode(
+            self.products,
+            assessment_mode,
+            validate_for_release=True,
+        )
 
 
 def calculate_erb_pipeline(
@@ -290,50 +362,80 @@ def calculate_erb_pipeline(
         profile=config.methodology.profile,
     )
 
-    erb_model_input = ErbModelInput(config=config)
+    solar_activity = build_calculation_solar_activity(config)
+    erb_model_input = ErbModelInput(
+        config=config,
+        solar_activity=solar_activity,
+    )
     erb_model_result = erb_model.calculate(erb_model_input)
+    on_orbit_products = erb_model_result.products
+    selected_on_orbit_products = select_products_for_assessment_mode(
+        on_orbit_products,
+        config.assessment_mode,
+    )
+    source_incomplete_reasons = _incomplete_reasons_from_products(
+        selected_on_orbit_products,
+    )
 
     calculation_result = calculation_result.set_component_status(
         component=ERB_MODEL_COMPONENT,
-        status=ComponentStatus.COMPLETED,
+        status=(
+            ComponentStatus.INCOMPLETE
+            if source_incomplete_reasons
+            else ComponentStatus.COMPLETED
+        ),
     )
 
     calculation_result = calculation_result.set_model_info(
         ModelInfo(
             name=erb_model_result.model,
-            version=UNVERSIONED_MODEL,
+            version=erb_model.metadata.version,
             status="calculated",
             source=erb_model_result.document,
         )
     )
 
+    model_log_details = {
+        "model": erb_model_result.model,
+        "document": erb_model_result.document,
+        "lifetime_years": str(erb_model_result.lifetime_years),
+        "kp": str(erb_model_result.kp),
+        "spectrum_count": str(len(erb_model_result.spectra)),
+    }
+    model_log_details.update(dict(erb_model_result.method_metadata))
     calculation_result = calculation_result.add_log_entry(
         level=LogLevel.INFO,
         stage=ERB_MODEL_COMPONENT,
         message="ERB spectra calculated.",
-        details={
-            "model": erb_model_result.model,
-            "document": erb_model_result.document,
-            "lifetime_years": str(erb_model_result.lifetime_years),
-            "kp": str(erb_model_result.kp),
-            "spectrum_count": str(len(erb_model_result.spectra)),
-        },
+        details=model_log_details,
     )
+    if source_incomplete_reasons:
+        calculation_result = calculation_result.add_log_entry(
+            level=LogLevel.WARNING,
+            stage=ERB_MODEL_COMPONENT,
+            message="ERB source spectra are incomplete.",
+            details={"reasons": "; ".join(source_incomplete_reasons)},
+        )
 
-    on_orbit_products = erb_model_result.products
     products = on_orbit_products
     shielding_by_thickness: tuple[ErbShieldingPipelineProduct, ...] = ()
     shielded_products: tuple[SpectrumProduct, ...] = ()
+    shielding_incomplete_reasons: tuple[str, ...] = ()
 
     if profile_uses_ost_134_1044_2007(config.methodology.profile):
+        shielding_input_products = select_products_for_assessment_mode(
+            on_orbit_products,
+            config.assessment_mode,
+            allow_untyped_legacy_diagnostics=True,
+        )
         proton_products = tuple(
             product
-            for product in on_orbit_products
+            for product in shielding_input_products
             if product.spectrum.particle is Particle.PROTON
         )
         electron_products = tuple(
             product
-            for product in on_orbit_products
+            for product in shielding_input_products
             if product.spectrum.particle is Particle.ELECTRON
         )
 
@@ -355,14 +457,21 @@ def calculate_erb_pipeline(
         )
 
         shielding_by_thickness = _calculate_erb_shielding_by_thickness(
-            products=on_orbit_products,
+            products=shielding_input_products,
             thicknesses_g_cm2=config.shielding.thicknesses_g_cm2,
         )
         shielded_products = tuple(
-            shielding_result.shielded_product
-            for shielding_result in shielding_by_thickness
+            shielding_result.shielded_product for shielding_result in shielding_by_thickness
         )
         products = (*on_orbit_products, *shielded_products)
+        selected_shielded_products = select_products_for_assessment_mode(
+            shielded_products,
+            config.assessment_mode,
+        )
+        shielding_incomplete_reasons = _merge_incomplete_reasons(
+            source_incomplete_reasons,
+            _incomplete_reasons_from_products(selected_shielded_products),
+        )
 
         calculation_result = calculation_result.set_model_info(
             ModelInfo(
@@ -374,7 +483,11 @@ def calculate_erb_pipeline(
         )
         calculation_result = calculation_result.set_component_status(
             component=ERB_SHIELDING_COMPONENT,
-            status=ComponentStatus.COMPLETED,
+            status=(
+                ComponentStatus.INCOMPLETE
+                if shielding_incomplete_reasons
+                else ComponentStatus.COMPLETED
+            ),
         )
         calculation_result = calculation_result.add_log_entry(
             level=LogLevel.INFO,
@@ -385,10 +498,18 @@ def calculate_erb_pipeline(
                 "thickness_count": str(len(config.shielding.thicknesses_g_cm2)),
             },
         )
+        if shielding_incomplete_reasons:
+            calculation_result = calculation_result.add_log_entry(
+                level=LogLevel.WARNING,
+                stage=ERB_SHIELDING_COMPONENT,
+                message="ERB shielding products are incomplete.",
+                details={"reasons": "; ".join(shielding_incomplete_reasons)},
+            )
 
     output_tables = _erb_pipeline_output_tables(
         on_orbit_products=on_orbit_products,
         shielding_by_thickness=shielding_by_thickness,
+        assessment_mode=config.assessment_mode,
     )
 
     calculation_result = calculation_result.set_component_status(
@@ -420,15 +541,28 @@ def calculate_erb_pipeline(
         },
     )
 
+    pipeline_incomplete_reasons = _merge_incomplete_reasons(
+        source_incomplete_reasons,
+        shielding_incomplete_reasons,
+    )
     calculation_result = calculation_result.set_component_status(
         component=ERB_PIPELINE_COMPONENT,
-        status=ComponentStatus.COMPLETED,
+        status=(
+            ComponentStatus.INCOMPLETE
+            if pipeline_incomplete_reasons
+            else ComponentStatus.COMPLETED
+        ),
     )
 
     calculation_result = calculation_result.add_log_entry(
         level=LogLevel.INFO,
         stage=ERB_PIPELINE_COMPONENT,
         message="ERB pipeline completed.",
+        details=(
+            {"incomplete_reasons": "; ".join(pipeline_incomplete_reasons)}
+            if pipeline_incomplete_reasons
+            else None
+        ),
     )
 
     spectra = tuple(product.spectrum for product in products)

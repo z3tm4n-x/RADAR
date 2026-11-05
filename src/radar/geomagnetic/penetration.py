@@ -24,6 +24,9 @@ class PenetrationFunction:
     values: tuple[float, ...]
     model: str
     kp: int = DEFAULT_KP
+    model_version: str = "1"
+    parameters: tuple[tuple[str, str], ...] = ()
+    incomplete_reasons: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if len(self.values) != len(self.rigidity_grid.values_gv):
@@ -49,6 +52,17 @@ class PenetrationFunction:
         if not self.model:
             msg = "Penetration model name must not be empty."
             raise ValueError(msg)
+
+        if not self.model_version.strip():
+            raise ValueError("Penetration model version must not be blank.")
+        if any(not key.strip() or not value.strip() for key, value in self.parameters):
+            raise ValueError("Penetration parameter names and values must not be blank.")
+        if len({key for key, _ in self.parameters}) != len(self.parameters):
+            raise ValueError("Penetration parameter names must be unique.")
+        if any(not reason.strip() for reason in self.incomplete_reasons):
+            raise ValueError("Penetration incomplete reasons must not be blank.")
+        if len(set(self.incomplete_reasons)) != len(self.incomplete_reasons):
+            raise ValueError("Penetration incomplete reasons must be unique.")
 
     def value_at(self, rigidity_gv: float) -> float:
         """Return linearly interpolated penetration value."""

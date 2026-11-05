@@ -19,6 +19,8 @@ from radar.erb.field import (
     MagneticFieldVector,
     magnetic_field_at_orbit_sample,
     magnetic_field_vector_km,
+    ost_l_shell_b_over_b0,
+    shifted_dipole_l_shell_b_over_b0,
     trace_l_shell_b_over_b0,
 )
 from radar.erb.igrf import IgrfCoefficients, parse_igrf_coefficients
@@ -88,6 +90,8 @@ __all__ = [
     "StaticErbModel",
     "magnetic_field_at_orbit_sample",
     "magnetic_field_vector_km",
+    "ost_l_shell_b_over_b0",
+    "shifted_dipole_l_shell_b_over_b0",
     "load_igrf14_coefficients",
     "load_ost_erb_appendix_a_tables",
     "parse_igrf_coefficients",

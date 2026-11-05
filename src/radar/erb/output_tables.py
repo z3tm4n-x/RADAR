@@ -17,7 +17,7 @@ from radar.erb.shielding import ErbElectronShieldingResult, ErbProtonShieldingRe
 from radar.output_tables import OutputTable, spectrum_output_table
 
 ERB_OUTPUT_LOCATION_ON_ORBIT = "on_orbit"
-ERB_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shielding"
+ERB_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shield"
 ERB_OUTPUT_SHIELDING_NOT_APPLIED = "not_applied"
 ERB_OUTPUT_SHIELDING_APPLIED = "applied"
 ERB_OUTPUT_SHIELD_MATERIAL_AL = "Al"
@@ -62,9 +62,8 @@ def _metadata_with(
 def _product_metadata(product: SpectrumProduct) -> dict[str, str]:
     spectrum = product.spectrum
 
-    return {
+    metadata = {
         "stage": "source_model",
-        "location": ERB_OUTPUT_LOCATION_ON_ORBIT,
         "shielding": ERB_OUTPUT_SHIELDING_NOT_APPLIED,
         "product_kind": product.kind.value,
         "spectrum_quantity": spectrum.quantity.value,
@@ -74,6 +73,9 @@ def _product_metadata(product: SpectrumProduct) -> dict[str, str]:
         ),
         "dose_see_dependency": ERB_OUTPUT_DOSE_SEE_DEFERRED_REASON,
     }
+    if spectrum.location is None:
+        metadata["location"] = ERB_OUTPUT_LOCATION_ON_ORBIT
+    return metadata
 
 
 def _product_table_id(product: SpectrumProduct) -> str:
@@ -141,7 +143,6 @@ def _shielding_metadata(
 ) -> dict[str, str]:
     metadata = {
         "stage": "shielding",
-        "location": ERB_OUTPUT_LOCATION_BEHIND_SHIELDING,
         "shielding": ERB_OUTPUT_SHIELDING_APPLIED,
         "shield_material": ERB_OUTPUT_SHIELD_MATERIAL_AL,
         "shield_geometry": ERB_OUTPUT_SHIELD_GEOMETRY_CENTERED_SPHERICAL_SHELL,
@@ -153,6 +154,14 @@ def _shielding_metadata(
         ),
         "dose_see_dependency": ERB_OUTPUT_DOSE_SEE_DEFERRED_REASON,
     }
+
+    output_spectrum = (
+        result.total
+        if isinstance(result, ErbProtonShieldingResult)
+        else result.primary
+    )
+    if output_spectrum.location is None:
+        metadata["location"] = ERB_OUTPUT_LOCATION_BEHIND_SHIELDING
 
     if isinstance(result, ErbProtonShieldingResult):
         metadata.update(

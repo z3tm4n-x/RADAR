@@ -1,4 +1,4 @@
-﻿"""Solar cycle helpers for RADAR."""
+"""Solar cycle helpers for RADAR."""
 
 from __future__ import annotations
 

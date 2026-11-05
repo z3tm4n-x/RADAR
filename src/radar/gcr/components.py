@@ -1,4 +1,4 @@
-﻿"""Scalar GCR, NEK and AKL component formulas."""
+"""Scalar GCR, NEK and AKL component formulas."""
 
 from __future__ import annotations
 
@@ -21,11 +21,12 @@ GOST_WOLF_2_MODULATION_SLOPE_GV: Final[float] = 4.4e-3
 GOST_MODULATION_EXPONENT: Final[float] = 4.5
 
 OST_MAIN_GCR_UNITS_NOTE: Final[str] = (
-    "OST Appendix V.1 is evaluated in the same numerical normalization as GOST: "
-    "m^-2 sr^-1 s^-1 (GeV/nucleon)^-1. The printed cm^-2/MeV unit label is "
-    "treated as a dimensional misprint; no 1e-3 normalization factor is applied "
-    "inside the main OST GCR core."
+    "OST 134-1044-2007 Appendix V.2.1 is evaluated literally: formula (V.1) "
+    "contains the 1e-3 normalization and returns directional differential flux "
+    "in cm^-2 sr^-1 s^-1 (MeV/nucleon)^-1. No GOST m^-2/GeV conversion is "
+    "applied to the strict OST branch."
 )
+OST_MAIN_GCR_NORMALIZATION: Final[float] = 1.0e-3
 
 OST_R0_WOLF_LOW_EXPONENT: Final[float] = 0.09
 OST_R0_WOLF_HIGH_COEFFICIENT: Final[float] = 4.0e-4
@@ -243,14 +244,8 @@ def ost_gcr_delay_months(
         msg = "OST solar cycle number must be positive."
         raise ValueError(msg)
 
-    t_plus = (
-        OST_DELAY_T_PLUS_COEFFICIENT_MONTHS
-        * rigidity_gv**OST_DELAY_T_PLUS_EXPONENT
-    )
-    t_minus = (
-        OST_DELAY_T_MINUS_COEFFICIENT_MONTHS
-        * rigidity_gv**OST_DELAY_T_MINUS_EXPONENT
-    )
+    t_plus = OST_DELAY_T_PLUS_COEFFICIENT_MONTHS * rigidity_gv**OST_DELAY_T_PLUS_EXPONENT
+    t_minus = OST_DELAY_T_MINUS_COEFFICIENT_MONTHS * rigidity_gv**OST_DELAY_T_MINUS_EXPONENT
     tau_ratio = max((wolf_for_tau - wolf_min) / wolf_max, 0.0)
     tau_sign = 1.0 if cycle_number % 2 == 0 else -1.0
     tau = tau_sign * tau_ratio**OST_DELAY_TAU_EXPONENT
@@ -261,9 +256,7 @@ def ost_gcr_delay_months(
 def ost_gcr_drift_m(state: OstGcrSolarState) -> float:
     """Return OST drift parameter M(W,n)."""
 
-    ratio = (state.wolf_current - state.wolf_min) / (
-        state.wolf_max - state.wolf_min
-    )
+    ratio = (state.wolf_current - state.wolf_min) / (state.wolf_max - state.wolf_min)
     ratio = _clamp(ratio, 0.0, 1.0)
 
     parity_factor = 1.0 if (state.cycle_number - 1) % 2 == 0 else -1.0
@@ -271,9 +264,7 @@ def ost_gcr_drift_m(state: OstGcrSolarState) -> float:
 
     return cast(
         float,
-        parity_factor
-        * polarity_factor
-        * (1.0 - ratio**OST_DRIFT_WOLF_EXPONENT),
+        parity_factor * polarity_factor * (1.0 - ratio**OST_DRIFT_WOLF_EXPONENT),
     )
 
 
@@ -288,8 +279,7 @@ def ost_modulation_potential_r0_gv(wolf_lagged: float) -> float:
     return cast(
         float,
         0.28 * wolf_lagged**OST_R0_WOLF_LOW_EXPONENT
-        + OST_R0_WOLF_HIGH_COEFFICIENT
-        * wolf_lagged**OST_R0_WOLF_HIGH_EXPONENT,
+        + OST_R0_WOLF_HIGH_COEFFICIENT * wolf_lagged**OST_R0_WOLF_HIGH_EXPONENT,
     )
 
 
@@ -315,16 +305,10 @@ def ost_delta_exponent(
 
     argument = beta * rigidity_gv / modulation_potential_r0_gv
 
-    return (
-        OST_DELTA_BASE
-        + OST_DELTA_DRIFT_COEFFICIENT
-        * drift_m
-        * argument
-        * exp(-argument)
-    )
+    return OST_DELTA_BASE + OST_DELTA_DRIFT_COEFFICIENT * drift_m * argument * exp(-argument)
 
 
-def ost_main_gcr_differential_flux_directional_m2_s_sr_gev(
+def ost_main_gcr_differential_flux_directional_cm2_s_sr_mev(
     *,
     kinetic_energy_gev_per_nucleon: float,
     parameters: GcrIonParameters,
@@ -333,10 +317,11 @@ def ost_main_gcr_differential_flux_directional_m2_s_sr_gev(
     """Return OST main GCR directional differential flux.
 
     Units:
-        m^-2 s^-1 sr^-1 (GeV/nucleon)^-1
+        cm^-2 s^-1 sr^-1 (MeV/nucleon)^-1
 
-    RADAR intentionally does not apply the printed OST 1e-3 factor here; see
-    ``OST_MAIN_GCR_UNITS_NOTE``.
+    The explicit ``1e-3`` multiplier is part of OST formula (V.1). It must
+    not be replaced by the GOST m^-2/GeV conversion: the OST section states
+    the same cm^-2/MeV units as the formula normalization.
     """
 
     if parameters.c == 0.0:
@@ -360,7 +345,8 @@ def ost_main_gcr_differential_flux_directional_m2_s_sr_gev(
 
     return cast(
         float,
-        parameters.c
+        OST_MAIN_GCR_NORMALIZATION
+        * parameters.c
         * parameters.mass_to_charge
         * beta ** (parameters.alpha - 1.0)
         * rigidity_gv ** (-parameters.gamma)
@@ -413,8 +399,7 @@ def ost_akl_gamma(years_from_cycle_start: float) -> float:
     return cast(
         float,
         OST_AKL_GAMMA_BASE
-        - OST_AKL_GAMMA_TIME_COEFFICIENT
-        * years_from_cycle_start**OST_AKL_GAMMA_TIME_EXPONENT,
+        - OST_AKL_GAMMA_TIME_COEFFICIENT * years_from_cycle_start**OST_AKL_GAMMA_TIME_EXPONENT,
     )
 
 
@@ -452,11 +437,7 @@ def ost_akl_differential_flux_directional_cm2_s_sr_mev(
         * years_from_cycle_start**OST_AKL_TIME_ATTENUATION_EXPONENT,
     )
 
-    return (
-        parameters.c
-        * time_attenuation
-        * exp(-gamma * kinetic_energy_mev_per_nucleon)
-    )
+    return parameters.c * time_attenuation * exp(-gamma * kinetic_energy_mev_per_nucleon)
 
 
 __all__ = [
@@ -465,6 +446,7 @@ __all__ = [
     "GOST_WOLF_1_MODULATION_SLOPE_GV",
     "GOST_WOLF_2_MODULATION_SLOPE_GV",
     "OST_MAIN_GCR_UNITS_NOTE",
+    "OST_MAIN_GCR_NORMALIZATION",
     "GostGcrSolarState",
     "OstGcrSolarState",
     "gost_main_gcr_differential_flux_directional_m2_s_sr_gev",
@@ -474,7 +456,7 @@ __all__ = [
     "ost_delta_exponent",
     "ost_gcr_delay_months",
     "ost_gcr_drift_m",
-    "ost_main_gcr_differential_flux_directional_m2_s_sr_gev",
+    "ost_main_gcr_differential_flux_directional_cm2_s_sr_mev",
     "ost_modulation_potential_r0_gv",
     "ost_nek_differential_flux_directional_cm2_s_sr_mev",
 ]

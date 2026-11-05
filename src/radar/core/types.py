@@ -9,6 +9,22 @@ class Particle(StrEnum):
     PROTON = "proton"
     ELECTRON = "electron"
     HZE = "hze"
+    MIXED_ION = "mixed_ion"
+
+
+class LetSpectrumRole(StrEnum):
+    """Physical role of a LET spectrum.
+
+    The role deliberately separates the HZE spectrum used by the direct-ion
+    SEE model from proton and mixed-particle diagnostic spectra.  Particle
+    type alone is insufficient because a mixed proton+HZE histogram must not
+    masquerade as an HZE assessment input.
+    """
+
+    HZE_SPECIES = "hze_species"
+    HZE_DIRECT_ION = "hze_direct_ion"
+    PROTON_DIAGNOSTIC = "proton_diagnostic"
+    MIXED_DIAGNOSTIC = "mixed_proton_hze_diagnostic"
 
 
 class RadiationSource(StrEnum):
@@ -24,6 +40,65 @@ class RadiationQuantityMode(StrEnum):
 
     FLUENCE = "fluence"
     FLUX = "flux"
+
+
+class AssessmentMode(StrEnum):
+    """The two user-facing RADAR spectral assessment modes."""
+
+    PEAK = "peak"
+    CUMULATIVE = "cumulative"
+
+
+class SpectrumAxisKind(StrEnum):
+    """Physical variable represented by a spectrum's abscissa."""
+
+    KINETIC_ENERGY = "kinetic_energy"
+    KINETIC_ENERGY_PER_NUCLEON = "kinetic_energy_per_nucleon"
+    LINEAR_ENERGY_TRANSFER = "linear_energy_transfer"
+
+
+class SpectrumOrdinateBasis(StrEnum):
+    """Mathematical meaning of the tabulated ordinate values."""
+
+    POINT_SAMPLE = "point_sample"
+    BIN_AVERAGE = "bin_average"
+
+
+class AngularBasis(StrEnum):
+    """Angular normalization of a spectrum.
+
+    RADAR's canonical production product is the omnidirectional spectrum
+    integrated over the full solid angle.  Directional spectra must be
+    converted before they enter that product contract.
+    """
+
+    OMNIDIRECTIONAL_4PI = "omnidirectional_4pi"
+
+
+class TemporalBasis(StrEnum):
+    """Time semantics of the ordinates in a spectral product."""
+
+    SEP_PEAK = "sep_peak"
+    SOURCE_MAXIMUM = "source_maximum"
+    MISSION_TOTAL = "mission_total"
+    MEAN_INTERNAL = "mean_internal"
+    ORBIT_AVERAGED = "orbit_averaged"
+    SOURCE_TIME_BIN = "source_time_bin"
+
+
+class SpectrumLocation(StrEnum):
+    """Physical stage at which a spectrum is defined."""
+
+    OUTSIDE_MAGNETOSPHERE = "outside_magnetosphere"
+    ON_ORBIT = "on_orbit"
+    BEHIND_SHIELD = "behind_shield"
+
+
+class SpectrumCompleteness(StrEnum):
+    """Whether every required component of a spectral product is present."""
+
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
 
 
 class RadiationProductKind(StrEnum):

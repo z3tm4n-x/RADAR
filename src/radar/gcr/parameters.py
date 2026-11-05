@@ -1,4 +1,4 @@
-﻿"""Normative GCR, NEK and AKL parameter tables."""
+"""Normative GCR, NEK and AKL parameter tables."""
 
 from __future__ import annotations
 
@@ -7,11 +7,14 @@ from math import exp, isfinite, sqrt
 from typing import Final
 
 OST_NEK_HE_BC_PRINTED: Final[float] = 6.6e-2
-OST_NEK_HE_BC_USED: Final[float] = 6.6e-3
+OST_NEK_HE_BC_ENGINEERING_ALTERNATIVE: Final[float] = 6.6e-3
+OST_NEK_HE_BC_USED: Final[float] = OST_NEK_HE_BC_PRINTED
+OST_NEK_HE_BC_VALIDATION_STATUS: Final[str] = "pending_cosrad_comparison"
+OST_NEK_HE_BC_RELEASE_ELIGIBLE: Final[bool] = False
 OST_NEK_HE_BC_CORRECTION_NOTE: Final[str] = (
-    "OST Appendix V.2 prints b_c(He)=6.6e-2; RADAR uses 6.6e-3 "
-    "as a probable misprint correction because the printed value inflates "
-    "low-energy He NEK by orders of magnitude at high solar activity."
+    "OST Appendix V.2 prints b_c(He)=6.6e-2, which is used provisionally. "
+    "The alternative 6.6e-3 is not selected. The value remains unresolved "
+    "pending an explicit comparison with COSRAD."
 )
 
 
@@ -255,7 +258,7 @@ def _gost_gamma_alpha(z: int) -> tuple[float, float]:
     if 3 <= z <= 5:
         return 3.06, 4.00
 
-    return 2.70, 3.60
+    return 2.70, 4.00
 
 
 def get_gost_gcr_ion_parameters() -> dict[str, GcrIonParameters]:
@@ -340,9 +343,7 @@ def get_ost_nek_parameters() -> dict[int, NekParameters]:
     """Return OST NEK parameters for Z=1..28."""
 
     return {
-        z: parameters
-        for z in range(1, 29)
-        if (parameters := get_ost_nek_parameter(z)) is not None
+        z: parameters for z in range(1, 29) if (parameters := get_ost_nek_parameter(z)) is not None
     }
 
 
@@ -365,8 +366,11 @@ __all__ = [
     "GcrIonParameters",
     "NekParameters",
     "OST_NEK_HE_BC_CORRECTION_NOTE",
+    "OST_NEK_HE_BC_ENGINEERING_ALTERNATIVE",
     "OST_NEK_HE_BC_PRINTED",
+    "OST_NEK_HE_BC_RELEASE_ELIGIBLE",
     "OST_NEK_HE_BC_USED",
+    "OST_NEK_HE_BC_VALIDATION_STATUS",
     "get_gost_gcr_ion_parameters",
     "get_ost_akl_parameters",
     "get_ost_gcr_ion_parameters",

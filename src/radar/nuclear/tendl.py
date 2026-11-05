@@ -5,11 +5,134 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import dataclass
+from enum import StrEnum
+from math import isfinite
 from pathlib import Path
 from typing import Iterable, Sequence
 
 ENDT_PROTON_ZAP = 1001
 EV_PER_MEV = 1.0e6
+
+
+class EndfInterpolationLaw(StrEnum):
+    """Interpolation laws retained by compact ENDF-derived resources."""
+
+    HISTOGRAM_LEFT = "histogram_left"
+    LINEAR_LINEAR = "linear_linear"
+
+
+@dataclass(frozen=True)
+class TendlMf6InterpolationMetadata:
+    """Interpolation contract for one compact MF=6 proton distribution.
+
+    The outgoing-energy ordinates in the bundled TENDL tables are ENDF
+    histogram values: ``pdf[i]`` applies on ``[E[i], E[i + 1])``.  Yield and
+    incident-energy PDF interpolation are linear between their own,
+    independent incident-energy grids.  No extrapolation is permitted.
+    """
+
+    yield_incident_energy: EndfInterpolationLaw = EndfInterpolationLaw.LINEAR_LINEAR
+    pdf_incident_energy: EndfInterpolationLaw = EndfInterpolationLaw.LINEAR_LINEAR
+    pdf_outgoing_energy: EndfInterpolationLaw = EndfInterpolationLaw.HISTOGRAM_LEFT
+
+
+DEFAULT_TENDL_MF6_INTERPOLATION = TendlMf6InterpolationMetadata()
+
+
+@dataclass(frozen=True)
+class TendlIncidentEnergySupport:
+    """Evaluated incident-proton energy domain of one TENDL operator.
+
+    Reaction thresholds inside this domain are represented by zero-valued
+    cross sections/yields.  Energies outside the evaluated domain are not
+    equivalent to a physical zero and must never be extrapolated silently.
+    """
+
+    minimum_mev: float
+    maximum_mev: float
+    dataset_ref: str
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.minimum_mev) or not isfinite(self.maximum_mev):
+            msg = "TENDL incident-energy support bounds must be finite."
+            raise ValueError(msg)
+        if self.minimum_mev < 0.0:
+            msg = "TENDL incident-energy support minimum must be non-negative."
+            raise ValueError(msg)
+        if self.maximum_mev <= self.minimum_mev:
+            msg = "TENDL incident-energy support maximum must exceed its minimum."
+            raise ValueError(msg)
+        if not self.dataset_ref.strip():
+            msg = "TENDL incident-energy support dataset reference must not be empty."
+            raise ValueError(msg)
+
+    def contains(self, energy_mev: float) -> bool:
+        """Return whether an energy is inside the evaluated domain."""
+
+        return (
+            isfinite(energy_mev)
+            and self.minimum_mev <= energy_mev <= self.maximum_mev
+        )
+
+    def require_contains(self, energy_mev: float, *, operator: str) -> None:
+        """Reject scalar evaluation outside support instead of extrapolating."""
+
+        if self.contains(energy_mev):
+            return
+        msg = (
+            f"{operator} incident energy {energy_mev:g} MeV is outside TENDL "
+            f"support [{self.minimum_mev:g}, {self.maximum_mev:g}] MeV."
+        )
+        raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class TendlIncidentEnergyCoverage:
+    """Typed coverage result for energies carrying a nonzero contribution."""
+
+    support: TendlIncidentEnergySupport
+    relevant_minimum_mev: float | None
+    relevant_maximum_mev: float | None
+    unsupported_minimum_mev: float | None
+    unsupported_maximum_mev: float | None
+
+    @property
+    def complete(self) -> bool:
+        """Return whether every relevant incident energy is evaluated."""
+
+        return self.unsupported_minimum_mev is None
+
+    def incomplete_reason(self, *, operator: str) -> str | None:
+        """Return a stable release-blocking reason, if coverage is incomplete."""
+
+        if self.complete:
+            return None
+        return (
+            f"{operator} is incomplete: nonzero transported proton contribution exists "
+            f"outside TENDL incident-energy support "
+            f"[{self.support.minimum_mev:g}, {self.support.maximum_mev:g}] MeV"
+        )
+
+
+def assess_tendl_incident_energy_coverage(
+    *,
+    relevant_energies_mev: Iterable[float],
+    support: TendlIncidentEnergySupport,
+) -> TendlIncidentEnergyCoverage:
+    """Classify only energies already known to carry a nonzero contribution."""
+
+    relevant = tuple(relevant_energies_mev)
+    if any(not isfinite(energy) or energy < 0.0 for energy in relevant):
+        msg = "Relevant TENDL incident energies must be finite and non-negative."
+        raise ValueError(msg)
+    unsupported = tuple(energy for energy in relevant if not support.contains(energy))
+    return TendlIncidentEnergyCoverage(
+        support=support,
+        relevant_minimum_mev=min(relevant, default=None),
+        relevant_maximum_mev=max(relevant, default=None),
+        unsupported_minimum_mev=min(unsupported, default=None),
+        unsupported_maximum_mev=max(unsupported, default=None),
+    )
 
 
 @dataclass(frozen=True)
@@ -29,6 +152,7 @@ class TendlMf6ProtonYieldPoint:
     product_index: int
     incident_energy_mev: float
     yield_value: float
+    interpolation_law: EndfInterpolationLaw = EndfInterpolationLaw.LINEAR_LINEAR
 
 
 @dataclass(frozen=True)
@@ -40,6 +164,12 @@ class TendlMf6ProtonPdfPoint:
     incident_energy_mev: float
     emitted_energy_mev: float
     pdf_per_mev: float
+    incident_energy_interpolation_law: EndfInterpolationLaw = (
+        EndfInterpolationLaw.LINEAR_LINEAR
+    )
+    outgoing_energy_interpolation_law: EndfInterpolationLaw = (
+        EndfInterpolationLaw.HISTOGRAM_LEFT
+    )
 
 
 @dataclass(frozen=True)
@@ -59,6 +189,7 @@ class _EndfTab1:
     l2: int
     nr: int
     np: int
+    interpolation_regions: tuple[tuple[int, int], ...]
     x: tuple[float, ...]
     y: tuple[float, ...]
 
@@ -71,6 +202,7 @@ class _EndfTab2:
     l2: int
     nr: int
     nz: int
+    interpolation_regions: tuple[tuple[int, int], ...]
 
 
 @dataclass(frozen=True)
@@ -168,6 +300,55 @@ def _parse_values(
     return tuple(values[:count]), current_index
 
 
+def _parse_interpolation_regions(
+    values: tuple[float, ...],
+    *,
+    point_count: int,
+    context: str,
+) -> tuple[tuple[int, int], ...]:
+    if len(values) % 2 != 0:
+        msg = f"{context} interpolation metadata must contain NBT/INT pairs."
+        raise ValueError(msg)
+
+    regions: list[tuple[int, int]] = []
+    previous_boundary = 0
+    for raw_boundary, raw_law in zip(values[0::2], values[1::2], strict=True):
+        boundary = int(raw_boundary)
+        law = int(raw_law)
+        if float(boundary) != raw_boundary or float(law) != raw_law:
+            msg = f"{context} interpolation NBT/INT values must be integers."
+            raise ValueError(msg)
+        if boundary <= previous_boundary or boundary > point_count:
+            msg = f"{context} interpolation boundaries are invalid."
+            raise ValueError(msg)
+        regions.append((boundary, law))
+        previous_boundary = boundary
+
+    if not regions or regions[-1][0] != point_count:
+        msg = f"{context} interpolation regions must cover all {point_count} points."
+        raise ValueError(msg)
+
+    return tuple(regions)
+
+
+def _require_endf_interpolation_law(
+    regions: tuple[tuple[int, int], ...],
+    *,
+    supported_int: int,
+    supported_name: str,
+    context: str,
+) -> None:
+    unsupported = tuple(
+        (boundary, law) for boundary, law in regions if law != supported_int
+    )
+    if unsupported:
+        msg = (
+            f"{context} uses unsupported ENDF interpolation regions {unsupported!r}; "
+            f"only {supported_name} (INT={supported_int}) is implemented."
+        )
+        raise ValueError(msg)
+
+
 def _section_lines(
     path: str | Path,
     *,
@@ -222,7 +403,12 @@ def _parse_tab1(
     c1, c2, l1, l2, nr, np_count = _parse_cont(lines[index])
     index += 1
 
-    _, index = _parse_values(lines, index, 2 * nr)
+    interpolation_values, index = _parse_values(lines, index, 2 * nr)
+    interpolation_regions = _parse_interpolation_regions(
+        interpolation_values,
+        point_count=np_count,
+        context="ENDF TAB1",
+    )
     values, index = _parse_values(lines, index, 2 * np_count)
 
     return (
@@ -233,6 +419,7 @@ def _parse_tab1(
             l2=l2,
             nr=nr,
             np=np_count,
+            interpolation_regions=interpolation_regions,
             x=values[0::2],
             y=values[1::2],
         ),
@@ -246,9 +433,25 @@ def _parse_tab2(
 ) -> tuple[_EndfTab2, int]:
     c1, c2, l1, l2, nr, nz = _parse_cont(lines[index])
     index += 1
-    _, index = _parse_values(lines, index, 2 * nr)
+    interpolation_values, index = _parse_values(lines, index, 2 * nr)
+    interpolation_regions = _parse_interpolation_regions(
+        interpolation_values,
+        point_count=nz,
+        context="ENDF TAB2",
+    )
 
-    return _EndfTab2(c1=c1, c2=c2, l1=l1, l2=l2, nr=nr, nz=nz), index
+    return (
+        _EndfTab2(
+            c1=c1,
+            c2=c2,
+            l1=l1,
+            l2=l2,
+            nr=nr,
+            nz=nz,
+            interpolation_regions=interpolation_regions,
+        ),
+        index,
+    )
 
 
 def _parse_list(
@@ -292,6 +495,12 @@ def parse_mf3_cross_section_points(
             continue
 
         tab1, _ = _parse_tab1(lines, 1)
+        _require_endf_interpolation_law(
+            tab1.interpolation_regions,
+            supported_int=2,
+            supported_name="linear-linear",
+            context=f"MF=3 MT={mt}",
+        )
 
         for energy_ev, sigma_barn in zip(tab1.x, tab1.y, strict=True):
             if energy_ev < 0.0:
@@ -344,7 +553,12 @@ def _parse_mf6_products_for_mt(
         zap, _, _, law, nr, np_count = _parse_cont(lines[index])
         index += 1
 
-        _, index = _parse_values(lines, index, 2 * nr)
+        yield_interpolation_values, index = _parse_values(lines, index, 2 * nr)
+        yield_interpolation_regions = _parse_interpolation_regions(
+            yield_interpolation_values,
+            point_count=np_count,
+            context=f"MF=6 MT={mt} product={product_index} yield",
+        )
         yield_values, index = _parse_values(lines, index, 2 * np_count)
 
         yield_points = tuple(
@@ -406,7 +620,34 @@ def _parse_mf6_products_for_mt(
 
         rounded_zap = int(round(zap))
 
-        if rounded_zap == target_zap and law == 1 and pdf_points:
+        if rounded_zap == target_zap:
+            if law != 1:
+                msg = (
+                    f"MF=6 MT={mt} emitted-proton product uses unsupported LAW={law}; "
+                    "only LAW=1 is implemented."
+                )
+                raise ValueError(msg)
+            _require_endf_interpolation_law(
+                yield_interpolation_regions,
+                supported_int=2,
+                supported_name="linear-linear",
+                context=f"MF=6 MT={mt} product={product_index} yield",
+            )
+            _require_endf_interpolation_law(
+                tab2.interpolation_regions,
+                supported_int=2,
+                supported_name="linear-linear",
+                context=f"MF=6 MT={mt} product={product_index} incident-energy PDF",
+            )
+            if tab2.l2 != 1:
+                msg = (
+                    f"MF=6 MT={mt} product={product_index} outgoing-energy PDF uses "
+                    f"unsupported ENDF LEP={tab2.l2}; only histogram-left (LEP=1) "
+                    "is implemented."
+                )
+                raise ValueError(msg)
+
+        if rounded_zap == target_zap and pdf_points:
             products.append(
                 _ParsedMf6Product(
                     mt=mt,
@@ -496,7 +737,15 @@ def convert_tendl_p_al27_to_csvs(
 
     with yield_path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(("mt", "product_index", "incident_energy_mev", "yield"))
+        writer.writerow(
+            (
+                "mt",
+                "product_index",
+                "incident_energy_mev",
+                "yield",
+                "yield_interpolation",
+            )
+        )
         for yield_point in yield_points:
             writer.writerow(
                 (
@@ -504,12 +753,23 @@ def convert_tendl_p_al27_to_csvs(
                     yield_point.product_index,
                     yield_point.incident_energy_mev,
                     yield_point.yield_value,
+                    yield_point.interpolation_law.value,
                 )
             )
 
     with pdf_path.open("w", encoding="utf-8", newline="") as file:
         writer = csv.writer(file)
-        writer.writerow(("mt", "product_index", "incident_energy_mev", "emitted_energy_mev", "pdf_per_mev"))
+        writer.writerow(
+            (
+                "mt",
+                "product_index",
+                "incident_energy_mev",
+                "emitted_energy_mev",
+                "pdf_per_mev",
+                "pdf_incident_interpolation",
+                "pdf_outgoing_interpolation",
+            )
+        )
         for pdf_point in pdf_points:
             writer.writerow(
                 (
@@ -518,6 +778,8 @@ def convert_tendl_p_al27_to_csvs(
                     pdf_point.incident_energy_mev,
                     pdf_point.emitted_energy_mev,
                     pdf_point.pdf_per_mev,
+                    pdf_point.incident_energy_interpolation_law.value,
+                    pdf_point.outgoing_energy_interpolation_law.value,
                 )
             )
 

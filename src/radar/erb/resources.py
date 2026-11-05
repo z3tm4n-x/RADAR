@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from importlib import resources
 
+from radar.data.integrity import validate_normative_resource_integrity
 from radar.erb.constants import DEFAULT_IGRF_EPOCH
 from radar.erb.igrf import IgrfCoefficients, parse_igrf_coefficients
 from radar.erb.radbelt import RadbeltAscMap, parse_radbelt_asc_text
@@ -31,6 +32,7 @@ def load_igrf14_coefficients(
 ) -> IgrfCoefficients:
     """Load IGRF-14 coefficients from package resources."""
 
+    validate_normative_resource_integrity(ERB_IGRF14_RESOURCE_NAME)
     resource = resources.files("radar.data.normative").joinpath(
         ERB_IGRF14_RESOURCE_NAME
     )
@@ -49,6 +51,7 @@ def load_radbelt_asc_map(
 ) -> RadbeltAscMap:
     """Load a RADBELT AE8/AP8 ASC map from package resources."""
 
+    validate_normative_resource_integrity(resource_name)
     resource = resources.files("radar.data.normative").joinpath(resource_name)
     text = resource.read_bytes().decode("ascii", errors="ignore")
 

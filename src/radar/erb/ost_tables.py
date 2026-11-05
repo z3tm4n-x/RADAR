@@ -11,6 +11,7 @@ from math import isfinite, log10
 from typing import Literal, Mapping, Sequence, cast
 
 from radar.core.types import Particle
+from radar.data.integrity import validate_normative_resource_integrity
 
 OST_ERB_APPENDIX_A_DOCUMENT = "OST 134-1044-2007 Appendix A"
 OST_ERB_RESOURCE_NAME = "erb/ost_appendix_a_tables.json"
@@ -59,6 +60,28 @@ class OstErbInterpolationMode(StrEnum):
 
     STRICT = "strict"
     ENGINEERING = "engineering"
+
+
+@dataclass(frozen=True)
+class OstErbInterpolationSupport:
+    """Exact Appendix-A interpolation support used for one query point."""
+
+    coordinates_finite: bool
+    l_below_table: bool
+    l_above_table: bool
+    selected_shell_indices: tuple[int, ...] = ()
+    b_over_b0_above_shell_indices: tuple[int, ...] = ()
+
+    @property
+    def fully_supported(self) -> bool:
+        """Return whether every shell used by the L stencil covers B/B0."""
+
+        return (
+            self.coordinates_finite
+            and not self.l_below_table
+            and not self.l_above_table
+            and not self.b_over_b0_above_shell_indices
+        )
 
 
 @dataclass(frozen=True)
@@ -171,6 +194,45 @@ class OstErbFluxTable:
 
         return tuple(shell.l_shell for shell in self.shells)
 
+    def interpolation_support(
+        self,
+        *,
+        l_shell: float,
+        b_over_b0: float,
+    ) -> OstErbInterpolationSupport:
+        """Describe support for the same three-shell stencil used by ``vector``."""
+
+        coordinates_finite = isfinite(l_shell) and isfinite(b_over_b0)
+        if not coordinates_finite:
+            return OstErbInterpolationSupport(
+                coordinates_finite=False,
+                l_below_table=False,
+                l_above_table=False,
+            )
+
+        l_below_table = l_shell < self.l_grid[0]
+        l_above_table = l_shell > self.l_grid[-1]
+        if l_below_table or l_above_table:
+            return OstErbInterpolationSupport(
+                coordinates_finite=True,
+                l_below_table=l_below_table,
+                l_above_table=l_above_table,
+            )
+
+        selected_shell_indices = _pick3(self.l_grid, l_shell)
+        b_over_b0_above_shell_indices = tuple(
+            index
+            for index in selected_shell_indices
+            if b_over_b0 > self.shells[index].b_over_b0[-1] * (1.0 + 1.0e-12)
+        )
+        return OstErbInterpolationSupport(
+            coordinates_finite=True,
+            l_below_table=False,
+            l_above_table=False,
+            selected_shell_indices=selected_shell_indices,
+            b_over_b0_above_shell_indices=b_over_b0_above_shell_indices,
+        )
+
     def vector(
         self,
         *,
@@ -180,13 +242,17 @@ class OstErbFluxTable:
     ) -> tuple[float, ...]:
         """Return the interpolated differential flux vector."""
 
-        if not isfinite(l_shell) or not isfinite(b_over_b0):
+        support = self.interpolation_support(
+            l_shell=l_shell,
+            b_over_b0=b_over_b0,
+        )
+        if not support.coordinates_finite:
             return _zero_vector(len(self.energies_mev))
 
-        if l_shell < self.l_grid[0] or l_shell > self.l_grid[-1]:
+        if support.l_below_table or support.l_above_table:
             return _zero_vector(len(self.energies_mev))
 
-        l_indices = _pick3(self.l_grid, l_shell)
+        l_indices = support.selected_shell_indices
         selected_shells = tuple(self.shells[index] for index in l_indices)
         selected_l = tuple(shell.l_shell for shell in selected_shells)
 
@@ -359,6 +425,7 @@ def _interp_positive(
 
 
 def _resource_data() -> Mapping[str, object]:
+    validate_normative_resource_integrity(OST_ERB_RESOURCE_NAME)
     resource = resources.files("radar.data.normative").joinpath(OST_ERB_RESOURCE_NAME)
     data = json.loads(resource.read_text(encoding="utf-8"))
 
@@ -539,6 +606,7 @@ __all__ = [
     "OST_ERB_PROTON_ENERGIES_MEV",
     "OST_ERB_RESOURCE_NAME",
     "OstErbFluxTable",
+    "OstErbInterpolationSupport",
     "OstErbInterpolationMode",
     "OstErbShell",
     "OstErbTableName",

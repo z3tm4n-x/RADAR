@@ -9,6 +9,7 @@ class Unit(StrEnum):
     DIMENSIONLESS = "1"
 
     MEV = "MeV"
+    MEV_PER_NUCLEON = "MeV/nucleon"
     GEV_PER_NUCLEON = "GeV/nucleon"
     LET = "MeV*cm^2/mg"
 
@@ -19,8 +20,12 @@ class Unit(StrEnum):
     THICKNESS = "g/cm^2"
 
     DIFFERENTIAL_FLUENCE = "cm^-2 MeV^-1"
+    DIFFERENTIAL_FLUENCE_PER_NUCLEON_ENERGY = "cm^-2 (MeV/nucleon)^-1"
     INTEGRAL_FLUENCE = "cm^-2"
     DIFFERENTIAL_FLUX = "cm^-2 s^-1 MeV^-1"
+    DIFFERENTIAL_FLUX_PER_NUCLEON_ENERGY = (
+        "cm^-2 s^-1 (MeV/nucleon)^-1"
+    )
     INTEGRAL_FLUX = "cm^-2 s^-1"
     DIFFERENTIAL_FLUENCE_PER_DAY = "cm^-2 day^-1 MeV^-1"
     INTEGRAL_FLUENCE_PER_DAY = "cm^-2 day^-1"

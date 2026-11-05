@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from radar.core.products import SpectrumProduct
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 
 _ERB_ELECTRON_AL_SHIELDING_MARKER = "erb_electron_al_shielding_primary_csda"
 
@@ -87,11 +93,29 @@ def select_hze_let_dose_inputs(
         for product in products
         if _is_mission_let_fluence(product)
         and product.spectrum.source in (RadiationSource.SEP, RadiationSource.GCR)
+        and product.spectrum.particle is Particle.HZE
+        and product.spectrum.let_role is LetSpectrumRole.HZE_DIRECT_ION
+    )
+
+
+def select_mixed_ion_let_dose_inputs(
+    products: tuple[SpectrumProduct, ...],
+) -> tuple[SpectrumProduct, ...]:
+    """Return the explicitly diagnostic mixed proton+HZE LET controls."""
+
+    return tuple(
+        product
+        for product in products
+        if _is_mission_let_fluence(product)
+        and product.spectrum.source in (RadiationSource.SEP, RadiationSource.GCR)
+        and product.spectrum.particle is Particle.MIXED_ION
+        and product.spectrum.let_role is LetSpectrumRole.MIXED_DIAGNOSTIC
     )
 
 
 __all__ = [
     "select_erb_electron_shieldose2_inputs",
     "select_hze_let_dose_inputs",
+    "select_mixed_ion_let_dose_inputs",
     "select_proton_dose_inputs",
 ]

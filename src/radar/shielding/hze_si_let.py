@@ -8,11 +8,20 @@ from math import exp, isfinite, log
 from pathlib import Path
 from typing import Mapping
 
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.spectra import Spectrum1D, TransformationStep
+from radar.core.spectrum_ops import derive_spectrum, mark_spectrum_incomplete
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationSource,
+    SpectrumAxisKind,
+    SpectrumOrdinateBasis,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 
 HZE_SI_LET_MODEL = "hze_si_let_histogram"
+HZE_SI_LET_MASS_NUMBER_MISMATCH_REASON_PREFIX = "HZE Si LET ion mass mismatch"
 
 _REQUIRED_COLUMNS = {
     "z",
@@ -243,11 +252,50 @@ def hze_energy_spectrum_to_let_spectrum(
         msg = "HZE LET conversion requires an HZE spectrum."
         raise ValueError(msg)
 
-    if spectrum.x_unit is not Unit.MEV:
-        msg = "HZE LET conversion requires MeV/nucleon encoded as Unit.MEV."
+    allowed_x_units: tuple[Unit, ...]
+    if spectrum.axis_kind is None:
+        allowed_x_units = (Unit.MEV, Unit.MEV_PER_NUCLEON)
+    else:
+        allowed_x_units = (Unit.MEV_PER_NUCLEON,)
+        if spectrum.axis_kind is not SpectrumAxisKind.KINETIC_ENERGY_PER_NUCLEON:
+            msg = "Typed HZE LET conversion requires a kinetic-energy-per-nucleon axis."
+            raise ValueError(msg)
+
+    if spectrum.x_unit not in allowed_x_units:
+        msg = "HZE LET conversion requires MeV/nucleon."
         raise ValueError(msg)
 
-    energy_edges = _log_edges_from_centers(spectrum.x)
+    species = spectrum.species
+    mass_number_mismatch_reason: str | None = None
+    if species is None:
+        if spectrum.axis_kind is not None:
+            msg = "Typed HZE LET conversion requires explicit ion species metadata."
+            raise ValueError(msg)
+    else:
+        expected_mass_number = int(round(table.mass_number))
+        if (
+            species.is_aggregate
+            or species.atomic_number != table.z
+            or species.symbol.casefold() != table.symbol.casefold()
+        ):
+            msg = (
+                "HZE spectrum species does not match the selected silicon LET "
+                f"table Z={table.z}, A={expected_mass_number}, {table.symbol}."
+            )
+            raise ValueError(msg)
+        if species.mass_number != expected_mass_number:
+            mass_number_mismatch_reason = (
+                f"{HZE_SI_LET_MASS_NUMBER_MISMATCH_REASON_PREFIX} for "
+                f"Z={table.z} {table.symbol}: spectrum A={species.mass_number}, "
+                f"silicon LET table A={expected_mass_number}"
+            )
+
+    energy_edges = (
+        spectrum.bin_edges
+        if spectrum.ordinate_basis is SpectrumOrdinateBasis.BIN_AVERAGE
+        else _log_edges_from_centers(spectrum.x)
+    )
+    assert energy_edges is not None
     let_values = tuple(table.total_let_at_energy(energy) for energy in spectrum.x)
 
     output_centers = let_centers
@@ -272,16 +320,39 @@ def hze_energy_spectrum_to_let_spectrum(
     )
     output_quantity, output_unit = _output_quantity_and_unit(spectrum.quantity)
 
-    return Spectrum1D(
+    output = derive_spectrum(
+        spectrum,
         x=output_centers,
         y=output_values,
         x_unit=Unit.LET,
         y_unit=output_unit,
         quantity=output_quantity,
         particle=Particle.HZE,
-        source=spectrum.source,
         model=model or f"{spectrum.model}+Z{table.z}_{table.symbol}+{HZE_SI_LET_MODEL}",
+        axis_kind=SpectrumAxisKind.LINEAR_ENERGY_TRANSFER,
+        let_role=LetSpectrumRole.HZE_SPECIES,
+        ordinate_basis=SpectrumOrdinateBasis.BIN_AVERAGE,
+        bin_edges=output_edges,
+        transformation=TransformationStep(
+            name=HZE_SI_LET_MODEL,
+            version="1",
+            parameters=(
+                ("target", "silicon"),
+                ("z", str(table.z)),
+                ("stopping_component_used", "legacy_table_total"),
+                ("direct_ionization_let_convention", "not_qualified"),
+            ),
+        ),
+        additional_dataset_refs=("stopping/hze_si_let.csv",),
     )
+    if output.axis_kind is not None:
+        output = mark_spectrum_incomplete(
+            output,
+            "HZE silicon LET dataset is quarantined after integrity audit",
+        )
+    if mass_number_mismatch_reason is not None:
+        output = mark_spectrum_incomplete(output, mass_number_mismatch_reason)
+    return output
 
 
 def _required_text(row: Mapping[str, str | None], column: str, line_number: int) -> str:

@@ -71,7 +71,7 @@ ost_134_1044_2007,fluence,log10_c,512,0.01,10.577,B.1
 ost_134_1044_2007,fluence,log10_c,512,0.001,10.613,B.1
 ost_134_1044_2007,fluence,break_energy_mev,1,0.9,,B.2
 ost_134_1044_2007,fluence,break_energy_mev,1,0.75,,B.2
-ost_134_1044_2007,fluence,break_energy_mev,1,0.5,9.715,B.2
+ost_134_1044_2007,fluence,break_energy_mev,1,0.5,9.175,B.2
 ost_134_1044_2007,fluence,break_energy_mev,1,0.25,8.279,B.2
 ost_134_1044_2007,fluence,break_energy_mev,1,0.1,9.636,B.2
 ost_134_1044_2007,fluence,break_energy_mev,1,0.01,18.24,B.2

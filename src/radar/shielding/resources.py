@@ -7,6 +7,7 @@ from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Callable, TypeVar
 
+from radar.data.integrity import validate_normative_resource_integrity
 from radar.shielding.electron_al import (
     ElectronAlRangeEnergyTable,
     load_electron_al_range_energy_table,
@@ -55,6 +56,7 @@ class ShieldingNormativeTables:
 
 
 def _load_resource(relative_path: str, loader: Callable[[Path], _T]) -> _T:
+    validate_normative_resource_integrity(relative_path)
     resource = files(_NORMATIVE_PACKAGE).joinpath(relative_path)
 
     with as_file(resource) as path:
@@ -121,6 +123,9 @@ def load_normative_al27_nonelastic_cross_section_table(
 def load_normative_secondary_proton_kernel() -> SecondaryProtonKernel:
     """Load packaged p+Al27 secondary-proton production kernel."""
 
+    validate_normative_resource_integrity(P_AL27_MF3_XS_RESOURCE)
+    validate_normative_resource_integrity(P_AL27_MF6_PROTON_YIELD_RESOURCE)
+    validate_normative_resource_integrity(P_AL27_MF6_PROTON_PDF_RESOURCE)
     xs_resource = files(_NORMATIVE_PACKAGE).joinpath(P_AL27_MF3_XS_RESOURCE)
     yield_resource = files(_NORMATIVE_PACKAGE).joinpath(P_AL27_MF6_PROTON_YIELD_RESOURCE)
     pdf_resource = files(_NORMATIVE_PACKAGE).joinpath(P_AL27_MF6_PROTON_PDF_RESOURCE)

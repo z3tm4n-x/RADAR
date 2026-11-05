@@ -1,4 +1,4 @@
-﻿"""OST solar activity tables."""
+"""OST solar activity tables."""
 
 from __future__ import annotations
 
@@ -65,10 +65,7 @@ def ost_wolf_number_cycle_table(level: SolarActivityLevel) -> SolarCycleTable:
     )
 
     if table_ref.cycle_period_years != str(SOLAR_CYCLE_YEARS):
-        msg = (
-            "OST Wolf number table cycle period does not match "
-            f"{SOLAR_CYCLE_YEARS} years."
-        )
+        msg = f"OST Wolf number table cycle period does not match {SOLAR_CYCLE_YEARS} years."
         raise ValueError(msg)
 
     rows = load_normative_table_rows(

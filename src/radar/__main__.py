@@ -7,9 +7,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from radar.core.constants import DEFAULT_SEP_EXCEEDANCE_PROBABILITY
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig, ShieldingConfig
 from radar.core.result import InputDataInfo
-from radar.core.types import SolarActivityLevel
+from radar.core.types import AssessmentMode, DoseQuantity, OrbitType, SolarActivityLevel
+from radar.core.units import Unit
 from radar.project_file import ProjectFile
 from radar.project_io import calculate_project_file, read_project_file, save_project_file
 
@@ -97,6 +99,18 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
 
     init_parser.add_argument(
+        "--sep-exceedance-probability",
+        type=float,
+        default=DEFAULT_SEP_EXCEEDANCE_PROBABILITY,
+        help="вероятность превышения потока СКЛ; по умолчанию 0.1",
+    )
+    init_parser.add_argument(
+        "--assessment-mode",
+        choices=tuple(mode.value for mode in AssessmentMode),
+        default=AssessmentMode.CUMULATIVE.value,
+        help="режим расчёта спектров: cumulative (суммарный) или peak (пиковый)",
+    )
+    init_parser.add_argument(
         "--solar-cycle-level",
         "--solar-activity",
         dest="solar_activity",
@@ -106,9 +120,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     init_parser.add_argument(
         "--orbit",
-        choices=("geo", "circular"),
+        choices=("geo", "circular", "elliptic", "elliptical"),
         default="geo",
-        help="тип орбиты: geo или circular",
+        help="тип орбиты: geo, circular или elliptic",
     )
     init_parser.add_argument(
         "--altitude-km",
@@ -121,6 +135,24 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.0,
         help="наклонение орбиты, град",
+    )
+    init_parser.add_argument(
+        "--perigee-km",
+        type=float,
+        default=None,
+        help="высота перигея эллиптической орбиты, км",
+    )
+    init_parser.add_argument(
+        "--apogee-km",
+        type=float,
+        default=None,
+        help="высота апогея эллиптической орбиты, км",
+    )
+    init_parser.add_argument(
+        "--argument-of-perigee-deg",
+        type=float,
+        default=0.0,
+        help="аргумент перигея эллиптической орбиты, град; по умолчанию 0",
     )
     init_parser.add_argument(
         "--kp",
@@ -174,13 +206,40 @@ def _build_argument_parser() -> argparse.ArgumentParser:
 def _calculation_config_from_init_args(args: argparse.Namespace) -> CalculationConfig:
     """Create calculation configuration from init command arguments."""
 
-    altitude_km = args.altitude_km
-    if args.orbit == "geo":
-        altitude_km = _GEO_ALTITUDE_KM if altitude_km is None else altitude_km
+    if args.orbit in ("elliptic", "elliptical"):
+        if args.altitude_km is not None:
+            msg = "Для эллиптической орбиты задайте перигей и апогей вместо высоты."
+            raise ValueError(msg)
+        if args.perigee_km is None or args.apogee_km is None:
+            msg = "Для эллиптической орбиты нужны одновременно --perigee-km и --apogee-km."
+            raise ValueError(msg)
+        orbit = OrbitConfig(
+            orbit_type=OrbitType.ELLIPTIC,
+            perigee_altitude_km=args.perigee_km,
+            apogee_altitude_km=args.apogee_km,
+            inclination_deg=args.inclination_deg,
+            argument_of_perigee_deg=args.argument_of_perigee_deg,
+        )
+    else:
+        if args.perigee_km is not None or args.apogee_km is not None:
+            msg = "Для круговой и GEO-орбиты задайте --altitude-km вместо перигея и апогея."
+            raise ValueError(msg)
+        if args.argument_of_perigee_deg != 0.0:
+            msg = "Аргумент перигея применим только к эллиптической орбите."
+            raise ValueError(msg)
 
-    if altitude_km is None:
-        msg = "Для круговой орбиты укажите --altitude-km."
-        raise ValueError(msg)
+        altitude_km = args.altitude_km
+        if args.orbit == "geo":
+            altitude_km = _GEO_ALTITUDE_KM if altitude_km is None else altitude_km
+
+        if altitude_km is None:
+            msg = "Для круговой орбиты укажите --altitude-km."
+            raise ValueError(msg)
+
+        orbit = OrbitConfig.circular(
+            altitude_km=altitude_km,
+            inclination_deg=args.inclination_deg,
+        )
 
     shielding = (
         ShieldingConfig(thicknesses_g_cm2=tuple(args.shield_thicknesses))
@@ -188,18 +247,29 @@ def _calculation_config_from_init_args(args: argparse.Namespace) -> CalculationC
         else ShieldingConfig()
     )
 
+    assessment_mode = AssessmentMode(args.assessment_mode)
+    dose_quantity = (
+        DoseQuantity.DOSE_RATE
+        if assessment_mode is AssessmentMode.PEAK
+        else DoseQuantity.ACCUMULATED_DOSE
+    )
+    dose_unit = (
+        Unit.RAD_PER_SECOND if assessment_mode is AssessmentMode.PEAK else Unit.RAD
+    )
+
     return CalculationConfig(
         mission=MissionConfig(
             launch_year=args.launch_year,
             lifetime_years=args.lifetime_years,
             solar_activity_level=SolarActivityLevel(args.solar_activity),
+            sep_exceedance_probability=args.sep_exceedance_probability,
         ),
-        orbit=OrbitConfig.circular(
-            altitude_km=altitude_km,
-            inclination_deg=args.inclination_deg,
-        ),
+        orbit=orbit,
         shielding=shielding,
         kp=args.kp,
+        assessment_mode=assessment_mode,
+        dose_quantity=dose_quantity,
+        dose_unit=dose_unit,
     )
 
 
@@ -258,6 +328,7 @@ def _print_project_summary(project_file: ProjectFile) -> None:
     )
     print(f"Толщины защиты, г/см²: {thicknesses}")
     print(f"Методика: {config.methodology.profile.value}")
+    print(f"Режим расчёта: {config.assessment_mode.value}")
     print(f"Дозовая величина: {config.dose_quantity.value}")
     print(f"Единица дозы: {config.dose_unit.value}")
 
@@ -267,6 +338,7 @@ def _print_project_summary(project_file: ProjectFile) -> None:
         return
 
     print("Результат расчёта: есть")
+    print(f"Нормативная готовность: {str(result.is_release_ready()).lower()}")
     if result.input_data_info:
         for info in result.input_data_info:
             _print_input_data_info(info)

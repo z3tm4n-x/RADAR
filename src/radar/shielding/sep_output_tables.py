@@ -14,7 +14,7 @@ from radar.shielding.sep_hze import SepHzeShieldingResult
 from radar.shielding.sep_let import SepLetProductsResult
 from radar.shielding.sep_proton import SepProtonShieldingResult
 
-SEP_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shielding"
+SEP_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shield"
 SEP_OUTPUT_SHIELD_MATERIAL_AL = "Al"
 SEP_OUTPUT_SHIELD_GEOMETRY_CENTERED_SPHERICAL_SHELL = "centered_spherical_shell"
 SEP_OUTPUT_DOSE_STATUS_NOT_CALCULATED = "not_calculated"
@@ -159,8 +159,9 @@ def sep_let_output_tables(
     *,
     result: SepLetProductsResult,
     thickness_g_cm2: float,
+    include_diagnostics: bool = True,
 ) -> tuple[OutputTable, ...]:
-    """Return SEP proton, HZE and combined LET spectrum tables."""
+    """Return SEP direct-ion and diagnostic LET spectrum tables."""
 
     base = _common_metadata(
         stage="let",
@@ -174,7 +175,7 @@ def sep_let_output_tables(
             metadata=_metadata_with(
                 base,
                 {
-                    "component": "proton_let",
+                    "component": "proton_let_diagnostic",
                     "let_target": "Si",
                 },
             ),
@@ -198,22 +199,47 @@ def sep_let_output_tables(
             )
         )
 
-    tables.append(
-        spectrum_output_table(
-            table_id="sep_combined_let_behind_al",
-            title="СКЛ. Суммарный ЛПЭ-спектр за Al-защитой в Si",
-            spectrum=result.combined_let,
-            metadata=_metadata_with(
-                base,
-                {
-                    "component": "combined_let",
-                    "hze_z_values": ",".join(str(z) for z in sorted(result.hze_let_by_z)),
-                    "let_target": "Si",
-                },
+    aggregate_metadata = {
+        "hze_z_values": ",".join(str(z) for z in sorted(result.hze_let_by_z)),
+        "let_target": "Si",
+    }
+    tables.extend(
+        (
+            spectrum_output_table(
+                table_id="sep_hze_aggregate_let_behind_al",
+                title="СКЛ. Суммарный ЛПЭ-спектр ТЗЧ за Al-защитой в Si",
+                spectrum=result.hze_aggregate_let,
+                metadata=_metadata_with(
+                    base,
+                    {
+                        **aggregate_metadata,
+                        "component": "hze_direct_ion_aggregate_let",
+                        "semantic_role": "hze_direct_ion",
+                    },
+                ),
+            ),
+            spectrum_output_table(
+                table_id="sep_combined_let_behind_al",
+                title="СКЛ. Диагностический ЛПЭ-спектр протоны+ТЗЧ за Al-защитой в Si",
+                spectrum=result.mixed_let_diagnostic,
+                metadata=_metadata_with(
+                    base,
+                    {
+                        **aggregate_metadata,
+                        "component": "mixed_proton_hze_let_diagnostic",
+                        "semantic_role": "diagnostic_only",
+                    },
+                ),
             ),
         )
     )
 
+    if not include_diagnostics:
+        diagnostic_ids = {
+            "sep_proton_let_behind_al",
+            "sep_combined_let_behind_al",
+        }
+        tables = [table for table in tables if table.table_id not in diagnostic_ids]
     return tuple(tables)
 
 
@@ -223,6 +249,7 @@ def sep_shielding_let_output_tables(
     hze_by_z: Mapping[int, SepHzeShieldingResult],
     let_products: SepLetProductsResult,
     include_proton_components: bool = False,
+    include_let_diagnostics: bool = True,
 ) -> tuple[OutputTable, ...]:
     """Return all SEP shielding and LET spectrum output tables."""
 
@@ -235,6 +262,7 @@ def sep_shielding_let_output_tables(
         *sep_let_output_tables(
             result=let_products,
             thickness_g_cm2=proton.thickness_g_cm2,
+            include_diagnostics=include_let_diagnostics,
         ),
     )
 

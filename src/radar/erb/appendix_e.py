@@ -9,6 +9,11 @@ from typing import Any
 
 from radar.core.spectrum_ops import integrate_differential_spectrum_tail_power_law
 
+OST_ERB_ELECTRON_DIFFERENTIAL_POLICY = "negative_derivative_of_e11_with_2E_gaussian_factor"
+OST_ERB_DIFFERENTIAL_ERRATA_STATUS = (
+    "internal_mathematical_consistency_correction_not_confirmed_official_errata"
+)
+
 
 def integrate_differential_flux_tail_power_law(
     *,
@@ -172,7 +177,14 @@ class OstErbElectronDifferentialApproximationCoefficients:
 
 @dataclass(frozen=True)
 class OstErbElectronIntegralApproximation:
-    """OST Appendix E.11/E.12/E.13 electron ERB approximation."""
+    """E.11 integral with a derivative-consistent differential approximation.
+
+    E.4 defines an above-threshold integral, so its differential is -dPhi/dE.
+    The printed E.12/E.13 omit 2E in the Gaussian term.  We retain E.13's
+    coefficient mapping and apply that energy-dependent factor explicitly.
+    This is a mathematical consistency correction, not an official erratum.
+    ``printed_differential_flux`` retains the literal text for comparisons.
+    """
 
     coefficients: OstErbElectronApproximationCoefficients
 
@@ -200,6 +212,20 @@ class OstErbElectronIntegralApproximation:
         )
 
     def differential_flux(self, energy_mev: float) -> float:
+        """Return -dPhi(>E)/dE, including 2E for the E.11 Gaussian term."""
+
+        _validate_positive_energy(energy_mev)
+        coefficients = self.differential_coefficients
+
+        return float(
+            coefficients.a1 * exp(-coefficients.a2 * energy_mev)
+            + 2.0 * energy_mev * coefficients.b1 * exp(-coefficients.b2 * energy_mev**2)
+            + coefficients.c1 * exp(-coefficients.c2 * energy_mev)
+        )
+
+    def printed_differential_flux(self, energy_mev: float) -> float:
+        """Evaluate literal E.12/E.13 for diagnostics, not a consistent derivative."""
+
         _validate_positive_energy(energy_mev)
         coefficients = self.differential_coefficients
 

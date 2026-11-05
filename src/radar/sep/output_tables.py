@@ -20,7 +20,7 @@ from radar.sep.pipeline_shielding import (
 from radar.shielding.sep_proton import SepProtonShieldingResult
 
 SEP_OUTPUT_LOCATION_ON_ORBIT = "on_orbit"
-SEP_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shielding"
+SEP_OUTPUT_LOCATION_BEHIND_SHIELDING = "behind_shield"
 
 SEP_OUTPUT_SHIELD_MATERIAL_AL = "Al"
 SEP_OUTPUT_SHIELD_GEOMETRY_CENTERED_SPHERICAL_SHELL = "centered_spherical_shell"
@@ -47,60 +47,24 @@ def _metadata_with(
     return metadata
 
 
-def _source_model_from_spectrum_model(model: str) -> str:
-    source_model = model.split(":", maxsplit=1)[0].split("+", maxsplit=1)[0]
+def _source_model_reference(spectrum: Spectrum1D) -> str:
+    reference = spectrum.model_reference
+    return spectrum.model if reference is None else reference.name
 
-    if not source_model:
-        msg = "Cannot infer SEP source model from empty spectrum model."
+
+def _sep_hze_z_symbol(spectrum: Spectrum1D) -> tuple[int, str]:
+    species = spectrum.species
+    if species is None or species.is_aggregate or species.atomic_number is None:
+        msg = "SEP HZE output requires structured species metadata with Z and A."
         raise ValueError(msg)
-
-    return source_model
-
-
-def _sep_hze_tag_from_spectrum_model(spectrum: Spectrum1D) -> str:
-    parts = spectrum.model.split(":")
-
-    if len(parts) < 3 or parts[1] != "hze" or not parts[2]:
-        msg = "SEP HZE output spectrum model must contain an hze ion tag."
-        raise ValueError(msg)
-
-    return parts[2].split("+", maxsplit=1)[0]
-
-
-def _sep_hze_z_symbol_from_spectrum_model(spectrum: Spectrum1D) -> tuple[int, str]:
-    tag = _sep_hze_tag_from_spectrum_model(spectrum)
-
-    if not tag.startswith("z"):
-        msg = "SEP HZE output ion tag must start with 'z'."
-        raise ValueError(msg)
-
-    digit_chars: list[str] = []
-    rest_start = 1
-
-    for index, character in enumerate(tag[1:], start=1):
-        if not character.isdigit():
-            rest_start = index
-            break
-
-        digit_chars.append(character)
-    else:
-        rest_start = len(tag)
-
-    if not digit_chars:
-        msg = "SEP HZE output ion tag must contain a charge number."
-        raise ValueError(msg)
-
-    symbol = tag[rest_start:].lstrip("_")
-
-    if not symbol:
-        symbol = f"z{int(''.join(digit_chars))}"
-
-    return int("".join(digit_chars)), symbol.capitalize()
+    return species.atomic_number, species.symbol
 
 
 def _particle_token(spectrum: Spectrum1D) -> str:
     if spectrum.particle is Particle.HZE:
-        z, _symbol = _sep_hze_z_symbol_from_spectrum_model(spectrum)
+        if spectrum.species is not None and spectrum.species.is_aggregate:
+            return "hze_aggregate"
+        z, _symbol = _sep_hze_z_symbol(spectrum)
         return f"hze_z{z}"
 
     return spectrum.particle.value
@@ -113,10 +77,9 @@ def _common_metadata(
     location: str,
     shielding: str,
 ) -> dict[str, str]:
-    return {
+    metadata = {
         "stage": stage,
-        "location": location,
-        "source_model": _source_model_from_spectrum_model(spectrum.model),
+        "source_model": _source_model_reference(spectrum),
         "shielding": shielding,
         "dose_status": SEP_OUTPUT_DOSE_STATUS_NOT_CALCULATED,
         "single_event_effects_status": (
@@ -124,6 +87,9 @@ def _common_metadata(
         ),
         "dose_see_dependency": SEP_OUTPUT_DOSE_SEE_DEFERRED_REASON,
     }
+    if spectrum.location is None:
+        metadata["location"] = location
+    return metadata
 
 
 def _on_orbit_product_table_token(product: SpectrumProduct) -> str:
@@ -158,8 +124,11 @@ def sep_on_orbit_product_output_tables(
         }
 
         if spectrum.particle is Particle.HZE:
-            z, symbol = _sep_hze_z_symbol_from_spectrum_model(spectrum)
-            extra.update({"z": str(z), "symbol": symbol})
+            if spectrum.species is not None and spectrum.species.is_aggregate:
+                extra.update({"species": spectrum.species.symbol})
+            else:
+                z, symbol = _sep_hze_z_symbol(spectrum)
+                extra.update({"z": str(z), "symbol": symbol})
 
         tables.append(
             spectrum_output_table(
@@ -313,25 +282,23 @@ def sep_let_output_tables(
     *,
     result: SepLetProductsResult,
     thickness_g_cm2: float,
+    include_diagnostics: bool = True,
 ) -> tuple[OutputTable, ...]:
-    """Return SEP proton, HZE and combined LET spectrum tables."""
+    """Return SEP direct-ion and diagnostic LET spectrum tables."""
 
     base = _shielding_metadata(
-        spectrum=result.combined_let,
+        spectrum=result.hze_aggregate_let,
         stage="let",
         thickness_g_cm2=thickness_g_cm2,
     )
     tables: list[OutputTable] = [
         spectrum_output_table(
             table_id="sep_proton_let_behind_al",
-            title="???. ??????? ?? Al-???????. ???-?????? ? Si",
+            title="СКЛ. Протоны за Al-защитой. Диагностический ЛПЭ-спектр в Si",
             spectrum=result.proton_let,
             metadata=_metadata_with(
                 base,
-                {
-                    "component": "proton_let",
-                    "let_target": "Si",
-                },
+                {"component": "proton_let_diagnostic", "let_target": "Si"},
             ),
         )
     ]
@@ -340,35 +307,55 @@ def sep_let_output_tables(
         tables.append(
             spectrum_output_table(
                 table_id=f"sep_hze_z{z}_let_behind_al",
-                title=f"???. ??? Z={z} ?? Al-???????. ???-?????? ? Si",
+                title=f"СКЛ. ТЗЧ Z={z} за Al-защитой. ЛПЭ-спектр в Si",
                 spectrum=spectrum,
                 metadata=_metadata_with(
                     base,
-                    {
-                        "component": "hze_let",
-                        "z": str(z),
-                        "let_target": "Si",
-                    },
+                    {"component": "hze_let", "z": str(z), "let_target": "Si"},
                 ),
             )
         )
 
-    tables.append(
-        spectrum_output_table(
-            table_id="sep_combined_let_behind_al",
-            title="???. ????????? ???-?????? ?? Al-??????? ? Si",
-            spectrum=result.combined_let,
-            metadata=_metadata_with(
-                base,
-                {
-                    "component": "combined_let",
-                    "hze_z_values": ",".join(str(z) for z in sorted(result.hze_let_by_z)),
-                    "let_target": "Si",
-                },
+    aggregate_metadata = {
+        "hze_z_values": ",".join(str(z) for z in sorted(result.hze_let_by_z)),
+        "let_target": "Si",
+    }
+    tables.extend(
+        (
+            spectrum_output_table(
+                table_id="sep_hze_aggregate_let_behind_al",
+                title="СКЛ. Суммарный ЛПЭ-спектр ТЗЧ за Al-защитой в Si",
+                spectrum=result.hze_aggregate_let,
+                metadata=_metadata_with(
+                    base,
+                    {
+                        **aggregate_metadata,
+                        "component": "hze_direct_ion_aggregate_let",
+                        "semantic_role": "hze_direct_ion",
+                    },
+                ),
+            ),
+            spectrum_output_table(
+                table_id="sep_combined_let_behind_al",
+                title="СКЛ. Диагностический ЛПЭ-спектр протоны+ТЗЧ за Al-защитой в Si",
+                spectrum=result.mixed_let_diagnostic,
+                metadata=_metadata_with(
+                    base,
+                    {
+                        **aggregate_metadata,
+                        "component": "mixed_proton_hze_let_diagnostic",
+                        "semantic_role": "diagnostic_only",
+                    },
+                ),
             ),
         )
     )
-
+    if not include_diagnostics:
+        diagnostic_ids = {
+            "sep_proton_let_behind_al",
+            "sep_combined_let_behind_al",
+        }
+        tables = [table for table in tables if table.table_id not in diagnostic_ids]
     return tuple(tables)
 
 
@@ -378,6 +365,7 @@ def sep_shielding_let_output_tables(
     hze_by_z: Mapping[int, SepHzeShieldingResult],
     let_products: SepLetProductsResult,
     include_proton_components: bool = False,
+    include_let_diagnostics: bool = True,
 ) -> tuple[OutputTable, ...]:
     """Return all SEP shielding and LET spectrum output tables."""
 
@@ -390,6 +378,7 @@ def sep_shielding_let_output_tables(
         *sep_let_output_tables(
             result=let_products,
             thickness_g_cm2=proton.thickness_g_cm2,
+            include_diagnostics=include_let_diagnostics,
         ),
     )
 

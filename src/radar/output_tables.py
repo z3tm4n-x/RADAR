@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+import json
 from math import isfinite
 from typing import TypeAlias, cast
 
@@ -397,10 +398,96 @@ def _spectrum_metadata(
         "model": spectrum.model,
     }
 
+    optional_values = {
+        "axis_kind": None if spectrum.axis_kind is None else spectrum.axis_kind.value,
+        "angular_basis": (
+            None if spectrum.angular_basis is None else spectrum.angular_basis.value
+        ),
+        "temporal_basis": (
+            None if spectrum.temporal_basis is None else spectrum.temporal_basis.value
+        ),
+        "assessment_mode": (
+            None if spectrum.assessment_mode is None else spectrum.assessment_mode.value
+        ),
+        "location": None if spectrum.location is None else spectrum.location.value,
+        "mission_duration_s": (
+            None
+            if spectrum.mission_duration_s is None
+            else f"{spectrum.mission_duration_s:.17g}"
+        ),
+        "completeness": (
+            None if spectrum.completeness is None else spectrum.completeness.value
+        ),
+        "let_role": None if spectrum.let_role is None else spectrum.let_role.value,
+        "ordinate_basis": spectrum.ordinate_basis.value,
+    }
+    metadata.update(
+        {key: value for key, value in optional_values.items() if value is not None}
+    )
+
+    if spectrum.species is not None:
+        metadata["species_symbol"] = spectrum.species.symbol
+        metadata["species_aggregate"] = str(spectrum.species.is_aggregate).lower()
+        if spectrum.species.atomic_number is not None:
+            metadata["species_z"] = str(spectrum.species.atomic_number)
+        if spectrum.species.mass_number is not None:
+            metadata["species_a"] = str(spectrum.species.mass_number)
+
+    if spectrum.bin_edges is not None:
+        metadata["bin_edges"] = json.dumps(
+            spectrum.bin_edges,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    if spectrum.shielding is not None:
+        metadata["shielding_material"] = spectrum.shielding.material
+        metadata["shielding_areal_density_g_cm2"] = (
+            f"{spectrum.shielding.areal_density_g_cm2:.17g}"
+        )
+
+    if spectrum.model_reference is not None:
+        metadata["model_version"] = spectrum.model_reference.version
+        metadata["model_document_refs"] = json.dumps(
+            spectrum.model_reference.document_refs,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        metadata["model_dataset_refs"] = json.dumps(
+            spectrum.model_reference.dataset_refs,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    if spectrum.transformation_chain:
+        metadata["transformation_chain"] = json.dumps(
+            [
+                {
+                    "name": step.name,
+                    "version": step.version,
+                    "parameters": dict(step.parameters),
+                }
+                for step in spectrum.transformation_chain
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    if spectrum.incomplete_reasons:
+        metadata["incomplete_reasons"] = json.dumps(
+            spectrum.incomplete_reasons,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
     if extra_metadata is None:
         return metadata
 
-    conflicting_keys = _SPECTRUM_METADATA_KEYS & set(extra_metadata)
+    conflicting_keys = {
+        key
+        for key in set(metadata) & set(extra_metadata)
+        if metadata[key] != extra_metadata[key]
+    }
     if conflicting_keys:
         keys = ", ".join(sorted(conflicting_keys))
         msg = f"Spectrum output metadata cannot override canonical keys: {keys}."

@@ -18,6 +18,30 @@ from radar.shielding.resources import (
 PROTON_SHIELDED_DOSE_MODEL = "proton_shielded_fluence_si_electronic_stopping_dose"
 
 
+class ProtonDoseDomainError(ValueError):
+    """Raised when the Si stopping table cannot support a dose quadrature node."""
+
+    energy_mev: float
+    minimum_mev: float
+    maximum_mev: float
+
+    def __init__(
+        self,
+        *,
+        energy_mev: float,
+        minimum_mev: float,
+        maximum_mev: float,
+    ) -> None:
+        self.energy_mev = energy_mev
+        self.minimum_mev = minimum_mev
+        self.maximum_mev = maximum_mev
+        super().__init__(
+            "proton Si electronic LET dose domain is incomplete: "
+            f"quadrature energy {energy_mev:.17g} MeV is outside the "
+            f"tabulated support [{minimum_mev:.17g}, {maximum_mev:.17g}] MeV"
+        )
+
+
 @dataclass(frozen=True)
 class ProtonDoseResult:
     """Dose contribution calculated from a shielded proton mission fluence."""
@@ -93,6 +117,12 @@ def _electronic_let_at_energy(
     table: ProtonSiLetTable,
     energy_mev: float,
 ) -> float:
+    if energy_mev < table.energy_mev[0] or energy_mev > table.energy_mev[-1]:
+        raise ProtonDoseDomainError(
+            energy_mev=energy_mev,
+            minimum_mev=table.energy_mev[0],
+            maximum_mev=table.energy_mev[-1],
+        )
     return _interpolate_linear_strict(
         x=energy_mev,
         xp=table.energy_mev,
@@ -146,7 +176,7 @@ def integrate_proton_energy_deposition_MeV_per_mg(
     _validate_proton_dose_product(product)
 
     spectrum = product.spectrum
-    edges = _log_edges_from_centers(spectrum.x)
+    edges = spectrum.bin_edges or _log_edges_from_centers(spectrum.x)
 
     return sum(
         fluence_density
@@ -186,6 +216,7 @@ def calculate_proton_dose_from_shielded_fluence(
 
 __all__ = [
     "PROTON_SHIELDED_DOSE_MODEL",
+    "ProtonDoseDomainError",
     "ProtonDoseResult",
     "calculate_proton_dose_from_shielded_fluence",
     "integrate_proton_energy_deposition_MeV_per_mg",

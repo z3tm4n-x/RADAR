@@ -12,6 +12,8 @@ from radar.core.project import CalculationConfig
 if TYPE_CHECKING:
     from radar.output_tables import OutputTable
 
+NORMATIVE_RELEASE_COMPONENT = "normative_release"
+
 
 class ComponentStatus(StrEnum):
     """Status of one calculation component."""
@@ -19,6 +21,7 @@ class ComponentStatus(StrEnum):
     NOT_STARTED = "not_started"
     SKIPPED = "skipped"
     COMPLETED = "completed"
+    INCOMPLETE = "incomplete"
     FAILED = "failed"
 
 
@@ -191,4 +194,13 @@ class CalculationResult:
         return any(
             entry.status is ComponentStatus.FAILED
             for entry in self.component_statuses
+        )
+
+    def is_release_ready(self) -> bool:
+        """Return whether explicit normative-release validation succeeded."""
+
+        return (
+            not self.has_errors()
+            and self.component_status(NORMATIVE_RELEASE_COMPONENT)
+            is ComponentStatus.COMPLETED
         )
