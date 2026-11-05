@@ -36,3 +36,5 @@ scripts/*.ps1 -text
 tests/fixtures/srim_h_al_smoke.txt -text
 tests/fixtures/nist_estar_al_1_2.txt -text
 src/radar/data/normative/tendl/p-Al027.tendl.txt -text
+src/radar/data/normative/** -text
+docs/validation/*.json -text
