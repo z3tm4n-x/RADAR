@@ -21,6 +21,7 @@ CATIMA = "research/ion_stopping_20261031/"
 ARCHIVE = STAR + "STAR.tar.gz"
 HEADER = CATIMA + "runtime/include/catima/data_ionisation_potential.h"
 MANIFEST = "outputs/stopping_mass_manifest_20261031.json"
+RADEF = "research/iaea_stopping_20261031/javanainen_esa_2009.pdf"
 ASTAR_EVIDENCE = tuple(STAR + name for name in (
     "download.html", "programs.html", "readme.html", "composition_al.html",
     "composition_si.html", "live_astar_013.html", "live_astar_014.html",
@@ -59,6 +60,7 @@ TEST_ARTIFACTS: dict[str, dict[str, tuple[str, ...]]] = {
     )},
     "test_astar_helium_controls.py": {
         "test_wheel_header_values_are_read_without_setting_i": (HEADER,),
+        "test_bad_archive_rejected_before_native_load": (HEADER,),
     },
     "test_astar_helium_comparison.py": {
         "test_exact_decimal_rounding_tie_is_not_an_online_discrepancy": (
@@ -69,9 +71,13 @@ TEST_ARTIFACTS: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "test_iaea_stopping_controls.py": {
         "test_native_elemental_i_header_is_unchanged": (HEADER,),
+        "test_generator_records_full_selection_and_all_qualification_boundaries": (HEADER,),
+        "test_changed_pins_or_reference_inventory_rejected": (HEADER,),
+        "test_radef_document_identity_is_verified": (RADEF,),
+        "test_bad_archives_fail_before_native_loading": (HEADER, RADEF),
         "test_real_pinned_inventory_request_mapping": (
             "research/iaea_stopping_20261031/data.zip",
-            "research/iaea_stopping_20261031/references.zip"),
+            "research/iaea_stopping_20261031/references.zip", RADEF),
     },
 }
 

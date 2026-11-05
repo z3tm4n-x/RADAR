@@ -17,7 +17,7 @@ import conftest as policy
     ("test_astar_helium_controls.py", "test_exact_total_to_per_mass_mapping_no_stopping_multiplier", {"generator"}),
     ("test_astar_helium_comparison.py", "test_reference_total_and_csda_not_projected", {"runner"}),
     ("test_catima_candidate_generator.py", "test_changed_source_is_rejected", {"generator"}),
-    ("test_iaea_stopping_controls.py", "test_bad_archives_fail_before_native_loading", {"generator"}),
+    ("test_iaea_stopping_controls.py", "test_missing_selected_record_inventory_rejected", {"generator"}),
     ("test_srim_source_catalog.py", "test_noncontrol_values_rejected_before_formatting", set()),
     ("test_srim_source_extension.py", "test_noncontrol_cannot_format_native_input", set()),
     ("test_gsi_atima_anchors.py", "test_collect", {"native_report"}),
@@ -98,3 +98,29 @@ def test_fixture_requirements_are_deduplicated() -> None:
     actual = policy.required_artifacts("test_srim_source_extension.py", "test_any",
                                        {"catalog", "baseline", "copied"})
     assert actual == (policy.MANIFEST,)
+
+
+def test_iaea_fake_backend_retains_unmocked_header_dependency() -> None:
+    assert policy.required_artifacts(
+        "test_iaea_stopping_controls.py",
+        "test_generator_records_full_selection_and_all_qualification_boundaries",
+        {"control_context", "generator"}) == (policy.HEADER,)
+    assert policy.required_artifacts(
+        "test_iaea_stopping_controls.py",
+        "test_source_and_bytecode_verification_failure_precedes_native_load",
+        {"control_context", "generator"}) == ()
+
+
+def test_radef_identity_checks_require_existing_document_before_hash_mock() -> None:
+    assert policy.required_artifacts(
+        "test_iaea_stopping_controls.py", "test_radef_document_identity_is_verified",
+        {"generator"}) == (policy.RADEF,)
+
+
+def test_bad_archive_negatives_still_read_upstream_pins_first() -> None:
+    assert policy.required_artifacts(
+        "test_astar_helium_controls.py", "test_bad_archive_rejected_before_native_load",
+        {"generator"}) == (policy.HEADER,)
+    assert set(policy.required_artifacts(
+        "test_iaea_stopping_controls.py", "test_bad_archives_fail_before_native_loading",
+        {"generator"})) == {policy.HEADER, policy.RADEF}
