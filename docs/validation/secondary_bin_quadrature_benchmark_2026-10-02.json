@@ -1,0 +1,316 @@
+{
+  "schema": "radar.secondary-partition-benchmark.v1",
+  "created_at_utc": "2026-10-02T18:28:45.378026+00:00",
+  "scope": "Synthetic triangular incident fluence on 33..33.02 MeV, all ten actual TENDL products and the current provisional Al range table. Thin-shield algorithm comparison only, not a GCR environment benchmark or normative reference. Wall times are local measurements, not general speedup guarantees.",
+  "source_energy_mev": [
+    1,
+    3,
+    33,
+    33.01,
+    33.02
+  ],
+  "source_ordinates": [
+    0,
+    0,
+    0,
+    1,
+    0
+  ],
+  "source_interpolation": "linear_on_true_source_intervals_no_extrapolation",
+  "python_version": "3.13.5 (tags/v3.13.5:6cb20a2, Jun 11 2025, 16:15:46) [MSC v.1943 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "file_sha256": {
+    "src/radar/shielding/proton_al_secondary.py": "739fda298f3180b0faa4f4a639381e1020422a43499dffc185d5d9efb7187927",
+    "src/radar/data/normative/stopping/proton_al_range.csv": "1fd8ccf7517e65dcc98535d361906d7910e56260b4f9016f157c70548e67fca6",
+    "src/radar/data/normative/tendl/p_al27_mf3_xs.csv": "974205f9de37390b43e456152bf4c41a51000aff564a7e981cb36f7b1216a670",
+    "src/radar/data/normative/tendl/p_al27_mf6_proton_yield.csv": "c069f1290a4756c493a60f19338f905ef64cc771a6dbde3fbe31b5d8541779ed",
+    "src/radar/data/normative/tendl/p_al27_mf6_proton_pdf.csv": "9b8fad351c68afe3032c381cf97e20b1cf90d4f07b6958582351bbdb74bc8f75",
+    "src/radar/data/normative/tendl/p-Al027.tendl.txt": "f2218940baef62cf9fb72ed3ab4a0326e69f92faabb0b7ee69fed7b0bb4c41a7",
+    "scripts/benchmark_secondary_bin_quadrature.py": "e42b43f5c3617c92a4553f3c9996ea70e57bb147fb77ddc6576199ab7c9e66f2"
+  },
+  "cases": [
+    {
+      "strategy": "global_union",
+      "thickness_g_cm2": 0.0001,
+      "incident_options": {
+        "relative_tolerance": 0.001,
+        "max_response_evaluations": 4096,
+        "max_refinement_depth": 6,
+        "max_unproven_zero_refinement_depth": 2,
+        "partition_strategy": "global_union"
+      },
+      "depth_options": {
+        "max_depth_knots": 8192,
+        "max_coupled_incident_knots": 65536
+      },
+      "depth_steps": 1,
+      "survival_integration_steps": 64,
+      "preflight_seconds": 0.025666300000011688,
+      "calculation_seconds_including_internal_preparation": 68.01421179999852,
+      "single_response_seconds": 67.98734009999498,
+      "observed_response_calls": 24,
+      "observed_response_bin_calls": 120,
+      "depth_knots_by_partition": [
+        34
+      ],
+      "source_intervals_by_partition": [
+        1946
+      ],
+      "all_crossing_partitions_included": true,
+      "output_bin_edges_mev": [
+        0.5773502691896257,
+        1.7320508075688774,
+        9.9498743710662,
+        33.004999621269505,
+        33.01499962138421,
+        33.02500113596204
+      ],
+      "output_ordinates": [
+        1.1157082363043118e-9,
+        1.4455556306509393e-9,
+        2.7404026971923275e-10,
+        0,
+        0
+      ],
+      "output_counts_by_bin": [
+        1.2883089011347542e-9,
+        1.1879321123909521e-8,
+        6.318032741976407e-9,
+        0,
+        0
+      ],
+      "total_count": 1.9485662767020684e-8,
+      "quantity": "differential_fluence",
+      "y_unit": "cm^-2 MeV^-1",
+      "completeness": "incomplete",
+      "incomplete_reasons": [
+        "secondary MF=6 centre-of-mass to laboratory energy-angle transformation not included",
+        "secondary angular distribution/path-length transport not included",
+        "higher-generation secondary-proton cascade not included",
+        "secondary-proton depth quadrature accuracy has not been established by refinement"
+      ],
+      "parameters": {
+        "incident_bin_operator": "integral_linear_point_source_times_vector_response",
+        "incident_quadrature_partition_strategy": "global_union",
+        "incident_quadrature_response_evaluation_unit": "vector_exit_spectrum_response",
+        "incident_quadrature_budget_scope": "global_across_all_exit_partitions",
+        "incident_quadrature_response_bin_evaluations": "120",
+        "crossing_knot_budget_scope": "whole_exit_grid",
+        "incident_source_support_mev": "1..33.020000000000003",
+        "incident_source_extrapolation": "none",
+        "incident_integrated_domain": "true_source_intersected_with_range_table_support",
+        "incident_omitted_range_intervals": "0",
+        "incident_quadrature": "open_gl4_adaptive_direct_mapped_and_coupled_crossing_knots",
+        "incident_crossing_partition": "all_coupled_depth_events_included",
+        "incident_crossing_max_knots": "65536",
+        "incident_partition_intervals": "1946",
+        "incident_partition_intervals_by_partition": "1946",
+        "incident_quadrature_relative_tolerance": "0.001",
+        "incident_quadrature_error_measure": "L1_exit_bin_counts_coarse_fine_difference_outer_integral_only",
+        "incident_quadrature_estimated_absolute_error": "3.4649561884080638e-21",
+        "incident_quadrature_estimated_relative_error": "1.7782080239387458e-13",
+        "incident_quadrature_response_evaluations": "24",
+        "incident_quadrature_response_evaluations_by_partition": "24",
+        "incident_quadrature_supported_depth_samples": "3360",
+        "incident_quadrature_max_response_evaluations": "4096",
+        "incident_quadrature_max_refinement_depth": "6",
+        "incident_quadrature_max_unproven_zero_refinement_depth": "2",
+        "incident_quadrature_zero_policy": "reaction_zero_proof_or_bounded_refinement_with_unknown_error",
+        "incident_quadrature_unresolved_intervals": "0",
+        "incident_quadrature_unresolved_intervals_by_partition": "0",
+        "incident_quadrature_status": "converged",
+        "depth_steps": "1",
+        "depth_quadrature": "gauss_legendre_4_split_at_transport_knots",
+        "depth_output_crossing_knots": "all_supported_pdf_range_attenuation_crossings",
+        "depth_output_crossing_count": "34",
+        "depth_output_crossing_counts_by_partition": "34",
+        "depth_output_crossing_budget_exceeded_by_partition": "false",
+        "incident_crossing_budget_exceeded_by_partition": "false",
+        "depth_output_crossing_max_knots": "8192",
+        "depth_output_crossing_accuracy": "not_established_by_refinement",
+        "survival_integration_steps": "64",
+        "thickness_g_cm2": "0.0001",
+        "primary_survival_to_depth": "TENDL_MF3_MT3",
+        "secondary_survival_to_exit": "TENDL_MF3_MT3",
+        "secondary_pdf_integration": "exact_endf_histogram_segments",
+        "mf6_reference_frame": "centre_of_mass_lct_3",
+        "mf6_cm_to_lab_transform": "not_included",
+        "secondary_angular_transport": "not_included",
+        "secondary_path_length": "radial_residual_thickness_diagnostic",
+        "secondary_generation": "single_collision_generation",
+        "higher_generation_cascade": "not_included"
+      }
+    },
+    {
+      "strategy": "per_output_bin",
+      "thickness_g_cm2": 0.0001,
+      "incident_options": {
+        "relative_tolerance": 0.001,
+        "max_response_evaluations": 4096,
+        "max_refinement_depth": 6,
+        "max_unproven_zero_refinement_depth": 2,
+        "partition_strategy": "per_output_bin"
+      },
+      "depth_options": {
+        "max_depth_knots": 8192,
+        "max_coupled_incident_knots": 65536
+      },
+      "depth_steps": 1,
+      "survival_integration_steps": 64,
+      "preflight_seconds": 0.04198330000144779,
+      "calculation_seconds_including_internal_preparation": 8.309115300000485,
+      "single_response_seconds": 8.26233390001289,
+      "observed_response_calls": 120,
+      "observed_response_bin_calls": 120,
+      "depth_knots_by_partition": [
+        31,
+        2,
+        0,
+        1,
+        1
+      ],
+      "source_intervals_by_partition": [
+        1784,
+        218,
+        110,
+        164,
+        164
+      ],
+      "all_crossing_partitions_included": true,
+      "output_bin_edges_mev": [
+        0.5773502691896257,
+        1.7320508075688774,
+        9.9498743710662,
+        33.004999621269505,
+        33.01499962138421,
+        33.02500113596204
+      ],
+      "output_ordinates": [
+        1.1157082363043118e-9,
+        1.4455556306509393e-9,
+        2.7404026971923275e-10,
+        0,
+        0
+      ],
+      "output_counts_by_bin": [
+        1.2883089011347542e-9,
+        1.1879321123909521e-8,
+        6.318032741976407e-9,
+        0,
+        0
+      ],
+      "total_count": 1.9485662767020684e-8,
+      "quantity": "differential_fluence",
+      "y_unit": "cm^-2 MeV^-1",
+      "completeness": "incomplete",
+      "incomplete_reasons": [
+        "secondary MF=6 centre-of-mass to laboratory energy-angle transformation not included",
+        "secondary angular distribution/path-length transport not included",
+        "higher-generation secondary-proton cascade not included",
+        "secondary-proton depth quadrature accuracy has not been established by refinement"
+      ],
+      "parameters": {
+        "incident_bin_operator": "integral_linear_point_source_times_scalar_bin_response",
+        "incident_quadrature_partition_strategy": "per_output_bin",
+        "incident_quadrature_response_evaluation_unit": "scalar_exit_bin_response",
+        "incident_quadrature_budget_scope": "global_across_all_exit_partitions",
+        "incident_quadrature_response_bin_evaluations": "120",
+        "crossing_knot_budget_scope": "per_exit_bin",
+        "incident_source_support_mev": "1..33.020000000000003",
+        "incident_source_extrapolation": "none",
+        "incident_integrated_domain": "true_source_intersected_with_range_table_support",
+        "incident_omitted_range_intervals": "0",
+        "incident_quadrature": "open_gl4_adaptive_direct_mapped_and_coupled_crossing_knots",
+        "incident_crossing_partition": "all_coupled_depth_events_included",
+        "incident_crossing_max_knots": "65536",
+        "incident_partition_intervals": "2440",
+        "incident_partition_intervals_by_partition": "1784,218,110,164,164",
+        "incident_quadrature_relative_tolerance": "0.001",
+        "incident_quadrature_error_measure": "L1_exit_bin_counts_coarse_fine_difference_outer_integral_only",
+        "incident_quadrature_estimated_absolute_error": "3.4639222126423725e-21",
+        "incident_quadrature_estimated_relative_error": "1.7776773898114624e-13",
+        "incident_quadrature_response_evaluations": "120",
+        "incident_quadrature_response_evaluations_by_partition": "24,24,24,24,24",
+        "incident_quadrature_supported_depth_samples": "3840",
+        "incident_quadrature_max_response_evaluations": "4096",
+        "incident_quadrature_max_refinement_depth": "6",
+        "incident_quadrature_max_unproven_zero_refinement_depth": "2",
+        "incident_quadrature_zero_policy": "reaction_or_supported_pdf_envelope_zero_proof_else_bounded_unknown_error",
+        "incident_quadrature_unresolved_intervals": "0",
+        "incident_quadrature_unresolved_intervals_by_partition": "0,0,0,0,0",
+        "incident_quadrature_status": "converged",
+        "depth_steps": "1",
+        "depth_quadrature": "gauss_legendre_4_split_at_transport_knots",
+        "depth_output_crossing_knots": "all_supported_pdf_range_attenuation_crossings",
+        "depth_output_crossing_count": "35",
+        "depth_output_crossing_counts_by_partition": "31,2,0,1,1",
+        "depth_output_crossing_budget_exceeded_by_partition": "false,false,false,false,false",
+        "incident_crossing_budget_exceeded_by_partition": "false,false,false,false,false",
+        "depth_output_crossing_max_knots": "8192",
+        "depth_output_crossing_accuracy": "not_established_by_refinement",
+        "survival_integration_steps": "64",
+        "thickness_g_cm2": "0.0001",
+        "primary_survival_to_depth": "TENDL_MF3_MT3",
+        "secondary_survival_to_exit": "TENDL_MF3_MT3",
+        "secondary_pdf_integration": "exact_endf_histogram_segments",
+        "mf6_reference_frame": "centre_of_mass_lct_3",
+        "mf6_cm_to_lab_transform": "not_included",
+        "secondary_angular_transport": "not_included",
+        "secondary_path_length": "radial_residual_thickness_diagnostic",
+        "secondary_generation": "single_collision_generation",
+        "higher_generation_cascade": "not_included"
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "thickness_g_cm2": 0.0001,
+      "global_over_per_bin_wall_time_ratio": 8.185493803413047,
+      "absolute_count_difference_by_bin": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "relative_count_difference_by_nonzero_reference_bin": [
+        0,
+        0,
+        0,
+        null,
+        null
+      ],
+      "l1_count_relative_difference": 0,
+      "full_counts_vectors_equal": true,
+      "both_outer_integrals_converged": true,
+      "both_crossing_partitions_full": true,
+      "same_production_source_sha": true,
+      "normative_certification": false,
+      "qualification": "This comparison establishes agreement for this thin-shield synthetic-source case only. Both spectra remain INCOMPLETE for absent CM-to-LAB, angular/path, higher-generation transport and unestablished general depth refinement accuracy. It is not evidence of speedup or convergence for the wider GCR production grids."
+    }
+  ],
+  "command_runs": [
+    {
+      "arguments": [
+        "--thickness",
+        "0.0001",
+        "--strategy",
+        "global_union"
+      ],
+      "external_process_timeout_seconds": 110,
+      "completed": true
+    },
+    {
+      "arguments": [
+        "--thickness",
+        "0.0001",
+        "--strategy",
+        "per_output_bin"
+      ],
+      "external_process_timeout_seconds": 110,
+      "completed": true
+    }
+  ],
+  "runner_post_execution_note": "After both measurements, a non-numerical assert that result.completeness is not None was added solely for static type checking. The recorded execution SHA remains the actual measured script version; current rerunnable script SHA is recorded separately.",
+  "current_runner_sha256": "a0539f2a8f6bf871610fb8819c63f0ca3f53bab912c1cf21a3759e723b521086"
+}

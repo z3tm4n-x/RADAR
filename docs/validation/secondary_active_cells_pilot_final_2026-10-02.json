@@ -1,0 +1,175 @@
+{
+  "schema": "radar.secondary-partition-benchmark.v1",
+  "created_at_utc": "2026-10-02T19:02:36.375425+00:00",
+  "scope": "Synthetic triangular incident fluence on 33..33.02 MeV, all ten actual TENDL products and the current provisional Al range table. Thin-shield algorithm comparison only, not a GCR environment benchmark or normative reference. Wall times are local measurements, not general speedup guarantees.",
+  "source_energy_mev": [
+    1,
+    3,
+    33,
+    33.01,
+    33.02
+  ],
+  "source_ordinates": [
+    0,
+    0,
+    0,
+    1,
+    0
+  ],
+  "source_interpolation": "linear_on_true_source_intervals_no_extrapolation",
+  "python_version": "3.13.5 (tags/v3.13.5:6cb20a2, Jun 11 2025, 16:15:46) [MSC v.1943 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "command_arguments": [
+    "--strategy",
+    "per_output_bin_active_cells",
+    "--thickness",
+    "0.01",
+    "--depth-steps",
+    "2"
+  ],
+  "file_sha256": {
+    "src/radar/shielding/proton_al_secondary.py": "5e08bbc7fa15fe2713291b9fcb3f080a5c46fa6aa50133994aaba567b624827e",
+    "src/radar/data/normative/stopping/proton_al_range.csv": "1fd8ccf7517e65dcc98535d361906d7910e56260b4f9016f157c70548e67fca6",
+    "src/radar/data/normative/tendl/p_al27_mf3_xs.csv": "974205f9de37390b43e456152bf4c41a51000aff564a7e981cb36f7b1216a670",
+    "src/radar/data/normative/tendl/p_al27_mf6_proton_yield.csv": "c069f1290a4756c493a60f19338f905ef64cc771a6dbde3fbe31b5d8541779ed",
+    "src/radar/data/normative/tendl/p_al27_mf6_proton_pdf.csv": "9b8fad351c68afe3032c381cf97e20b1cf90d4f07b6958582351bbdb74bc8f75",
+    "src/radar/data/normative/tendl/p-Al027.tendl.txt": "f2218940baef62cf9fb72ed3ab4a0326e69f92faabb0b7ee69fed7b0bb4c41a7",
+    "scripts/benchmark_secondary_bin_quadrature.py": "c965a6d7024e3f5a0374d950a18e23077c356a9dcb32290b537fc62a4edfafd2"
+  },
+  "cases": [
+    {
+      "strategy": "per_output_bin_active_cells",
+      "thickness_g_cm2": 0.01,
+      "incident_options": {
+        "relative_tolerance": 0.001,
+        "max_response_evaluations": 4096,
+        "max_refinement_depth": 6,
+        "max_unproven_zero_refinement_depth": 2,
+        "partition_strategy": "per_output_bin_active_cells"
+      },
+      "depth_options": {
+        "max_depth_knots": 8192,
+        "max_coupled_incident_knots": 65536,
+        "max_active_cell_records": 32768
+      },
+      "depth_steps": 2,
+      "survival_integration_steps": 64,
+      "preflight_seconds": 0.03049529999771039,
+      "calculation_seconds_including_internal_preparation": 116.00340340000184,
+      "single_response_seconds": 115.95477350001238,
+      "observed_response_calls": 120,
+      "observed_response_bin_calls": 120,
+      "depth_knots_by_partition": [
+        296,
+        84,
+        11,
+        0,
+        0
+      ],
+      "active_cell_records_by_partition": [
+        161,
+        50,
+        10,
+        0,
+        0
+      ],
+      "source_intervals_by_partition": [
+        137,
+        137,
+        137,
+        137,
+        137
+      ],
+      "all_crossing_partitions_included": true,
+      "output_bin_edges_mev": [
+        0.5773502691896257,
+        1.7320508075688774,
+        9.9498743710662,
+        33.004999621269505,
+        33.01499962138421,
+        33.02500113596204
+      ],
+      "output_ordinates": [
+        1.3120340522143845e-7,
+        1.3247247788440296e-7,
+        2.6944411494859235e-8,
+        0,
+        0
+      ],
+      "output_counts_by_bin": [
+        1.515006426463861e-7,
+        0.0000010886354502733247,
+        6.212067818069973e-7,
+        0,
+        0
+      ],
+      "total_count": 0.000001861342874726708,
+      "quantity": "differential_fluence",
+      "y_unit": "cm^-2 MeV^-1",
+      "completeness": "incomplete",
+      "incomplete_reasons": [
+        "secondary MF=6 centre-of-mass to laboratory energy-angle transformation not included",
+        "secondary angular distribution/path-length transport not included",
+        "higher-generation secondary-proton cascade not included",
+        "secondary-proton depth quadrature accuracy has not been established by refinement"
+      ],
+      "parameters": {
+        "depth_pdf_pruning": "exact_reachable_primary_cells_with_all_interpolation_neighbours",
+        "depth_active_pdf_support_missing": "false",
+        "depth_active_primary_cells": "1",
+        "depth_output_crossing_active_cell_records": "221",
+        "depth_output_crossing_max_active_cell_records": "32768",
+        "incident_bin_operator": "integral_linear_point_source_times_scalar_bin_response",
+        "incident_quadrature_partition_strategy": "per_output_bin_active_cells",
+        "incident_quadrature_response_evaluation_unit": "scalar_exit_bin_response",
+        "incident_quadrature_budget_scope": "global_across_all_exit_partitions",
+        "incident_quadrature_response_bin_evaluations": "120",
+        "crossing_knot_budget_scope": "per_exit_bin",
+        "incident_source_support_mev": "1..33.020000000000003",
+        "incident_source_extrapolation": "none",
+        "incident_integrated_domain": "true_source_intersected_with_range_table_support",
+        "incident_omitted_range_intervals": "0",
+        "incident_quadrature": "open_gl4_adaptive_direct_mapped_and_coupled_crossing_knots",
+        "incident_crossing_partition": "all_coupled_depth_events_included",
+        "incident_crossing_max_knots": "65536",
+        "incident_partition_intervals": "685",
+        "incident_partition_intervals_by_partition": "137,137,137,137,137",
+        "incident_quadrature_relative_tolerance": "0.001",
+        "incident_quadrature_error_measure": "L1_exit_bin_counts_coarse_fine_difference_outer_integral_only",
+        "incident_quadrature_estimated_absolute_error": "3.3124282193563483e-19",
+        "incident_quadrature_estimated_relative_error": "1.7795905656783927e-13",
+        "incident_quadrature_response_evaluations": "120",
+        "incident_quadrature_response_evaluations_by_partition": "24,24,24,24,24",
+        "incident_quadrature_supported_depth_samples": "38496",
+        "incident_quadrature_max_response_evaluations": "4096",
+        "incident_quadrature_max_refinement_depth": "6",
+        "incident_quadrature_max_unproven_zero_refinement_depth": "2",
+        "incident_quadrature_zero_policy": "reaction_or_supported_pdf_envelope_zero_proof_else_bounded_unknown_error",
+        "incident_quadrature_unresolved_intervals": "0",
+        "incident_quadrature_unresolved_intervals_by_partition": "0,0,0,0,0",
+        "incident_quadrature_status": "converged",
+        "depth_steps": "2",
+        "depth_quadrature": "gauss_legendre_4_split_at_transport_knots",
+        "depth_output_crossing_knots": "all_reachable_active_pdf_and_transport_crossings",
+        "depth_output_crossing_count": "391",
+        "depth_output_crossing_counts_by_partition": "296,84,11,0,0",
+        "depth_output_crossing_budget_exceeded_by_partition": "false,false,false,false,false",
+        "incident_crossing_budget_exceeded_by_partition": "false,false,false,false,false",
+        "depth_output_crossing_max_knots": "8192",
+        "depth_output_crossing_accuracy": "not_established_by_refinement",
+        "survival_integration_steps": "64",
+        "thickness_g_cm2": "0.01",
+        "primary_survival_to_depth": "TENDL_MF3_MT3",
+        "secondary_survival_to_exit": "TENDL_MF3_MT3",
+        "secondary_pdf_integration": "exact_endf_histogram_segments",
+        "mf6_reference_frame": "centre_of_mass_lct_3",
+        "mf6_cm_to_lab_transform": "not_included",
+        "secondary_angular_transport": "not_included",
+        "secondary_path_length": "radial_residual_thickness_diagnostic",
+        "secondary_generation": "single_collision_generation",
+        "higher_generation_cascade": "not_included"
+      }
+    }
+  ],
+  "comparisons": []
+}
