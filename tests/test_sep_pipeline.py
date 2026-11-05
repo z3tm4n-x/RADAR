@@ -1,8 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from types import SimpleNamespace
 
 import pytest
 
 from radar.core.products import SpectrumProduct
+from radar.core.log import LogLevel
 from radar.core.profiles import (
     OST_134_1044_2007_DOCUMENT,
     MethodologyProfile,
@@ -17,13 +19,26 @@ from radar.core.project import (
     ShieldingConfig,
 )
 from radar.core.result import ComponentStatus
-from radar.core.spectra import Spectrum1D
+from radar.core.spectra import (
+    ModelReference,
+    ParticleSpecies,
+    Spectrum1D,
+    TransformationStep,
+)
+from radar.core.spectrum_ops import mark_spectrum_incomplete
 from radar.core.types import (
+    AngularBasis,
+    AssessmentMode,
+    DoseQuantity,
     Particle,
     RadiationProductKind,
     RadiationSource,
     SolarActivityLevel,
+    SpectrumAxisKind,
+    SpectrumCompleteness,
+    SpectrumLocation,
     SpectrumQuantity,
+    TemporalBasis,
 )
 from radar.core.units import Unit
 from radar.pipelines.sep import (
@@ -80,6 +95,7 @@ def _sep_proton_spectrum(
         particle=Particle.PROTON,
         source=RadiationSource.SEP,
         model=model,
+        species=ParticleSpecies(symbol="p", atomic_number=1, mass_number=1),
     )
 
 
@@ -98,6 +114,7 @@ def _sep_hze_spectrum(
         particle=Particle.HZE,
         source=RadiationSource.SEP,
         model=model,
+        species=ParticleSpecies(symbol="Fe", atomic_number=26, mass_number=56),
     )
 
 
@@ -214,6 +231,117 @@ class _NormativeSepModel:
         )
 
 
+@dataclass(frozen=True)
+class _IncompleteNormativeSepModel(_NormativeSepModel):
+    reason: str = "SEP source energy domain incomplete: regression"
+
+    def calculate(self, model_input: SepModelInput) -> SepModelResult:
+        result = super().calculate(model_input)
+        products = tuple(
+            replace(
+                product,
+                spectrum=mark_spectrum_incomplete(product.spectrum, self.reason),
+            )
+            for product in result.products
+        )
+        return replace(
+            result,
+            spectrum=products[0].spectrum,
+            products=products,
+        )
+
+
+def _typed_mode_sep_product(
+    *,
+    kind: RadiationProductKind,
+    incomplete: bool,
+    mission_duration_s: float,
+) -> SpectrumProduct:
+    cumulative = kind is RadiationProductKind.MISSION_FLUENCE
+    spectrum = Spectrum1D(
+        x=(10.0, 30.0, 100.0),
+        y=(3.0, 2.0, 1.0),
+        x_unit=Unit.MEV,
+        y_unit=(
+            Unit.DIFFERENTIAL_FLUENCE
+            if cumulative
+            else Unit.DIFFERENTIAL_FLUX
+        ),
+        quantity=(
+            SpectrumQuantity.DIFFERENTIAL_FLUENCE
+            if cumulative
+            else SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX
+        ),
+        particle=Particle.PROTON,
+        source=RadiationSource.SEP,
+        model="mode_selective_sep",
+        axis_kind=SpectrumAxisKind.KINETIC_ENERGY,
+        angular_basis=AngularBasis.OMNIDIRECTIONAL_4PI,
+        temporal_basis=(
+            TemporalBasis.MISSION_TOTAL if cumulative else TemporalBasis.SEP_PEAK
+        ),
+        location=SpectrumLocation.OUTSIDE_MAGNETOSPHERE,
+        species=ParticleSpecies(symbol="p", atomic_number=1, mass_number=1),
+        assessment_mode=(
+            AssessmentMode.CUMULATIVE if cumulative else AssessmentMode.PEAK
+        ),
+        mission_duration_s=mission_duration_s if cumulative else None,
+        model_reference=ModelReference(
+            name="mode_selective_sep",
+            version="test-v1",
+            document_refs=("test normative document",),
+            dataset_refs=("test/mode_selective_sep.csv@sha256:test",),
+        ),
+        transformation_chain=(
+            TransformationStep(name="source_model", version="test-v1"),
+        ),
+        completeness=SpectrumCompleteness.COMPLETE,
+    )
+    if incomplete:
+        spectrum = mark_spectrum_incomplete(
+            spectrum,
+            f"{kind.value}_test_incomplete",
+        )
+    return SpectrumProduct(kind=kind, spectrum=spectrum, label=kind.value)
+
+
+@dataclass(frozen=True)
+class _ModeSelectiveSepModel:
+    incomplete_kind: RadiationProductKind
+
+    @property
+    def metadata(self) -> SourceModelMetadata:
+        return SourceModelMetadata(
+            source=RadiationSource.SEP,
+            model_family=SourceModelFamily.CUSTOM,
+            name="mode_selective_sep",
+            document="test normative document",
+            version="test-v1",
+        )
+
+    def calculate(self, model_input: SepModelInput) -> SepModelResult:
+        mission_duration_s = model_input.lifetime_years * 365.25 * 86400.0
+        products = tuple(
+            _typed_mode_sep_product(
+                kind=kind,
+                incomplete=kind is self.incomplete_kind,
+                mission_duration_s=mission_duration_s,
+            )
+            for kind in (
+                RadiationProductKind.MISSION_FLUENCE,
+                RadiationProductKind.PEAK_FLUX,
+            )
+        )
+        return SepModelResult(
+            spectrum=products[0].spectrum,
+            lifetime_years=model_input.lifetime_years,
+            exceedance_probability=model_input.exceedance_probability,
+            model="mode_selective_sep",
+            document="test normative document",
+            products=products,
+        )
+
+
 def test_sep_pipeline_returns_model_products_for_custom_profile() -> None:
     pipeline_result = calculate_sep_pipeline(
         config=_config(lifetime_years=2),
@@ -267,10 +395,10 @@ def test_sep_pipeline_accepts_ost_sep_model_and_integrates_shielding_let() -> No
 
     assert len(pipeline_result.source_products) == 6
     assert len(pipeline_result.on_orbit_products) == 6
-    assert len(pipeline_result.shielded_products) == 6
-    assert len(pipeline_result.let_products) == 3
-    assert len(pipeline_result.products) == 15
-    assert len(pipeline_result.spectra) == 15
+    assert len(pipeline_result.shielded_products) == 2
+    assert len(pipeline_result.let_products) == 1
+    assert len(pipeline_result.products) == 9
+    assert len(pipeline_result.spectra) == 9
     assert pipeline_result.products == (
         *pipeline_result.on_orbit_products,
         *pipeline_result.shielded_products,
@@ -278,18 +406,20 @@ def test_sep_pipeline_accepts_ost_sep_model_and_integrates_shielding_let() -> No
     )
 
     assert tuple(product.kind for product in pipeline_result.let_products) == (
-        RadiationProductKind.PEAK_LET_FLUX,
-        RadiationProductKind.MEAN_LET_FLUX,
         RadiationProductKind.MISSION_LET_FLUENCE,
     )
+    assert {
+        product.kind for product in pipeline_result.shielded_products
+    } == {RadiationProductKind.MISSION_FLUENCE}
 
     result = pipeline_result.calculation_result
     assert (
         result.component_status(SEP_GEOMAGNETIC_PENETRATION_COMPONENT)
-        is ComponentStatus.COMPLETED
+        is ComponentStatus.INCOMPLETE
     )
-    assert result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.COMPLETED
-    assert result.component_status(SEP_LET_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert result.component_status(SEP_LET_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.INCOMPLETE
     assert result.component_status(SEP_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
 
     for source_product, on_orbit_product in zip(
@@ -315,11 +445,12 @@ def test_sep_pipeline_accepts_ost_sep_model_and_integrates_shielding_let() -> No
         table.table_id
         for table in result.output_tables
     }
-    assert len(output_table_ids) == 21
+    assert len(output_table_ids) == 8
     assert "sep_proton_mission_fluence_on_orbit" in output_table_ids
-    assert "sep_hze_z26_peak_flux_on_orbit" in output_table_ids
+    assert "sep_hze_z26_peak_flux_on_orbit" not in output_table_ids
+    assert "sep_t0_1_peak_flux_sep_combined_let_behind_al" not in output_table_ids
     assert (
-        "sep_t0_1_peak_flux_sep_combined_let_behind_al"
+        "sep_t0_1_mission_fluence_sep_hze_aggregate_let_behind_al"
         in output_table_ids
     )
     assert (
@@ -333,8 +464,120 @@ def test_sep_pipeline_accepts_ost_sep_model_and_integrates_shielding_let() -> No
     }
     penetration_info = model_info_by_name["ost_134_1044_2007_geomagnetic_penetration"]
     assert penetration_info.version == SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION
+    assert penetration_info.status == "diagnostic"
+    qualification_entries = [
+        entry for entry in result.log.entries
+        if entry.stage == SEP_GEOMAGNETIC_PENETRATION_COMPONENT
+        and entry.level is LogLevel.WARNING
+    ]
+    assert len(qualification_entries) == 1
+    assert "shadow qualification unresolved" in dict(qualification_entries[0].details)[
+        "qualification_reasons"
+    ]
+    assert all(
+        any("shadow qualification unresolved" in reason
+            for reason in product.spectrum.incomplete_reasons)
+        for product in pipeline_result.on_orbit_products
+    )
+    with pytest.raises(ValueError, match="shadow qualification unresolved"):
+        pipeline_result.production_release_products()
     assert model_info_by_name[SEP_SHIELDING_MODEL].version == SEP_SHIELDING_MODEL_VERSION
     assert model_info_by_name[SEP_LET_MODEL].version == SEP_LET_MODEL_VERSION
+
+
+@pytest.mark.parametrize("mode", list(AssessmentMode))
+def test_sep_pipeline_geometric_qualification_blocks_each_selected_mode(
+    mode: AssessmentMode,
+) -> None:
+    config = replace(
+        _config(profile=MethodologyProfile.OST_134_1044_2007), assessment_mode=mode,
+        dose_quantity=(DoseQuantity.DOSE_RATE if mode is AssessmentMode.PEAK
+                       else DoseQuantity.ACCUMULATED_DOSE),
+        dose_unit=Unit.RAD_PER_SECOND if mode is AssessmentMode.PEAK else Unit.RAD,
+    )
+    result = calculate_sep_pipeline(config=config, sep_model=_NormativeSepModel())
+    assert all(
+        not product.spectrum.incomplete_reasons for product in result.source_products
+    )
+    assert all(
+        any("shadow qualification unresolved" in reason
+            for reason in product.spectrum.incomplete_reasons)
+        for product in result.on_orbit_products
+    )
+    assert all(
+        any("representative of the mission" in reason
+            for reason in product.spectrum.incomplete_reasons)
+        for product in result.on_orbit_products
+    )
+    with pytest.raises(ValueError, match="shadow qualification unresolved"):
+        result.production_release_products()
+    with pytest.raises(ValueError, match="representative of the mission"):
+        result.production_release_products()
+    assert all(any("local-time convention" in reason
+                   for reason in product.spectrum.incomplete_reasons)
+               for product in result.on_orbit_products)
+    with pytest.raises(ValueError, match="local-time convention"):
+        result.production_release_products()
+
+
+def test_sep_pipeline_propagates_source_quarantine_to_every_downstream_status() -> None:
+    pipeline_result = calculate_sep_pipeline(
+        config=_config(
+            profile=MethodologyProfile.OST_134_1044_2007,
+            thicknesses_g_cm2=(0.1,),
+        ),
+        sep_model=_IncompleteNormativeSepModel(),
+    )
+    result = pipeline_result.calculation_result
+
+    for component in (
+        SEP_MODEL_COMPONENT,
+        SEP_GEOMAGNETIC_PENETRATION_COMPONENT,
+        SEP_SHIELDING_COMPONENT,
+        SEP_LET_COMPONENT,
+        SEP_PIPELINE_COMPONENT,
+    ):
+        assert result.component_status(component) is ComponentStatus.INCOMPLETE
+    with pytest.raises(ValueError, match="SEP source energy domain incomplete"):
+        pipeline_result.production_release_products()
+
+
+def test_sep_unselected_incomplete_mode_does_not_block_cumulative_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "radar.data.integrity.require_release_eligible_normative_resource",
+        lambda _path: SimpleNamespace(sha256="test"),
+    )
+    pipeline_result = calculate_sep_pipeline(
+        config=_config(),
+        sep_model=_ModeSelectiveSepModel(
+            incomplete_kind=RadiationProductKind.PEAK_FLUX,
+        ),
+    )
+
+    result = pipeline_result.calculation_result
+    assert result.component_status(SEP_MODEL_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
+    released = pipeline_result.production_release_products()
+    assert tuple(product.kind for product in released) == (
+        RadiationProductKind.MISSION_FLUENCE,
+    )
+
+
+def test_sep_selected_incomplete_mode_blocks_cumulative_release() -> None:
+    pipeline_result = calculate_sep_pipeline(
+        config=_config(),
+        sep_model=_ModeSelectiveSepModel(
+            incomplete_kind=RadiationProductKind.MISSION_FLUENCE,
+        ),
+    )
+
+    result = pipeline_result.calculation_result
+    assert result.component_status(SEP_MODEL_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.INCOMPLETE
+    with pytest.raises(ValueError, match="mission_fluence_test_incomplete"):
+        pipeline_result.production_release_products()
 
 
 def test_sep_pipeline_result_rejects_empty_spectra() -> None:

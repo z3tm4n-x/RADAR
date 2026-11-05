@@ -1,6 +1,12 @@
 from radar.core.log import LogLevel
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
-from radar.core.result import CalculationResult, ComponentStatus, InputDataInfo, ModelInfo
+from radar.core.result import (
+    NORMATIVE_RELEASE_COMPONENT,
+    CalculationResult,
+    ComponentStatus,
+    InputDataInfo,
+    ModelInfo,
+)
 from radar.core.units import Unit
 from radar.output_tables import OutputTableColumn, OutputTableKind, output_table_from_rows
 
@@ -18,6 +24,23 @@ def test_result_starts_without_errors() -> None:
     assert result.log.entries == ()
     assert result.component_status("solar_activity") is ComponentStatus.NOT_STARTED
     assert result.has_errors() is False
+    assert result.is_release_ready() is False
+
+
+def test_release_ready_requires_explicit_completed_validation() -> None:
+    result = CalculationResult(config=_config()).set_component_status(
+        NORMATIVE_RELEASE_COMPONENT,
+        ComponentStatus.COMPLETED,
+    )
+
+    assert result.is_release_ready() is True
+
+    incomplete = result.set_component_status(
+        NORMATIVE_RELEASE_COMPONENT,
+        ComponentStatus.INCOMPLETE,
+    )
+    assert incomplete.has_errors() is False
+    assert incomplete.is_release_ready() is False
 
 
 def test_result_adds_log_immutably() -> None:

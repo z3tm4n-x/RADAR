@@ -16,6 +16,7 @@ from radar.gcr.penetration import (
     gcr_product_mass_to_charge,
     gcr_rigidity_grid_for_products,
 )
+from radar.gcr.products import GcrFluxTimeBin, calculate_gcr_mission_products
 from radar.physics.rigidity import (
     ion_kinetic_energy_per_nucleon_to_rigidity_gv,
     proton_kinetic_energy_to_rigidity_gv,
@@ -155,6 +156,41 @@ def test_apply_gcr_penetration_to_products_preserves_product_semantics() -> None
         "gost_gcr_source_outside_magnetosphere:He:total:mission_products:maximum_flux"
         "+test_penetration+derived_from_"
     )
+
+
+def test_gcr_penetration_preserves_declared_finite_integral_domain() -> None:
+    source_spectrum = Spectrum1D(
+        x=(10.0, 20.0),
+        y=(0.01, 0.0025),
+        x_unit=Unit.MEV,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+        quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
+        particle=Particle.PROTON,
+        source=RadiationSource.GCR,
+        model="finite_domain_source",
+    )
+    source_products = calculate_gcr_mission_products(
+        (GcrFluxTimeBin(spectrum=source_spectrum, duration_seconds=1.0),),
+        upper_energy_bound=40.0,
+    )
+    penetration = PenetrationFunction(
+        rigidity_grid=RigidityGrid(values_gv=(0.001, 1000.0)),
+        values=(0.5, 0.5),
+        model="test_penetration",
+    )
+
+    transformed = apply_gcr_penetration_to_products(
+        products=(
+            source_products.mean_flux,
+            source_products.mean_integral_flux,
+        ),
+        penetration=penetration,
+    )
+
+    assert transformed[1].spectrum.y == pytest.approx((0.0375, 0.0125))
+    assert dict(transformed[1].spectrum.transformation_chain[-1].parameters)[
+        "upper_energy_bound"
+    ] == "40"
 
 
 def test_apply_gcr_penetration_to_products_supports_mission_fluence() -> None:

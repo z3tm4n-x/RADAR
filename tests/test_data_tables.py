@@ -33,7 +33,7 @@ def test_load_normative_collection_manifest() -> None:
     assert manifest.schema_version == "1.0"
     assert manifest.collection_id == "ost_134_1044_2007"
     assert manifest.document == "ОСТ 134-1044-2007"
-    assert manifest.status == "partially_transferred"
+    assert manifest.status.startswith("legacy_table_index")
     assert len(manifest.tables) == 1
 
 

@@ -211,6 +211,7 @@ def test_source_model_registration_for_custom_profile_has_no_default() -> None:
             source=RadiationSource.SEP,
         )
 
+
 def test_source_model_bundle_for_plain_ost_profile() -> None:
     bundle = source_model_bundle_for_profile(MethodologyProfile.OST_134_1044_2007)
 
@@ -285,6 +286,7 @@ def test_source_model_bundle_for_custom_profile_has_no_default_models() -> None:
     with pytest.raises(ValueError, match="No registered source model"):
         source_model_bundle_for_profile(MethodologyProfile.CUSTOM)
 
+
 def test_source_model_bundle_for_explicit_selection() -> None:
     selection = SourceModelSelectionConfig.from_profile(
         MethodologyProfile.OST_WITH_GOST_SEP_GCR,
@@ -330,7 +332,6 @@ def test_source_model_bundle_for_custom_selection_has_no_default_models() -> Non
         source_model_bundle_for_selection(selection)
 
 
-
 def test_source_model_instances_for_profile_returns_default_instances() -> None:
     sep_model, gcr_model, erb_model = source_model_instances_for_profile(
         MethodologyProfile.OST_134_1044_2007
@@ -339,7 +340,7 @@ def test_source_model_instances_for_profile_returns_default_instances() -> None:
     assert isinstance(sep_model, OstSepModel)
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)
-    assert sep_model.version == "not_implemented"
+    assert sep_model.version == "ost_134_1044_2007_change_2_appendix_b_v1"
 
 
 def test_source_model_instances_for_selection_configures_ost_sep_model() -> None:
@@ -389,7 +390,6 @@ def test_source_model_instances_for_selection_respects_ae8_ap8_erb_profile() -> 
     assert isinstance(erb_model, Ae8Ap8ErbModel)
 
 
-
 def _calculation_config_for_model_builder(
     profile: MethodologyProfile = MethodologyProfile.OST_134_1044_2007,
     *,
@@ -416,7 +416,7 @@ def test_source_model_instances_for_config_returns_default_instances_without_sep
     assert isinstance(sep_model, OstSepModel)
     assert sep_model.energy_grid_mev == ()
     assert sep_model.monthly_smoothed_wolf_numbers == ()
-    assert sep_model.version == "not_implemented"
+    assert sep_model.version == "ost_134_1044_2007_change_2_appendix_b_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)
@@ -433,10 +433,11 @@ def test_source_model_instances_for_config_configures_ost_sep_model() -> None:
     assert isinstance(sep_model, OstSepModel)
     assert sep_model.energy_grid_mev == (10.0, 20.0, 100.0)
     assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
-    assert sep_model.monthly_smoothed_wolf_numbers[:12] == (
-        sep_model.monthly_smoothed_wolf_numbers[0],
-    ) * 12
-    assert sep_model.version == "protons_only_v1"
+    assert (
+        sep_model.monthly_smoothed_wolf_numbers[:12]
+        == (sep_model.monthly_smoothed_wolf_numbers[0],) * 12
+    )
+    assert sep_model.version == "ost_134_1044_2007_change_2_appendix_b_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)
@@ -455,7 +456,7 @@ def test_source_model_instances_for_config_configures_ost_sep_hze_model() -> Non
     assert sep_model.energy_grid_mev == (10.0, 20.0, 100.0)
     assert sep_model.hze_energy_grid_mev_per_nucleon == (5.0, 15.0, 50.0)
     assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
-    assert sep_model.version == "protons_hze_v1"
+    assert sep_model.version == "ost_134_1044_2007_change_2_appendix_b_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)
@@ -473,14 +474,27 @@ def test_source_model_instances_for_pipeline_config_uses_sep_hze_defaults() -> N
         == DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
     )
     assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
-    assert sep_model.version == "protons_hze_v1"
+    assert sep_model.version == "ost_134_1044_2007_change_2_appendix_b_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
-    assert (
-        gcr_model.energy_grid_mev_per_nucleon
-        == DEFAULT_GCR_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
-    )
+    assert gcr_model.energy_grid_mev_per_nucleon == DEFAULT_GCR_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
     assert isinstance(erb_model, OstErbModel)
+
+
+def test_source_model_bundle_uses_one_calendar_timeline_for_all_sources() -> None:
+    config = _calculation_config_for_model_builder(lifetime_years=2)
+
+    sep_model, gcr_model, erb_model = source_model_instances_for_pipeline_config(config)
+
+    assert isinstance(gcr_model, OstGcrModel)
+    assert isinstance(erb_model, OstErbModel)
+    assert gcr_model.solar_activity is erb_model.solar_activity
+    assert gcr_model.solar_activity is not None
+    assert sep_model.monthly_smoothed_wolf_numbers == tuple(
+        point.wolf_number for point in gcr_model.solar_activity.months
+    )
+    assert gcr_model.solar_activity.reference_start_year == 2020
+    assert gcr_model.solar_activity.reference_cycle_number == 25
 
 
 def test_source_model_instances_for_pipeline_config_can_override_gcr_grid() -> None:
@@ -518,7 +532,7 @@ def test_source_model_instances_for_pipeline_config_can_disable_sep_hze_grid() -
     assert isinstance(sep_model, OstSepModel)
     assert sep_model.energy_grid_mev == DEFAULT_SEP_PROTON_PIPELINE_ENERGY_GRID_MEV
     assert sep_model.hze_energy_grid_mev_per_nucleon == ()
-    assert sep_model.version == "protons_only_v1"
+    assert sep_model.version == "ost_134_1044_2007_change_2_appendix_b_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)
@@ -541,7 +555,7 @@ def test_source_model_instances_for_pipeline_config_respects_gost_sep_profile() 
         == DEFAULT_SEP_HZE_PIPELINE_ENERGY_GRID_MEV_PER_NUCLEON
     )
     assert sep_model.event_count_policy is SepEventCountPolicy.GOST_R_25645_165_2025_W1_0
-    assert sep_model.version == "protons_hze_v1"
+    assert sep_model.version == "gost_r_25645_165_2025_draft_v1"
 
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)
@@ -594,6 +608,6 @@ def test_source_model_instances_for_config_configures_gost_sep_w1_model() -> Non
     assert sep_model.energy_grid_mev == (10.0, 20.0)
     assert len(sep_model.monthly_smoothed_wolf_numbers) == 24
     assert sep_model.event_count_policy is SepEventCountPolicy.GOST_R_25645_165_2025_W1_0
-    assert sep_model.version == "protons_only_v1"
+    assert sep_model.version == "gost_r_25645_165_2025_draft_v1"
     assert isinstance(gcr_model, OstGcrModel)
     assert isinstance(erb_model, OstErbModel)

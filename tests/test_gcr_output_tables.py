@@ -1,6 +1,7 @@
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
 from radar.core.types import (
+    LetSpectrumRole,
     Particle,
     RadiationProductKind,
     RadiationSource,
@@ -56,6 +57,7 @@ def _let_spectrum(
     model: str,
     quantity: SpectrumQuantity = SpectrumQuantity.LET_DIFFERENTIAL_FLUX,
     y_unit: Unit = Unit.DIFFERENTIAL_LET_FLUX,
+    let_role: LetSpectrumRole | None = None,
 ) -> Spectrum1D:
     return Spectrum1D(
         x=(1.0, 10.0, 100.0),
@@ -66,6 +68,7 @@ def _let_spectrum(
         particle=particle,
         source=RadiationSource.GCR,
         model=model,
+        let_role=let_role,
     )
 
 
@@ -180,6 +183,7 @@ def _let_products() -> GcrLetProductsResult:
     return GcrLetProductsResult(
         proton_let=_let_spectrum(
             particle=Particle.PROTON,
+            let_role=LetSpectrumRole.PROTON_DIAGNOSTIC,
             model=(
                 "gost_gcr_source_outside_magnetosphere:"
                 "H:total:mission_products:mean_flux+penetration+shielding+proton_let"
@@ -188,17 +192,27 @@ def _let_products() -> GcrLetProductsResult:
         hze_let_by_z={
             26: _let_spectrum(
                 particle=Particle.HZE,
+                let_role=LetSpectrumRole.HZE_SPECIES,
                 model=(
                     "gost_gcr_source_outside_magnetosphere:"
                     "Fe:total:mission_products:mean_flux+penetration+shielding+hze_let"
                 ),
             )
         },
-        combined_let=_let_spectrum(
+        hze_aggregate_let=_let_spectrum(
             particle=Particle.HZE,
+            let_role=LetSpectrumRole.HZE_DIRECT_ION,
             model=(
                 "gost_gcr_source_outside_magnetosphere:"
-                "H:total:mission_products:mean_flux+penetration+shielding+combined_let"
+                "Fe:total:mission_products:mean_flux+penetration+shielding+hze_aggregate_let"
+            ),
+        ),
+        mixed_let_diagnostic=_let_spectrum(
+            particle=Particle.MIXED_ION,
+            let_role=LetSpectrumRole.MIXED_DIAGNOSTIC,
+            model=(
+                "gost_gcr_source_outside_magnetosphere:"
+                "H:total:mission_products:mean_flux+penetration+shielding+mixed_let"
             ),
         ),
         let_centers=(1.0, 10.0, 100.0),
@@ -290,6 +304,7 @@ def test_gcr_let_output_tables_include_proton_hze_and_combined() -> None:
     assert tuple(table.table_id for table in tables) == (
         "gcr_proton_let_behind_al",
         "gcr_hze_z26_let_behind_al",
+        "gcr_hze_aggregate_let_behind_al",
         "gcr_combined_let_behind_al",
     )
 
@@ -297,7 +312,8 @@ def test_gcr_let_output_tables_include_proton_hze_and_combined() -> None:
     assert combined.columns[0].title == "ЛПЭ"
     assert combined.columns[1].title == "Дифференциальный ЛПЭ-поток"
     assert ("stage", "let") in combined.metadata
-    assert ("component", "combined_let") in combined.metadata
+    assert ("component", "mixed_proton_hze_let_diagnostic") in combined.metadata
+    assert ("semantic_role", "diagnostic_only") in combined.metadata
     assert ("hze_z_values", "26") in combined.metadata
     assert ("let_target", "Si") in combined.metadata
     assert ("dose_status", GCR_OUTPUT_DOSE_STATUS_NOT_CALCULATED) in combined.metadata
@@ -314,7 +330,7 @@ def test_gcr_shielding_let_output_tables_do_not_create_dose_or_see_tables() -> N
     assert all(table.kind is OutputTableKind.SPECTRUM for table in tables)
     assert all(table.kind is not OutputTableKind.DOSE for table in tables)
     assert all(table.kind is not OutputTableKind.SINGLE_EVENT for table in tables)
-    assert len(tables) == 8
+    assert len(tables) == 9
 
 
 

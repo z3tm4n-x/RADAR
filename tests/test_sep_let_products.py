@@ -1,7 +1,13 @@
 ﻿import pytest
 
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.shielding.hze_al import HzeAlRangeTable
 from radar.shielding.hze_si_let import HzeSiLetTable
@@ -145,7 +151,7 @@ def _tables() -> ShieldingNormativeTables:
         hze_al_ranges_by_z={26: _hze_al_table()},
         hze_si_let_by_z={26: _hze_si_table()},
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 10.0),
             sigma_barn=(0.0, 0.0),
         ),
@@ -166,16 +172,20 @@ def test_sep_let_products_build_proton_hze_and_combined_let() -> None:
 
     assert result.proton_let.x == result.let_centers
     assert result.hze_let_by_z[26].x == result.let_centers
-    assert result.combined_let.x == result.let_centers
+    assert result.hze_aggregate_let.x == result.let_centers
+    assert result.mixed_let_diagnostic.x == result.let_centers
     assert result.proton_let.x_unit is Unit.LET
-    assert result.combined_let.y_unit is Unit.DIFFERENTIAL_LET_FLUENCE
-    assert result.combined_let.quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE
+    assert result.hze_aggregate_let.y_unit is Unit.DIFFERENTIAL_LET_FLUENCE
+    assert result.hze_aggregate_let.quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE
 
     expected = tuple(
         result.proton_let.y[index] + result.hze_let_by_z[26].y[index]
         for index in range(len(result.let_centers))
     )
-    assert result.combined_let.y == pytest.approx(expected)
+    assert result.hze_aggregate_let.y == pytest.approx(result.hze_let_by_z[26].y)
+    assert result.mixed_let_diagnostic.y == pytest.approx(expected)
+    assert result.hze_aggregate_let.let_role is LetSpectrumRole.HZE_DIRECT_ION
+    assert result.mixed_let_diagnostic.let_role is LetSpectrumRole.MIXED_DIAGNOSTIC
 
 
 def test_sep_combined_let_product_for_mission_fluence() -> None:
@@ -190,7 +200,8 @@ def test_sep_combined_let_product_for_mission_fluence() -> None:
     assert product.spectrum.x_unit is Unit.LET
     assert product.spectrum.y_unit is Unit.DIFFERENTIAL_LET_FLUENCE
     assert product.spectrum.quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE
-    assert product.spectrum.particle is Particle.HZE
+    assert product.spectrum.particle is Particle.MIXED_ION
+    assert product.spectrum.let_role is LetSpectrumRole.MIXED_DIAGNOSTIC
 
 
 def test_sep_combined_let_product_for_peak_flux() -> None:
@@ -250,11 +261,12 @@ def test_sep_let_products_model_records_method_flags() -> None:
         let_centers=(1.0, 3.1622776601683795, 10.0, 31.622776601683793, 100.0),
     )
 
-    assert SEP_LET_PRODUCTS_MODEL in result.combined_let.model
-    assert SEP_LET_PROTON_TOTAL_AFTER_AL in result.combined_let.model
-    assert SEP_LET_HZE_PRIMARY_AFTER_AL in result.combined_let.model
-    assert SEP_LET_SILICON_TARGET in result.combined_let.model
-    assert SEP_LET_NO_HIDDEN_4PI in result.combined_let.model
+    assert SEP_LET_PRODUCTS_MODEL in result.hze_aggregate_let.model
+    assert SEP_LET_HZE_PRIMARY_AFTER_AL in result.hze_aggregate_let.model
+    assert SEP_LET_PROTON_TOTAL_AFTER_AL not in result.hze_aggregate_let.model
+    assert SEP_LET_SILICON_TARGET in result.hze_aggregate_let.model
+    assert SEP_LET_NO_HIDDEN_4PI in result.hze_aggregate_let.model
+    assert SEP_LET_PROTON_TOTAL_AFTER_AL in result.mixed_let_diagnostic.model
 
 
 def test_sep_let_products_reject_empty_hze_results() -> None:

@@ -1,7 +1,25 @@
 ﻿import pytest
 
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+import json
+
+from radar.core.spectra import (
+    ModelReference,
+    ParticleSpecies,
+    ShieldingDescriptor,
+    Spectrum1D,
+    TransformationStep,
+)
+from radar.core.types import (
+    AngularBasis,
+    AssessmentMode,
+    Particle,
+    RadiationSource,
+    SpectrumAxisKind,
+    SpectrumCompleteness,
+    SpectrumLocation,
+    SpectrumQuantity,
+    TemporalBasis,
+)
 from radar.core.units import Unit
 from radar.output_tables import (
     OutputTableColumn,
@@ -133,6 +151,66 @@ def test_spectrum_output_table_rejects_canonical_metadata_override() -> None:
             spectrum=_spectrum(),
             metadata={"quantity": "wrong"},
         )
+
+
+def test_spectrum_output_table_serializes_full_production_contract() -> None:
+    duration_s = 365.25 * 86400.0
+    spectrum = Spectrum1D(
+        x=(10.0, 20.0),
+        y=(2.0, 1.0),
+        x_unit=Unit.MEV,
+        y_unit=Unit.DIFFERENTIAL_FLUENCE,
+        quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
+        particle=Particle.PROTON,
+        source=RadiationSource.SEP,
+        model="ost_sep+shield",
+        axis_kind=SpectrumAxisKind.KINETIC_ENERGY,
+        angular_basis=AngularBasis.OMNIDIRECTIONAL_4PI,
+        temporal_basis=TemporalBasis.MISSION_TOTAL,
+        location=SpectrumLocation.BEHIND_SHIELD,
+        species=ParticleSpecies(symbol="p", atomic_number=1, mass_number=1),
+        shielding=ShieldingDescriptor("aluminium", 1.5),
+        assessment_mode=AssessmentMode.CUMULATIVE,
+        mission_duration_s=duration_s,
+        model_reference=ModelReference(
+            name="ost_sep+shield",
+            version="protons_v1",
+            document_refs=("OST 134-1044-2007",),
+            dataset_refs=("sep_protons/ost_134_1044_2007_coefficients.csv",),
+        ),
+        transformation_chain=(
+            TransformationStep(
+                name="aluminium_transport",
+                version="1",
+                parameters=(("thickness_g_cm2", "1.5"),),
+            ),
+        ),
+        completeness=SpectrumCompleteness.COMPLETE,
+    )
+
+    metadata = dict(
+        spectrum_output_table(
+            table_id="production",
+            title="Production",
+            spectrum=spectrum,
+        ).metadata
+    )
+
+    assert metadata["axis_kind"] == SpectrumAxisKind.KINETIC_ENERGY.value
+    assert metadata["angular_basis"] == AngularBasis.OMNIDIRECTIONAL_4PI.value
+    assert metadata["temporal_basis"] == TemporalBasis.MISSION_TOTAL.value
+    assert metadata["assessment_mode"] == AssessmentMode.CUMULATIVE.value
+    assert metadata["location"] == SpectrumLocation.BEHIND_SHIELD.value
+    assert float(metadata["mission_duration_s"]) == pytest.approx(duration_s)
+    assert metadata["species_z"] == "1"
+    assert metadata["species_a"] == "1"
+    assert metadata["shielding_material"] == "aluminium"
+    assert metadata["model_version"] == "protons_v1"
+    assert json.loads(metadata["model_document_refs"]) == ["OST 134-1044-2007"]
+    assert json.loads(metadata["transformation_chain"])[0]["name"] == (
+        "aluminium_transport"
+    )
+    assert metadata["completeness"] == SpectrumCompleteness.COMPLETE.value
 
 
 def test_let_spectrum_is_regular_spectrum_with_let_axis() -> None:

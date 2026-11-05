@@ -1,10 +1,17 @@
 ﻿import pytest
 
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationSource,
+    SpectrumOrdinateBasis,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.shielding.let_combined import (
     COMBINED_LET_MODEL,
+    combine_hze_let_spectra,
     combine_let_spectra,
     combine_proton_and_hze_let_spectra,
     rebin_let_spectrum_to_grid,
@@ -68,6 +75,9 @@ def test_rebin_let_spectrum_preserves_integral_on_wider_grid() -> None:
     )
 
     assert _counts_integral(rebinned) == pytest.approx(_counts_integral(source))
+    assert rebinned.ordinate_basis is SpectrumOrdinateBasis.BIN_AVERAGE
+    assert rebinned.bin_edges is not None
+    assert rebinned.integral_conserved() == pytest.approx(_counts_integral(source))
 
 
 def test_combine_let_spectra_on_same_grid_adds_values() -> None:
@@ -82,6 +92,8 @@ def test_combine_let_spectra_on_same_grid_adds_values() -> None:
     assert combined.y_unit is Unit.DIFFERENTIAL_LET_FLUENCE
     assert combined.quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE
     assert combined.model == COMBINED_LET_MODEL
+    assert combined.particle is Particle.MIXED_ION
+    assert combined.let_role is LetSpectrumRole.MIXED_DIAGNOSTIC
 
 
 def test_combine_let_spectra_rebins_to_common_grid() -> None:
@@ -116,7 +128,20 @@ def test_combine_proton_and_hze_let_spectra() -> None:
     )
 
     assert combined.y == pytest.approx((12.0, 15.0, 18.0))
-    assert combined.particle is Particle.HZE
+    assert combined.particle is Particle.MIXED_ION
+    assert combined.let_role is LetSpectrumRole.MIXED_DIAGNOSTIC
+
+
+def test_hze_aggregate_is_exact_sum_of_individual_hze_spectra() -> None:
+    hze_fe = _let_spectrum(y=(4.0, 5.0, 6.0), particle=Particle.HZE, model="fe")
+    hze_o = _let_spectrum(y=(7.0, 8.0, 9.0), particle=Particle.HZE, model="o")
+
+    aggregate = combine_hze_let_spectra(hze_let_spectra=(hze_fe, hze_o))
+
+    assert aggregate.y == pytest.approx((11.0, 13.0, 15.0))
+    assert aggregate.particle is Particle.HZE
+    assert aggregate.let_role is LetSpectrumRole.HZE_DIRECT_ION
+    assert aggregate.species is not None and aggregate.species.is_aggregate
 
 
 def test_combine_rejects_energy_spectrum() -> None:

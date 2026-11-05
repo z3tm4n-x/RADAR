@@ -1,9 +1,13 @@
+import pytest
+
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
 from radar.core.types import (
+    LetSpectrumRole,
     Particle,
     RadiationProductKind,
     RadiationSource,
+    SpectrumLocation,
     SpectrumQuantity,
 )
 from radar.core.units import Unit
@@ -11,6 +15,7 @@ from radar.gcr.pipeline_shielding import (
     calculate_gcr_shielding_let_products,
     calculate_gcr_shielding_let_products_for_thickness,
 )
+from radar.nuclear.tendl import TendlIncidentEnergySupport
 from radar.shielding.hze_al import HzeAlRangeTable
 from radar.shielding.hze_si_let import HzeSiLetTable
 from radar.shielding.proton_al import ProtonAlRangeEnergyTable
@@ -93,7 +98,7 @@ def _tables() -> ShieldingNormativeTables:
         hze_al_ranges_by_z={26: _hze_al_table()},
         hze_si_let_by_z={26: _hze_si_table()},
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 300.0),
             sigma_barn=(0.0, 0.0),
         ),
@@ -217,6 +222,23 @@ def test_gcr_pipeline_shielding_let_products_for_one_thickness() -> None:
         RadiationProductKind.MAXIMUM_LET_FLUX,
         RadiationProductKind.MISSION_LET_FLUENCE,
     )
+    assert all(
+        product.spectrum.particle is Particle.HZE
+        and product.spectrum.let_role is LetSpectrumRole.HZE_DIRECT_ION
+        for product in result.let_products
+    )
+    assert len(result.diagnostic_let_products) == 6
+    for let_result in result.let_results_by_kind.values():
+        expected_hze = tuple(
+            sum(spectrum.y[index] for spectrum in let_result.hze_let_by_z.values())
+            for index in range(len(let_result.let_centers))
+        )
+        expected_mixed = tuple(
+            let_result.proton_let.y[index] + expected_hze[index]
+            for index in range(len(let_result.let_centers))
+        )
+        assert let_result.hze_aggregate_let.y == pytest.approx(expected_hze)
+        assert let_result.mixed_let_diagnostic.y == pytest.approx(expected_mixed)
 
 
 def test_gcr_pipeline_shielding_let_products_for_multiple_thicknesses() -> None:
@@ -231,7 +253,53 @@ def test_gcr_pipeline_shielding_let_products_for_multiple_thicknesses() -> None:
     assert all(len(result.let_products) == 3 for result in results)
 
 
-def test_gcr_pipeline_shielding_skips_hze_without_tables_but_keeps_protons() -> None:
+def test_gcr_pipeline_propagates_tendl_support_blocker_to_release_result() -> None:
+    support = TendlIncidentEnergySupport(
+        minimum_mev=0.0,
+        maximum_mev=50.0,
+        dataset_ref="test TENDL",
+    )
+    base_tables = _tables()
+    limited_tables = ShieldingNormativeTables(
+        **{
+            **base_tables.__dict__,
+            "al27_nonelastic_xs": Al27NonelasticCrossSectionTable(
+                mt=3,
+                energy_mev=(1.0, 300.0),
+                sigma_barn=(0.0, 0.0),
+                incident_energy_support=support,
+            ),
+            "secondary_proton_kernel": SecondaryProtonKernel(
+                products=base_tables.secondary_proton_kernel.products,
+                cross_sections_by_mt=(
+                    base_tables.secondary_proton_kernel.cross_sections_by_mt
+                ),
+                incident_energy_support=support,
+            ),
+        }
+    )
+
+    result = calculate_gcr_shielding_let_products_for_thickness(
+        products=(_products()[0],),
+        tables=limited_tables,
+        thickness_g_cm2=0.1,
+        survival_integration_steps=4,
+        secondary_depth_steps=4,
+    )
+
+    expected_tendl_reasons = {
+        "TENDL p+Al-27 nonelastic survival is incomplete: nonzero transported "
+        "proton contribution exists outside TENDL incident-energy support [0, 50] MeV",
+        "TENDL p+Al-27 secondary-proton production is incomplete: nonzero "
+        "transported proton contribution exists outside TENDL incident-energy "
+        "support [0, 50] MeV",
+    }
+    assert expected_tendl_reasons <= set(result.incomplete_reasons)
+    with pytest.raises(ValueError, match="incomplete spectra"):
+        result.shielded_products[0].spectrum.validate_production_contract()
+
+
+def test_gcr_pipeline_zero_shield_preserves_hze_without_transport_table() -> None:
     product = _product(
         particle=Particle.HZE,
         symbol="U",
@@ -246,9 +314,64 @@ def test_gcr_pipeline_shielding_skips_hze_without_tables_but_keeps_protons() -> 
         thickness_g_cm2=0.0,
     )
 
+    assert len(result.shielded_products) == 2
+    shielded_hze = next(
+        item
+        for item in result.shielded_products
+        if item.spectrum.particle is Particle.HZE
+    )
+    assert shielded_hze.spectrum.x == product.spectrum.x
+    assert shielded_hze.spectrum.y == product.spectrum.y
+    assert shielded_hze.spectrum.location is SpectrumLocation.BEHIND_SHIELD
+    assert shielded_hze.spectrum.shielding is not None
+    assert shielded_hze.spectrum.shielding.material == "aluminium"
+    assert shielded_hze.spectrum.shielding.areal_density_g_cm2 == 0.0
+    assert result.let_products == ()
+    assert result.incomplete_reasons == ()
+    assert result.hze_by_kind == {}
+
+
+def test_gcr_pipeline_positive_shield_marks_missing_hze_table_incomplete() -> None:
+    product = _product(
+        particle=Particle.HZE,
+        symbol="U",
+        kind=RadiationProductKind.MEAN_FLUX,
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+    )
+    result = calculate_gcr_shielding_let_products_for_thickness(
+        products=(_products()[0], product),
+        tables=_tables(),
+        thickness_g_cm2=0.1,
+    )
+
     assert len(result.shielded_products) == 1
     assert result.shielded_products[0].spectrum.particle is Particle.PROTON
+    assert "no HZE aluminium range table is available for Z=92" in set(
+        result.incomplete_reasons
+    )
+    assert result.hze_by_kind == {}
+
+
+def test_gcr_pipeline_shielding_marks_missing_hze_let_table_incomplete() -> None:
+    tables = ShieldingNormativeTables(
+        **{
+            **_tables().__dict__,
+            "hze_si_let_by_z": {},
+        }
+    )
+
+    result = calculate_gcr_shielding_let_products_for_thickness(
+        products=(_products()[0], _products()[3]),
+        tables=tables,
+        thickness_g_cm2=0.0,
+    )
+
+    assert len(result.shielded_products) == 2
     assert result.let_products == ()
+    assert result.incomplete_reasons == (
+        "no HZE silicon LET table is available for Z=26 (mean_flux)",
+    )
 
 
 

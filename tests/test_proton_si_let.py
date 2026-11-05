@@ -1,15 +1,19 @@
 ﻿from pathlib import Path
 
+from math import exp, log
+
 import pytest
 
 from radar.core.spectra import Spectrum1D
 from radar.core.types import Particle, RadiationSource, SpectrumQuantity
 from radar.core.units import Unit
+from radar.data.integrity import load_normative_integrity_manifest
 from radar.shielding.proton_si_let import (
     ProtonSiLetTable,
     load_proton_si_let_table,
     proton_energy_spectrum_to_let_spectrum,
 )
+from radar.shielding.resources import load_normative_proton_si_let_table
 
 
 def _table() -> ProtonSiLetTable:
@@ -43,6 +47,40 @@ def test_proton_si_let_table_interpolates() -> None:
     table = _table()
 
     assert table.total_let_at_energy(55.0) == pytest.approx(3.5)
+
+
+def test_declared_proton_let_law_matches_synthetic_linear_not_log_midpoint() -> None:
+    entry = load_normative_integrity_manifest().by_path("stopping/proton_si_let.csv")
+    table = ProtonSiLetTable(
+        energy_mev=(1.0, 100.0),
+        let_total_mev_cm2_mg=(100.0, 1.0),
+        let_electronic_mev_cm2_mg=(100.0, 1.0),
+        let_nuclear_mev_cm2_mg=(0.0, 0.0),
+    )
+
+    assert entry.interpolation_law == "linear_linear_piecewise"
+    assert table.total_let_at_energy(50.5) == 50.5
+    # These endpoints give L(E)=100/E under the old claimed log-log law.
+    assert table.total_let_at_energy(50.5) != pytest.approx(100.0 / 50.5)
+
+
+def test_declared_proton_let_law_matches_loaded_table_segment() -> None:
+    entry = load_normative_integrity_manifest().by_path("stopping/proton_si_let.csv")
+    table = load_normative_proton_si_let_table()
+    e0, e1 = table.energy_mev[:2]
+    l0, l1 = table.let_total_mev_cm2_mg[:2]
+    midpoint = (e0 + e1) / 2.0
+    expected_linear = (l0 + l1) / 2.0
+    log_fraction = log(midpoint / e0) / log(e1 / e0)
+    alternative_log_log = exp(log(l0) + log_fraction * log(l1 / l0))
+
+    assert entry.interpolation_law == "linear_linear_piecewise"
+    assert table.total_let_at_energy(midpoint) == pytest.approx(
+        expected_linear, rel=1e-14, abs=1e-15,
+    )
+    assert table.total_let_at_energy(midpoint) != pytest.approx(
+        alternative_log_log, rel=1e-6,
+    )
 
 
 def test_proton_energy_spectrum_to_let_fluence_spectrum() -> None:

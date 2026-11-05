@@ -1,11 +1,17 @@
 ﻿import pytest
 
+from dataclasses import replace
+
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
+from radar.core.spectra import ModelReference, ParticleSpecies, Spectrum1D
 from radar.core.types import (
+    LetSpectrumRole,
     Particle,
     RadiationProductKind,
     RadiationSource,
+    SpectrumAxisKind,
+    SpectrumLocation,
+    SpectrumCompleteness,
     SpectrumQuantity,
 )
 from radar.core.units import Unit
@@ -14,6 +20,8 @@ from radar.gcr.shielding import (
     GCR_HZE_NUCLEAR_ATTENUATION_NOT_INCLUDED,
     GCR_NO_HIDDEN_4PI,
     GCR_PROTON_AL_SHIELDING_MODEL,
+    GCR_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON,
+    GCR_PROTON_SECONDARY_OMITTED_REASON,
     calculate_gcr_combined_let_product,
     calculate_gcr_hze_shielding_product,
     calculate_gcr_hze_shielding_spectrum,
@@ -108,7 +116,7 @@ def _tables(
         hze_al_ranges_by_z={26: _hze_al_table()},
         hze_si_let_by_z={26: _hze_si_table()},
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 300.0),
             sigma_barn=(survival_sigma_barn, survival_sigma_barn),
         ),
@@ -188,6 +196,67 @@ def test_gcr_proton_shielding_zero_thickness_preserves_total_spectrum() -> None:
     assert GCR_NO_HIDDEN_4PI in result.total.model
 
 
+def test_gcr_zero_thickness_omitted_operators_are_exact_and_not_blocking() -> None:
+    source = _proton_product().spectrum
+    result = calculate_gcr_proton_shielding_spectrum(
+        spectrum=source,
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+        include_nonelastic_survival=False,
+        include_secondary_protons=False,
+    )
+
+    assert result.total.y == source.y
+    assert result.total.incomplete_reasons == source.incomplete_reasons
+
+
+@pytest.mark.parametrize(
+    ("include_nonelastic_survival", "include_secondary_protons", "reason"),
+    (
+        (False, True, GCR_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON),
+        (True, False, GCR_PROTON_SECONDARY_OMITTED_REASON),
+    ),
+)
+def test_gcr_positive_thickness_omitted_proton_operator_is_incomplete(
+    include_nonelastic_survival: bool,
+    include_secondary_protons: bool,
+    reason: str,
+) -> None:
+    result = calculate_gcr_proton_shielding_spectrum(
+        spectrum=_proton_product().spectrum,
+        tables=_tables(),
+        thickness_g_cm2=1.0,
+        include_nonelastic_survival=include_nonelastic_survival,
+        include_secondary_protons=include_secondary_protons,
+        secondary_depth_steps=4,
+    )
+
+    assert result.total.completeness is SpectrumCompleteness.INCOMPLETE
+    assert reason in result.total.incomplete_reasons
+
+
+def test_gcr_omitted_secondary_uses_behind_shield_metadata() -> None:
+    source = replace(
+        _proton_product().spectrum,
+        location=SpectrumLocation.ON_ORBIT,
+    )
+
+    result = calculate_gcr_proton_shielding_spectrum(
+        spectrum=source,
+        tables=_tables(),
+        thickness_g_cm2=1.0,
+        include_secondary_protons=False,
+    )
+
+    assert result.secondary.y == (0.0, 0.0, 0.0)
+    assert result.secondary.location is SpectrumLocation.BEHIND_SHIELD
+    assert result.secondary.shielding is not None
+    assert result.secondary.shielding.material == "aluminium"
+    assert result.secondary.shielding.areal_density_g_cm2 == pytest.approx(1.0)
+    assert result.secondary.transformation_chain[-1].name == "secondary_protons_omitted"
+    assert result.total.location is SpectrumLocation.BEHIND_SHIELD
+
+
 def test_gcr_proton_shielding_product_preserves_maximum_flux_semantics() -> None:
     product = _proton_product(
         kind=RadiationProductKind.MAXIMUM_FLUX,
@@ -224,6 +293,77 @@ def test_gcr_hze_shielding_product_uses_symbol_tag_and_records_limitations() -> 
     assert "Z26_Fe" in shielded.spectrum.model
     assert GCR_HZE_NUCLEAR_ATTENUATION_NOT_INCLUDED in shielded.spectrum.model
     assert GCR_HZE_FRAGMENTATION_NOT_INCLUDED in shielded.spectrum.model
+
+
+def test_gcr_hze_zero_thickness_inherits_only_source_blockers_and_provenance() -> None:
+    source = replace(
+        _hze_product().spectrum,
+        model_reference=ModelReference(
+            name="source",
+            version="test",
+            dataset_refs=("source/hze.csv",),
+        ),
+        completeness=SpectrumCompleteness.INCOMPLETE,
+        incomplete_reasons=("source pending",),
+    )
+
+    result = calculate_gcr_hze_shielding_spectrum(
+        z=26,
+        spectrum=source,
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+    )
+
+    assert result.spectrum.incomplete_reasons == source.incomplete_reasons
+    assert result.spectrum.model_reference is not None
+    assert result.spectrum.model_reference.dataset_refs == ("source/hze.csv",)
+
+
+def test_gcr_hze_zero_shield_without_table_is_typed_identity() -> None:
+    source = replace(
+        _hze_product().spectrum,
+        x_unit=Unit.MEV_PER_NUCLEON,
+        y_unit=Unit.DIFFERENTIAL_FLUX_PER_NUCLEON_ENERGY,
+        axis_kind=SpectrumAxisKind.KINETIC_ENERGY_PER_NUCLEON,
+        species=ParticleSpecies(symbol="U", atomic_number=92, mass_number=238),
+        model_reference=ModelReference(
+            name="source",
+            version="test",
+            dataset_refs=("source/u.csv",),
+        ),
+        completeness=SpectrumCompleteness.INCOMPLETE,
+        incomplete_reasons=("source pending",),
+    )
+
+    result = calculate_gcr_hze_shielding_spectrum(
+        z=92,
+        spectrum=source,
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+    )
+
+    assert result.symbol == "U"
+    assert result.spectrum.x == source.x
+    assert result.spectrum.y == source.y
+    assert result.spectrum.location is SpectrumLocation.BEHIND_SHIELD
+    assert result.spectrum.incomplete_reasons == source.incomplete_reasons
+    assert result.spectrum.model_reference is not None
+    assert result.spectrum.model_reference.dataset_refs == ("source/u.csv",)
+
+
+def test_gcr_hze_positive_shield_without_table_is_rejected() -> None:
+    source = replace(
+        _hze_product().spectrum,
+        species=ParticleSpecies(symbol="U", atomic_number=92, mass_number=238),
+    )
+
+    with pytest.raises(ValueError, match="Z=92"):
+        calculate_gcr_hze_shielding_spectrum(
+            z=92,
+            spectrum=source,
+            tables=_tables(),
+            thickness_g_cm2=0.1,
+        )
 
 
 def test_gcr_shielding_products_handles_proton_and_hze_products() -> None:
@@ -267,7 +407,8 @@ def test_gcr_combined_let_product_builds_mean_let_flux() -> None:
     assert let_product.spectrum.quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUX
     assert let_product.spectrum.y_unit is Unit.DIFFERENTIAL_LET_FLUX
     assert let_product.spectrum.source is RadiationSource.GCR
-    assert let_product.spectrum.particle is Particle.HZE
+    assert let_product.spectrum.particle is Particle.MIXED_ION
+    assert let_product.spectrum.let_role is LetSpectrumRole.MIXED_DIAGNOSTIC
     assert sum(let_product.spectrum.y) > 0.0
 
 

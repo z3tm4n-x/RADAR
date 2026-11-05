@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.spectra import ParticleSpecies, Spectrum1D
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.see.inputs import (
     ERB_PROTON_SEE_MARKER,
@@ -57,6 +63,7 @@ def _let_product(
     quantity: SpectrumQuantity = SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE,
     particle: Particle = Particle.HZE,
     y_unit: Unit = Unit.DIFFERENTIAL_LET_FLUENCE,
+    let_role: LetSpectrumRole = LetSpectrumRole.HZE_DIRECT_ION,
 ) -> SpectrumProduct:
     return SpectrumProduct(
         kind=kind,
@@ -69,6 +76,8 @@ def _let_product(
             particle=particle,
             source=source,
             model=f"{source.value}_combined_let",
+            species=ParticleSpecies(symbol="HZE aggregate", is_aggregate=True),
+            let_role=let_role,
         ),
     )
 
@@ -122,10 +131,21 @@ def test_rejects_non_hze_or_non_mission_let_products() -> None:
             quantity=SpectrumQuantity.LET_DIFFERENTIAL_FLUX,
             y_unit=Unit.DIFFERENTIAL_LET_FLUX,
         ),
+        _let_product(
+            RadiationSource.SEP,
+            particle=Particle.MIXED_ION,
+            let_role=LetSpectrumRole.MIXED_DIAGNOSTIC,
+        ),
         _let_product(RadiationSource.SEP),
     )
 
-    assert select_heavy_ion_let_see_inputs(products) == (products[2],)
+    assert select_heavy_ion_let_see_inputs(products) == (products[3],)
+
+
+def test_bendel_proton_selector_cannot_consume_hze_direct_ion_let() -> None:
+    hze_direct_ion = _let_product(RadiationSource.SEP)
+
+    assert select_proton_see_inputs((hze_direct_ion,)) == ()
 
 
 def test_selects_combined_single_event_effect_inputs() -> None:

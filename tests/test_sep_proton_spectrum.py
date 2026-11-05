@@ -539,7 +539,7 @@ def test_ost_fluence_break_energy_control_point_n1_p05() -> None:
         probability=0.5,
     )
 
-    assert coefficients.break_energy_mev == pytest.approx(9.715)
+    assert coefficients.break_energy_mev == pytest.approx(9.175)
 
 
 def test_sep_proton_interpolation_rejects_event_count_below_table_range() -> None:

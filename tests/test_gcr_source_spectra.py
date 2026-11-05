@@ -2,14 +2,19 @@
 
 import pytest
 
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    Particle,
+    RadiationSource,
+    SpectrumCompleteness,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.gcr.components import (
     GostGcrSolarState,
     OstGcrSolarState,
     gost_main_gcr_differential_flux_directional_m2_s_sr_gev,
     ost_akl_differential_flux_directional_cm2_s_sr_mev,
-    ost_main_gcr_differential_flux_directional_m2_s_sr_gev,
+    ost_main_gcr_differential_flux_directional_cm2_s_sr_mev,
     ost_nek_differential_flux_directional_cm2_s_sr_mev,
 )
 from radar.gcr.kinematics import (
@@ -26,6 +31,9 @@ from radar.gcr.parameters import (
 from radar.gcr.source_spectra import (
     GCR_SOURCE_SPECTRA_UNITS_NOTE,
     GOST_GCR_SOURCE_SPECTRA_MODEL,
+    OST_AKL_CONVENTIONS_INCOMPLETE_REASON,
+    OST_AKL_GAMMA_GUARD_INCOMPLETE_REASON,
+    OST_NEK_HE_BC_INCOMPLETE_REASON,
     OST_GCR_SOURCE_SPECTRA_MODEL,
     calculate_gost_gcr_source_spectra_outside_magnetosphere,
     calculate_ost_gcr_source_spectra_outside_magnetosphere,
@@ -172,8 +180,8 @@ def test_ost_gcr_source_spectra_build_total_from_ost_main_and_low_energy_compone
     expected_total: list[float] = []
 
     for energy_mev in energy_grid:
-        main = main_gcr_directional_m2_gev_to_omnidirectional_cm2_mev(
-            ost_main_gcr_differential_flux_directional_m2_s_sr_gev(
+        main = low_energy_directional_cm2_mev_to_omnidirectional_cm2_mev(
+            ost_main_gcr_differential_flux_directional_cm2_s_sr_mev(
                 kinetic_energy_gev_per_nucleon=mev_per_nucleon_to_gev_per_nucleon(
                     energy_mev,
                 ),
@@ -216,9 +224,15 @@ def test_source_spectra_use_radar_gcr_differential_flux_contract() -> None:
     assert proton.particle is Particle.PROTON
     assert hze.particle is Particle.HZE
 
-    for spectrum in result.all_component_spectra:
+    for spectrum in proton.all_spectra:
         assert spectrum.x_unit is Unit.MEV
         assert spectrum.y_unit is Unit.DIFFERENTIAL_FLUX
+        assert spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUX
+        assert spectrum.source is RadiationSource.GCR
+
+    for spectrum in hze.all_spectra:
+        assert spectrum.x_unit is Unit.MEV_PER_NUCLEON
+        assert spectrum.y_unit is Unit.DIFFERENTIAL_FLUX_PER_NUCLEON_ENERGY
         assert spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUX
         assert spectrum.source is RadiationSource.GCR
 
@@ -259,11 +273,134 @@ def test_source_spectra_model_names_identify_components() -> None:
     assert ion.akl.model == "ost_gcr_source_outside_magnetosphere:He:akl"
     assert ion.total.model == "ost_gcr_source_outside_magnetosphere:He:total"
 
+    nek_trace = dict(ion.nek.transformation_chain[0].parameters)
+    total_trace = dict(ion.total.transformation_chain[0].parameters)
+    assert float(nek_trace["ost_nek_he_bc_used"]) == pytest.approx(6.6e-2)
+    assert nek_trace["ost_nek_he_bc_validation_status"] == (
+        "pending_cosrad_comparison"
+    )
+    assert total_trace["ost_nek_he_bc_validation_status"] == (
+        "pending_cosrad_comparison"
+    )
+    assert ion.main.completeness is SpectrumCompleteness.COMPLETE
+    assert ion.akl.completeness is SpectrumCompleteness.INCOMPLETE
+    assert ion.nek.completeness is SpectrumCompleteness.INCOMPLETE
+    assert ion.total.completeness is SpectrumCompleteness.INCOMPLETE
+    assert ion.nek.incomplete_reasons == (OST_NEK_HE_BC_INCOMPLETE_REASON,)
+    assert ion.akl.incomplete_reasons == (OST_AKL_CONVENTIONS_INCOMPLETE_REASON,)
+    assert set(ion.total.incomplete_reasons) == {
+        OST_NEK_HE_BC_INCOMPLETE_REASON,
+        OST_AKL_CONVENTIONS_INCOMPLETE_REASON,
+    }
+
+
+def test_pending_nek_he_coefficient_does_not_mark_other_ions_incomplete() -> None:
+    result = calculate_ost_gcr_source_spectra_outside_magnetosphere(
+        energy_grid_mev_per_nucleon=(10.0, 100.0),
+        solar_state=_ost_state(),
+        nek_wolf_number=60.0,
+        akl_years_from_cycle_start=2.0,
+        symbols=("H", "O"),
+    )
+
+    assert all(
+        OST_NEK_HE_BC_INCOMPLETE_REASON not in spectrum.incomplete_reasons
+        for ion in result.ions
+        for spectrum in ion.all_spectra
+    )
+
+
+@pytest.mark.parametrize("time", (2.0, 6.0))
+@pytest.mark.parametrize("symbol", ("He", "C", "N", "O", "Ne", "Ar"))
+def test_akl_assumptions_mark_only_akl_and_total_for_contributing_ions(
+    symbol: str,
+    time: float,
+) -> None:
+    result = calculate_ost_gcr_source_spectra_outside_magnetosphere(
+        energy_grid_mev_per_nucleon=(10.0, 100.0),
+        solar_state=_ost_state(),
+        nek_wolf_number=60.0,
+        akl_years_from_cycle_start=time,
+        symbols=(symbol,),
+    )
+    ion = result.ion(symbol)
+    for spectrum in (ion.akl, ion.total):
+        assert spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        assert OST_AKL_CONVENTIONS_INCOMPLETE_REASON in spectrum.incomplete_reasons
+        assert (OST_AKL_GAMMA_GUARD_INCOMPLETE_REASON in spectrum.incomplete_reasons) == (
+            time == 6.0
+        )
+        metadata = dict(spectrum.transformation_chain[0].parameters)
+        assert metadata["ost_akl_conventions_status"] == "pending_source_or_reference_comparison"
+        assert metadata["ost_akl_printed_flux_units"] == "cm^-2 s^-1 MeV^-1"
+        assert metadata["ost_akl_assumed_input_flux_units"] == (
+            "cm^-2 sr^-1 s^-1 (MeV/nucleon)^-1"
+        )
+        assert metadata["ost_akl_angular_conversion"] == "directional_times_4pi_provisional"
+        assert metadata["ost_akl_assumed_time_unit"] == "years_since_solar_cycle_start"
+        assert float(metadata["ost_akl_years_from_cycle_start"]) == time
+        assert metadata["ost_akl_gamma_zeroing_guard_active"] == str(time == 6.0).lower()
+    for spectrum in (ion.main, ion.nek):
+        assert OST_AKL_CONVENTIONS_INCOMPLETE_REASON not in spectrum.incomplete_reasons
+        assert OST_AKL_GAMMA_GUARD_INCOMPLETE_REASON not in spectrum.incomplete_reasons
+        assert not any(
+            key.startswith("ost_akl_") for key, _ in spectrum.transformation_chain[0].parameters
+        )
+    assert ion.main.completeness is SpectrumCompleteness.COMPLETE
+    assert ion.nek.completeness is (
+        SpectrumCompleteness.INCOMPLETE if symbol == "He" else SpectrumCompleteness.COMPLETE
+    )
+    assert ion.total.y == pytest.approx(
+        tuple(sum(values) for values in zip(ion.main.y, ion.nek.y, ion.akl.y, strict=True))
+    )
+    if time == 6.0:
+        assert ion.akl.y == (0.0, 0.0)
+    else:
+        assert all(value > 0.0 for value in ion.akl.y)
+
+
+@pytest.mark.parametrize("time", (2.0, 6.0))
+def test_no_akl_contribution_has_no_akl_assumption_blocker(time: float) -> None:
+    result = calculate_ost_gcr_source_spectra_outside_magnetosphere(
+        energy_grid_mev_per_nucleon=(10.0,),
+        solar_state=_ost_state(),
+        nek_wolf_number=60.0,
+        akl_years_from_cycle_start=time,
+        symbols=("H", "Fe", "U"),
+    )
+    for ion in result.ions:
+        assert ion.akl.y == (0.0,)
+        for spectrum in ion.all_spectra:
+            assert spectrum.completeness is SpectrumCompleteness.COMPLETE
+            assert spectrum.incomplete_reasons == ()
+            assert not any(
+                key.startswith("ost_akl_") for key, _ in spectrum.transformation_chain[0].parameters
+            )
+
+
+def test_experimental_gost_retains_draft_reason_and_localizes_akl_reasons() -> None:
+    from radar.gcr.source_spectra import GOST_GCR_DRAFT_INCOMPLETE_REASON
+
+    result = calculate_gost_gcr_source_spectra_outside_magnetosphere(
+        energy_grid_mev_per_nucleon=(10.0,),
+        solar_state=_gost_state(),
+        nek_wolf_number=60.0,
+        akl_years_from_cycle_start=6.0,
+        symbols=("H", "He", "C"),
+    )
+    for ion in result.ions:
+        for spectrum in ion.all_spectra:
+            assert GOST_GCR_DRAFT_INCOMPLETE_REASON in spectrum.incomplete_reasons
+            has_akl = ion.symbol != "H" and spectrum in (ion.akl, ion.total)
+            assert (OST_AKL_CONVENTIONS_INCOMPLETE_REASON in spectrum.incomplete_reasons) == has_akl
+            assert (OST_AKL_GAMMA_GUARD_INCOMPLETE_REASON in spectrum.incomplete_reasons) == has_akl
+
 
 def test_gcr_source_spectra_units_note_documents_both_conversion_paths() -> None:
     assert "4*pi*1e-7" in GCR_SOURCE_SPECTRA_UNITS_NOTE
-    assert "4*pi" in GCR_SOURCE_SPECTRA_UNITS_NOTE
-    assert "cm^-2 s^-1 MeV^-1" in GCR_SOURCE_SPECTRA_UNITS_NOTE
+    assert "converted only with 4*pi" in GCR_SOURCE_SPECTRA_UNITS_NOTE
+    assert "cm^-2 s^-1 (MeV/nucleon)^-1" in GCR_SOURCE_SPECTRA_UNITS_NOTE
+    assert "provisional" in GCR_SOURCE_SPECTRA_UNITS_NOTE
 
 
 @pytest.mark.parametrize(

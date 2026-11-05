@@ -6,12 +6,19 @@ import pytest
 
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.dose.electron_shieldose2 import load_normative_elbrbas2_database
 from radar.pipelines.dose import (
     DOSE_PIPELINE_MODEL,
     DOSE_PIPELINE_MODEL_VERSION,
+    DosePipelineIncompleteError,
     calculate_dose_pipeline_from_pipeline_results,
     calculate_dose_pipeline_from_products,
     let_products_by_thickness_from_pipeline_results,
@@ -39,12 +46,17 @@ def _proton_marker(source: RadiationSource) -> str:
     raise AssertionError(source)
 
 
-def _shielded_proton_product(source: RadiationSource) -> SpectrumProduct:
+def _shielded_proton_product(
+    source: RadiationSource,
+    *,
+    x: tuple[float, ...] = (1.0, 4.0),
+    y: tuple[float, ...] = (10.0, 1.0),
+) -> SpectrumProduct:
     return SpectrumProduct(
         kind=RadiationProductKind.MISSION_FLUENCE,
         spectrum=Spectrum1D(
-            x=(1.0, 4.0),
-            y=(10.0, 1.0),
+            x=x,
+            y=y,
             x_unit=Unit.MEV,
             y_unit=Unit.DIFFERENTIAL_FLUENCE,
             quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
@@ -80,9 +92,10 @@ def _let_product(source: RadiationSource) -> SpectrumProduct:
             x_unit=Unit.LET,
             y_unit=Unit.DIFFERENTIAL_LET_FLUENCE,
             quantity=SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE,
-            particle=Particle.HZE,
+            particle=Particle.MIXED_ION,
             source=source,
-            model=f"{source.value}_combined_proton_hze_let",
+            model=f"{source.value}_mixed_proton_hze_let_diagnostic",
+            let_role=LetSpectrumRole.MIXED_DIAGNOSTIC,
         ),
     )
 
@@ -135,8 +148,8 @@ def test_calculates_dose_pipeline_components_and_totals() -> None:
         "gcr_proton",
     }
     assert {component.component for component in result.optional_components} == {
-        "sep_combined_let_optional",
-        "gcr_combined_let_optional",
+        "sep_mixed_let_diagnostic_optional",
+        "gcr_mixed_let_diagnostic_optional",
     }
 
     assert tuple(total.thickness_g_cm2 for total in result.totals_by_thickness) == thicknesses
@@ -179,17 +192,46 @@ def test_dose_pipeline_rejects_invalid_thicknesses() -> None:
         )
 
 
+def test_dose_pipeline_refuses_partial_result_outside_proton_si_let_support() -> None:
+    unsupported = _shielded_proton_product(
+        RadiationSource.SEP,
+        x=(1.0, 40.0),
+        y=(10.0, 1.0),
+    )
+
+    with pytest.raises(DosePipelineIncompleteError) as exc_info:
+        calculate_dose_pipeline_from_products(
+            thicknesses_g_cm2=(0.1,),
+            erb_on_orbit_products=(),
+            shielded_products_by_thickness={0.1: (unsupported,)},
+            let_products_by_thickness={},
+            proton_si_let_table=_proton_table(),
+        )
+
+    assert exc_info.value.incomplete_reasons == (
+        "source=sep, shielding=0.10000000000000001 g/cm^2: proton Si electronic "
+        "LET dose domain is incomplete: quadrature energy 40 MeV is outside the "
+        "tabulated support [0.5, 20] MeV",
+    )
+
+
 
 def _fake_shielding_result(
     *,
     thickness_g_cm2: float,
     shielded_products: tuple[SpectrumProduct, ...] = (),
     let_products: tuple[SpectrumProduct, ...] = (),
+    diagnostic_let_products: tuple[SpectrumProduct, ...] | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         thickness_g_cm2=thickness_g_cm2,
         shielded_products=shielded_products,
         let_products=let_products,
+        diagnostic_let_products=(
+            let_products
+            if diagnostic_let_products is None
+            else diagnostic_let_products
+        ),
     )
 
 

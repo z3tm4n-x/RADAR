@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from radar.core.profiles import MethodologyProfile
@@ -9,8 +11,26 @@ from radar.core.project import (
     ShieldingConfig,
 )
 from radar.core.result import ComponentStatus
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.spectra import (
+    ModelReference,
+    ParticleSpecies,
+    Spectrum1D,
+    TransformationStep,
+)
+from radar.core.spectrum_ops import mark_spectrum_incomplete
+from radar.core.types import (
+    AngularBasis,
+    AssessmentMode,
+    DoseQuantity,
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumAxisKind,
+    SpectrumCompleteness,
+    SpectrumLocation,
+    SpectrumQuantity,
+    TemporalBasis,
+)
 from radar.core.units import Unit
 from radar.erb.model import StaticErbModel
 from radar.pipelines.erb import (
@@ -72,6 +92,81 @@ def _erb_model() -> StaticErbModel:
         ),
         model="static_erb_test",
         document="test_document",
+    )
+
+
+def _typed_mode_erb_spectrum(
+    *,
+    kind: RadiationProductKind,
+    incomplete: bool,
+) -> Spectrum1D:
+    cumulative = kind is RadiationProductKind.MISSION_FLUENCE
+    spectrum = Spectrum1D(
+        x=(0.1, 1.0, 10.0),
+        y=(3.0, 2.0, 1.0),
+        x_unit=Unit.MEV,
+        y_unit=(
+            Unit.DIFFERENTIAL_FLUENCE
+            if cumulative
+            else Unit.DIFFERENTIAL_FLUX
+        ),
+        quantity=(
+            SpectrumQuantity.DIFFERENTIAL_FLUENCE
+            if cumulative
+            else SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
+        ),
+        particle=Particle.PROTON,
+        source=RadiationSource.ERB,
+        model="mode_selective_erb",
+        axis_kind=SpectrumAxisKind.KINETIC_ENERGY,
+        angular_basis=AngularBasis.OMNIDIRECTIONAL_4PI,
+        temporal_basis=(
+            TemporalBasis.MISSION_TOTAL
+            if cumulative
+            else TemporalBasis.SOURCE_MAXIMUM
+        ),
+        location=SpectrumLocation.ON_ORBIT,
+        species=ParticleSpecies(symbol="p", atomic_number=1, mass_number=1),
+        assessment_mode=(
+            AssessmentMode.CUMULATIVE if cumulative else AssessmentMode.PEAK
+        ),
+        mission_duration_s=7.0 * 365.25 * 86400.0 if cumulative else None,
+        model_reference=ModelReference(
+            name="mode_selective_erb",
+            version="test-v1",
+            document_refs=("test normative document",),
+            dataset_refs=("test/mode_selective_erb.csv@sha256:test",),
+        ),
+        transformation_chain=(
+            TransformationStep(name="source_model", version="test-v1"),
+        ),
+        completeness=SpectrumCompleteness.COMPLETE,
+    )
+    if incomplete:
+        return mark_spectrum_incomplete(
+            spectrum,
+            f"{kind.value}_test_incomplete",
+        )
+    return spectrum
+
+
+def _mode_selective_erb_model(
+    *,
+    incomplete_kind: RadiationProductKind,
+) -> StaticErbModel:
+    return StaticErbModel(
+        spectra=tuple(
+            _typed_mode_erb_spectrum(
+                kind=kind,
+                incomplete=kind is incomplete_kind,
+            )
+            for kind in (
+                RadiationProductKind.MISSION_FLUENCE,
+                RadiationProductKind.MAXIMUM_FLUX,
+            )
+        ),
+        model="mode_selective_erb",
+        document="test normative document",
     )
 
 
@@ -190,38 +285,26 @@ def test_erb_pipeline_records_integrated_proton_shielding_tables() -> None:
         for table in pipeline_result.calculation_result.output_tables
     )
 
-    assert len(table_ids) == 12
-    assert "erb_proton_mean_flux_mean_differential_flux_on_orbit" in table_ids
-    assert "erb_electron_mean_flux_mean_differential_flux_on_orbit" in table_ids
-    assert (
-        "erb_t0_1_mean_flux_erb_proton_total_energy_behind_al"
-        in table_ids
-    )
-    assert (
-        "erb_t0_1_maximum_flux_erb_proton_total_energy_behind_al"
-        in table_ids
-    )
+    assert len(table_ids) == 4
+    assert "erb_proton_mean_flux_mean_differential_flux_on_orbit" not in table_ids
+    assert "erb_electron_mean_flux_mean_differential_flux_on_orbit" not in table_ids
+    assert "erb_t0_1_mean_flux_erb_proton_total_energy_behind_al" not in table_ids
+    assert "erb_t0_1_maximum_flux_erb_proton_total_energy_behind_al" not in table_ids
     assert (
         "erb_t0_1_mission_fluence_erb_proton_total_energy_behind_al"
         in table_ids
     )
-    assert (
-        "erb_t0_1_mean_flux_erb_electron_primary_energy_behind_al"
-        in table_ids
-    )
-    assert (
-        "erb_t0_1_maximum_flux_erb_electron_primary_energy_behind_al"
-        in table_ids
-    )
+    assert "erb_t0_1_mean_flux_erb_electron_primary_energy_behind_al" not in table_ids
+    assert "erb_t0_1_maximum_flux_erb_electron_primary_energy_behind_al" not in table_ids
     assert (
         "erb_t0_1_mission_fluence_erb_electron_primary_energy_behind_al"
         in table_ids
     )
-    assert len(pipeline_result.shielded_products) == 6
+    assert len(pipeline_result.shielded_products) == 2
     assert sum(
         product.spectrum.particle is Particle.ELECTRON
         for product in pipeline_result.shielded_products
-    ) == 3
+    ) == 1
 
 
 def test_erb_pipeline_result_validates_spectra() -> None:
@@ -409,9 +492,9 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
     )
 
     assert len(pipeline_result.on_orbit_products) == 6
-    assert len(pipeline_result.shielded_products) == 6
-    assert len(pipeline_result.products) == 12
-    assert len(pipeline_result.spectra) == 12
+    assert len(pipeline_result.shielded_products) == 2
+    assert len(pipeline_result.products) == 8
+    assert len(pipeline_result.spectra) == 8
     assert tuple(product.kind for product in pipeline_result.on_orbit_products) == (
         RadiationProductKind.MEAN_FLUX,
         RadiationProductKind.MAXIMUM_FLUX,
@@ -425,27 +508,51 @@ def test_erb_pipeline_accepts_ost_erb_model() -> None:
         for product in pipeline_result.shielded_products
     ) == (
         Particle.PROTON,
-        Particle.PROTON,
-        Particle.PROTON,
-        Particle.ELECTRON,
-        Particle.ELECTRON,
         Particle.ELECTRON,
     )
-    assert all(
+
+
+    assert any(
         "+erb_proton_al_shielding_primary_survival_secondary+"
         in product.spectrum.model
-        for product in pipeline_result.shielded_products[:3]
+        for product in pipeline_result.shielded_products
+    )
+    assert any(
+        "+erb_electron_al_shielding_primary_csda+" in product.spectrum.model
+        for product in pipeline_result.shielded_products
     )
     assert all(
-        "+erb_electron_al_shielding_primary_csda+" in product.spectrum.model
-        for product in pipeline_result.shielded_products[3:]
+        product.kind is RadiationProductKind.MISSION_FLUENCE
+        for product in pipeline_result.shielded_products
     )
     assert pipeline_result.calculation_result.component_status(
         ERB_MODEL_COMPONENT
-    ) is ComponentStatus.COMPLETED
+    ) is ComponentStatus.INCOMPLETE
     assert pipeline_result.calculation_result.component_status(
         ERB_SHIELDING_COMPONENT
-    ) is ComponentStatus.COMPLETED
+    ) is ComponentStatus.INCOMPLETE
+    assert pipeline_result.calculation_result.component_status(
+        ERB_PIPELINE_COMPONENT
+    ) is ComponentStatus.INCOMPLETE
+    electron_reasons = {
+        reason
+        for product in pipeline_result.shielded_products
+        if product.spectrum.particle is Particle.ELECTRON
+        for reason in product.spectrum.incomplete_reasons
+    }
+    assert "electron_bremsstrahlung_transport_not_included" in electron_reasons
+    assert "electron_secondary_particles_not_included" in electron_reasons
+    shielding_warning = next(
+        entry
+        for entry in pipeline_result.calculation_result.log.entries
+        if entry.stage == ERB_SHIELDING_COMPONENT
+        and entry.message == "ERB shielding products are incomplete."
+    )
+    warning_reasons = dict(shielding_warning.details)["reasons"]
+    assert "electron_bremsstrahlung_transport_not_included" in warning_reasons
+    assert "electron_secondary_particles_not_included" in warning_reasons
+    with pytest.raises(ValueError, match="ERB pipeline is incomplete"):
+        pipeline_result.production_release_products()
 
 
 def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
@@ -478,9 +585,9 @@ def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
 
     assert pipeline_result.erb_model_result.model == "ae8_ap8_radbelt_model"
     assert len(pipeline_result.on_orbit_products) == 6
-    assert len(pipeline_result.shielded_products) == 6
-    assert len(pipeline_result.products) == 12
-    assert len(pipeline_result.spectra) == 12
+    assert len(pipeline_result.shielded_products) == 2
+    assert len(pipeline_result.products) == 8
+    assert len(pipeline_result.spectra) == 8
     assert tuple(product.kind for product in pipeline_result.on_orbit_products) == (
         RadiationProductKind.MEAN_FLUX,
         RadiationProductKind.MAXIMUM_FLUX,
@@ -494,15 +601,90 @@ def test_erb_pipeline_accepts_ae8_ap8_profile_model() -> None:
         for product in pipeline_result.shielded_products
     ) == (
         Particle.PROTON,
-        Particle.PROTON,
-        Particle.PROTON,
-        Particle.ELECTRON,
-        Particle.ELECTRON,
         Particle.ELECTRON,
     )
-    assert len(pipeline_result.shielding_by_thickness) == 6
+    assert all(
+        product.kind is RadiationProductKind.MISSION_FLUENCE
+        for product in pipeline_result.shielded_products
+    )
+    assert len(pipeline_result.shielding_by_thickness) == 2
     assert pipeline_result.calculation_result.component_status(
         ERB_SHIELDING_COMPONENT
-    ) is ComponentStatus.COMPLETED
+    ) is ComponentStatus.INCOMPLETE
+    assert pipeline_result.calculation_result.component_status(
+        ERB_PIPELINE_COMPONENT
+    ) is ComponentStatus.INCOMPLETE
     assert pipeline_result.calculation_result.has_errors() is False
+
+
+def test_erb_pipeline_shields_only_selected_peak_mode() -> None:
+    from radar.core.types import RadiationProductKind
+    from radar.erb.igrf import IgrfCoefficients
+    from radar.erb.model import OstErbModel
+
+    config = CalculationConfig(
+        mission=MissionConfig(launch_year=2027, lifetime_years=2),
+        orbit=OrbitConfig.circular(altitude_km=2_000.0, inclination_deg=0.0),
+        shielding=ShieldingConfig(thicknesses_g_cm2=(0.1,)),
+        dose_quantity=DoseQuantity.DOSE_RATE,
+        dose_unit=Unit.RAD_PER_SECOND,
+        assessment_mode=AssessmentMode.PEAK,
+    )
+    model = OstErbModel(
+        anomaly_samples=2,
+        node_samples=2,
+        igrf_coefficients=IgrfCoefficients(
+            epoch=1985.0,
+            g={(1, 0): -31_165.3},
+            h={},
+            nmax=1,
+        ),
+    )
+
+    pipeline_result = calculate_erb_pipeline(config=config, erb_model=model)
+
+    assert len(pipeline_result.on_orbit_products) == 6
+    assert len(pipeline_result.shielded_products) == 2
+    assert all(
+        product.kind is RadiationProductKind.MAXIMUM_FLUX
+        for product in pipeline_result.shielded_products
+    )
+
+
+def test_erb_unselected_incomplete_mode_does_not_block_cumulative_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "radar.data.integrity.require_release_eligible_normative_resource",
+        lambda _path: SimpleNamespace(sha256="test"),
+    )
+    pipeline_result = calculate_erb_pipeline(
+        config=_config(),
+        erb_model=_mode_selective_erb_model(
+            incomplete_kind=RadiationProductKind.MAXIMUM_FLUX,
+        ),
+    )
+
+    result = pipeline_result.calculation_result
+    assert result.component_status(ERB_MODEL_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(ERB_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
+    released = pipeline_result.production_release_products()
+    assert tuple(product.kind for product in released) == (
+        RadiationProductKind.MISSION_FLUENCE,
+    )
+
+
+def test_erb_selected_incomplete_mode_blocks_cumulative_release() -> None:
+    pipeline_result = calculate_erb_pipeline(
+        config=_config(),
+        erb_model=_mode_selective_erb_model(
+            incomplete_kind=RadiationProductKind.MISSION_FLUENCE,
+        ),
+    )
+
+    result = pipeline_result.calculation_result
+    assert result.component_status(ERB_MODEL_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert result.component_status(ERB_PIPELINE_COMPONENT) is ComponentStatus.INCOMPLETE
+    with pytest.raises(ValueError, match="mission_fluence_test_incomplete"):
+        pipeline_result.production_release_products()
 

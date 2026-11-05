@@ -50,13 +50,17 @@ def test_normative_hze_resource_tables_load() -> None:
     assert len(hze_si[sample_z].energy_mev_per_nucleon) > 10
 
 
-def test_normative_al27_nonelastic_xs_resource_merges_duplicate_energies() -> None:
+def test_normative_al27_nonelastic_xs_resource_uses_mf3_mt3() -> None:
     table = load_normative_al27_nonelastic_cross_section_table()
 
     assert table.mt == DEFAULT_AL27_NONELASTIC_MT
     assert len(set(table.energy_mev)) == len(table.energy_mev)
-    assert table.sigma_at_energy(30.0) > 0.0
-    assert table.sigma_at_energy(40.0) > 0.0
+    assert table.incident_energy_support is not None
+    assert table.incident_energy_support.minimum_mev == 0.0
+    assert table.incident_energy_support.maximum_mev == 200.0
+    assert table.sigma_at_energy(10.0) == pytest.approx(0.7563697)
+    assert table.sigma_at_energy(30.0) == pytest.approx(0.7151679)
+    assert table.sigma_at_energy(40.0) == pytest.approx(0.6480981)
 
 
 def test_normative_secondary_proton_kernel_resource_loads() -> None:
@@ -64,6 +68,11 @@ def test_normative_secondary_proton_kernel_resource_loads() -> None:
 
     assert kernel.products
     assert kernel.cross_sections_by_mt
+    assert kernel.incident_energy_support is not None
+    assert kernel.incident_energy_support.minimum_mev == 0.0
+    assert kernel.incident_energy_support.maximum_mev == 200.0
+    assert kernel.nonelastic_cross_section is not None
+    assert kernel.nonelastic_cross_section.mt == 3
 
     for product in kernel.products:
         assert len(set(product.incident_energy_mev)) == len(product.incident_energy_mev)

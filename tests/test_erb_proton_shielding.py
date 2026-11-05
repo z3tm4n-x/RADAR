@@ -2,12 +2,20 @@ import pytest
 
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumCompleteness,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.erb.shielding import (
     ERB_PROTON_AL_CENTERED_SPHERICAL_SHELL,
     ERB_PROTON_AL_NO_HIDDEN_4PI,
     ERB_PROTON_AL_SHIELDING_MODEL,
+    ERB_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON,
+    ERB_PROTON_SECONDARY_OMITTED_REASON,
     calculate_erb_proton_shielding_product,
     calculate_erb_proton_shielding_spectrum,
 )
@@ -97,7 +105,7 @@ def _tables(
         hze_al_ranges_by_z={26: _hze_al_table()},
         hze_si_let_by_z={26: _hze_si_table()},
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 1000.0),
             sigma_barn=(survival_sigma_barn, survival_sigma_barn),
         ),
@@ -139,6 +147,22 @@ def test_erb_proton_shielding_zero_thickness_preserves_total_spectrum() -> None:
     assert result.secondary_protons is True
 
 
+def test_erb_zero_thickness_omitted_operators_are_exact_and_not_blocking() -> None:
+    source = _spectrum()
+    result = calculate_erb_proton_shielding_spectrum(
+        spectrum=source,
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+        include_nonelastic_survival=False,
+        include_secondary_protons=False,
+    )
+
+    assert result.total.y == source.y
+    assert result.total.incomplete_reasons == source.incomplete_reasons
+    assert result.total.location is result.primary.location
+    assert result.total.shielding == result.primary.shielding
+
+
 def test_erb_proton_shielding_total_includes_secondary_when_enabled() -> None:
     result_without_secondary = calculate_erb_proton_shielding_spectrum(
         spectrum=_spectrum(),
@@ -173,6 +197,31 @@ def test_erb_proton_shielding_can_disable_nonelastic_survival() -> None:
     )
 
     assert sum(with_survival.primary_survived.y) < sum(without_survival.primary_survived.y)
+
+
+@pytest.mark.parametrize(
+    ("include_nonelastic_survival", "include_secondary_protons", "reason"),
+    (
+        (False, True, ERB_PROTON_NONELASTIC_SURVIVAL_OMITTED_REASON),
+        (True, False, ERB_PROTON_SECONDARY_OMITTED_REASON),
+    ),
+)
+def test_erb_positive_thickness_omitted_proton_operator_is_incomplete(
+    include_nonelastic_survival: bool,
+    include_secondary_protons: bool,
+    reason: str,
+) -> None:
+    result = calculate_erb_proton_shielding_spectrum(
+        spectrum=_spectrum(),
+        tables=_tables(),
+        thickness_g_cm2=1.0,
+        include_nonelastic_survival=include_nonelastic_survival,
+        include_secondary_protons=include_secondary_protons,
+        secondary_depth_steps=4,
+    )
+
+    assert result.total.completeness is SpectrumCompleteness.INCOMPLETE
+    assert reason in result.total.incomplete_reasons
 
 
 def test_erb_proton_shielding_product_preserves_product_kind_and_units() -> None:

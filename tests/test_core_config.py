@@ -9,7 +9,13 @@ from radar.core.project import (
     OrbitConfig,
     ShieldingConfig,
 )
-from radar.core.types import DoseQuantity, OrbitType, ShieldGeometry, SolarActivityLevel
+from radar.core.types import (
+    AssessmentMode,
+    DoseQuantity,
+    OrbitType,
+    ShieldGeometry,
+    SolarActivityLevel,
+)
 from radar.core.units import Unit
 
 
@@ -31,6 +37,9 @@ def test_default_calculation_config() -> None:
     assert config.methodology.calculate_gcr_electrons is False
     assert config.methodology.include_bremsstrahlung is True
     assert config.methodology.include_protons_in_let is True
+    assert config.assessment_mode is AssessmentMode.CUMULATIVE
+    assert config.methodology.solar_cycle_reference_start_year == 2020
+    assert config.methodology.solar_cycle_reference_number == 25
 
 
 def test_lifetime_must_be_integer() -> None:
@@ -46,6 +55,29 @@ def test_kp_default_and_range() -> None:
 
     with pytest.raises(ValueError, match="0..9"):
         CalculationConfig(mission=mission, orbit=orbit, kp=10)
+
+
+def test_calculation_config_accepts_only_explicit_assessment_mode() -> None:
+    mission = MissionConfig(launch_year=2027, lifetime_years=15)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+
+    assert (
+        CalculationConfig(
+            mission=mission,
+            orbit=orbit,
+            assessment_mode=AssessmentMode.PEAK,
+            dose_quantity=DoseQuantity.DOSE_RATE,
+            dose_unit=Unit.RAD_PER_SECOND,
+        ).assessment_mode
+        is AssessmentMode.PEAK
+    )
+
+    with pytest.raises(ValueError, match="Assessment mode"):
+        CalculationConfig(
+            mission=mission,
+            orbit=orbit,
+            assessment_mode="peak",  # type: ignore[arg-type]
+        )
 
 
 def test_dose_quantity_and_unit_must_match() -> None:
@@ -65,6 +97,7 @@ def test_dose_quantity_and_unit_must_match() -> None:
     dose_rate_config = CalculationConfig(
         mission=mission,
         orbit=orbit,
+        assessment_mode=AssessmentMode.PEAK,
         dose_quantity=DoseQuantity.DOSE_RATE,
         dose_unit=Unit.RAD_PER_SECOND,
     )
@@ -84,7 +117,31 @@ def test_dose_quantity_and_unit_must_match() -> None:
         CalculationConfig(
             mission=mission,
             orbit=orbit,
+            assessment_mode=AssessmentMode.PEAK,
             dose_quantity=DoseQuantity.DOSE_RATE,
+            dose_unit=Unit.RAD,
+        )
+
+
+def test_assessment_mode_and_dose_contract_must_match() -> None:
+    mission = MissionConfig(launch_year=2027, lifetime_years=15)
+    orbit = OrbitConfig.circular(altitude_km=35786.0, inclination_deg=0.0)
+
+    with pytest.raises(ValueError, match="Cumulative assessment mode requires"):
+        CalculationConfig(
+            mission=mission,
+            orbit=orbit,
+            assessment_mode=AssessmentMode.CUMULATIVE,
+            dose_quantity=DoseQuantity.DOSE_RATE,
+            dose_unit=Unit.RAD_PER_SECOND,
+        )
+
+    with pytest.raises(ValueError, match="Peak assessment mode requires"):
+        CalculationConfig(
+            mission=mission,
+            orbit=orbit,
+            assessment_mode=AssessmentMode.PEAK,
+            dose_quantity=DoseQuantity.ACCUMULATED_DOSE,
             dose_unit=Unit.RAD,
         )
 
@@ -109,8 +166,8 @@ def test_first_version_methodology_switches_are_strict() -> None:
     with pytest.raises(ValueError, match="Bremsstrahlung"):
         MethodologyConfig(include_bremsstrahlung=False)
 
-    with pytest.raises(ValueError, match="Protons"):
-        MethodologyConfig(include_protons_in_let=False)
+    methodology = MethodologyConfig(include_protons_in_let=False)
+    assert methodology.include_mixed_let_diagnostic is False
 
 
 def test_circular_orbit_requires_equal_altitudes() -> None:
@@ -122,10 +179,12 @@ def test_circular_orbit_requires_equal_altitudes() -> None:
             inclination_deg=82.0,
         )
 
+
 def test_methodology_config_accepts_profile() -> None:
     methodology = MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR)
 
     assert methodology.profile is MethodologyProfile.OST_WITH_GOST_SEP_GCR
+
 
 def test_methodology_config_exposes_profile_spec_and_source_model_contract() -> None:
     methodology = MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_SEP_GCR)
@@ -133,7 +192,4 @@ def test_methodology_config_exposes_profile_spec_and_source_model_contract() -> 
     assert methodology.profile_spec.profile is MethodologyProfile.OST_WITH_GOST_SEP_GCR
     assert methodology.source_model_contract.sep_model_family is SourceModelFamily.GOST_SEP
     assert methodology.source_model_contract.gcr_model_family is SourceModelFamily.GOST_GCR
-    assert (
-        methodology.source_model_contract.erb_model_family
-        is SourceModelFamily.OST_134_1044_2007
-    )
+    assert methodology.source_model_contract.erb_model_family is SourceModelFamily.OST_134_1044_2007

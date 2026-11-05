@@ -6,7 +6,8 @@ import radar.project_io as project_io
 from radar.__main__ import main
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
 from radar.core.result import CalculationResult, InputDataInfo
-from radar.core.types import RadiationSource
+from radar.core.types import AssessmentMode, DoseQuantity, OrbitType, RadiationSource
+from radar.core.units import Unit
 from radar.project_io import (
     calculate_and_save_project_file,
     read_project_file,
@@ -190,6 +191,89 @@ def test_main_init_accepts_solar_activity_level(tmp_path) -> None:
 
     assert exit_code == 0
     assert restored.calculation_config.mission.solar_activity_level.value == "maximum"
+
+
+def test_main_init_accepts_peak_mode_and_sep_probability(tmp_path) -> None:
+    output_path = tmp_path / "peak.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "geo",
+            "--assessment-mode",
+            "peak",
+            "--sep-exceedance-probability",
+            "0.1",
+        ],
+    )
+    config = read_project_file(output_path).calculation_config
+
+    assert exit_code == 0
+    assert config.assessment_mode is AssessmentMode.PEAK
+    assert config.dose_quantity is DoseQuantity.DOSE_RATE
+    assert config.dose_unit is Unit.RAD_PER_SECOND
+    assert config.mission.sep_exceedance_probability == pytest.approx(0.1)
+
+
+def test_main_init_accepts_elliptic_orbit_inputs(tmp_path) -> None:
+    output_path = tmp_path / "elliptic.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "elliptic",
+            "--perigee-km",
+            "500",
+            "--apogee-km",
+            "40000",
+            "--inclination-deg",
+            "63.4",
+            "--argument-of-perigee-deg",
+            "270",
+        ],
+    )
+    orbit = read_project_file(output_path).calculation_config.orbit
+
+    assert exit_code == 0
+    assert orbit.orbit_type is OrbitType.ELLIPTIC
+    assert orbit.perigee_altitude_km == pytest.approx(500.0)
+    assert orbit.apogee_altitude_km == pytest.approx(40000.0)
+    assert orbit.inclination_deg == pytest.approx(63.4)
+    assert orbit.argument_of_perigee_deg == pytest.approx(270.0)
+
+
+def test_main_init_rejects_incomplete_elliptic_orbit(tmp_path, capsys) -> None:
+    output_path = tmp_path / "invalid-elliptic.radar.json"
+
+    exit_code = main(
+        [
+            "init",
+            str(output_path),
+            "--launch-year",
+            "2028",
+            "--lifetime-years",
+            "7",
+            "--orbit",
+            "elliptic",
+            "--perigee-km",
+            "500",
+        ],
+    )
+
+    assert exit_code == 1
+    assert "нужны одновременно --perigee-km и --apogee-km" in capsys.readouterr().err
 
 
 def test_main_init_rejects_invalid_shield_thickness(tmp_path, capsys) -> None:

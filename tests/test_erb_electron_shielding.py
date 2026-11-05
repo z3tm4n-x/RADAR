@@ -17,7 +17,11 @@ from radar.shielding.electron_al import ElectronAlRangeEnergyTable
 from radar.shielding.hze_al import HzeAlRangeTable
 from radar.shielding.hze_si_let import HzeSiLetTable
 from radar.shielding.proton_al import ProtonAlRangeEnergyTable
-from radar.shielding.proton_al_secondary import SecondaryProtonKernel
+from radar.shielding.proton_al_secondary import (
+    Al27CrossSectionTable,
+    SecondaryProtonKernel,
+    SecondaryProtonProductDistribution,
+)
 from radar.shielding.proton_al_survival import Al27NonelasticCrossSectionTable
 from radar.shielding.proton_si_let import ProtonSiLetTable
 from radar.shielding.resources import ShieldingNormativeTables
@@ -76,19 +80,33 @@ def _tables(
     *,
     electron_al_range: ElectronAlRangeEnergyTable | None = _electron_al_table(),
 ) -> ShieldingNormativeTables:
+    secondary_product = SecondaryProtonProductDistribution(
+        mt=5,
+        product_index=0,
+        incident_energy_mev=(1.0, 10.0),
+        yield_value=(0.0, 0.0),
+        emitted_energy_mev_by_incident=((1.0, 10.0), (1.0, 10.0)),
+        pdf_per_mev_by_incident=((0.0, 0.0), (0.0, 0.0)),
+    )
     return ShieldingNormativeTables(
         proton_al_range=_proton_al_table(),
         proton_si_let=_proton_si_table(),
         hze_al_ranges_by_z={26: _hze_al_table()},
         hze_si_let_by_z={26: _hze_si_table()},
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 10.0),
             sigma_barn=(0.0, 0.0),
         ),
         secondary_proton_kernel=SecondaryProtonKernel(
-            products=(),
-            cross_sections_by_mt={},
+            products=(secondary_product,),
+            cross_sections_by_mt={
+                5: Al27CrossSectionTable(
+                    mt=5,
+                    energy_mev=(1.0, 10.0),
+                    sigma_barn=(0.0, 0.0),
+                )
+            },
         ),
         electron_al_range=electron_al_range,
     )
@@ -136,6 +154,12 @@ def test_erb_electron_shielding_positive_thickness_changes_spectrum() -> None:
     assert result.primary.x == _spectrum().x
     assert result.primary.y != pytest.approx(_spectrum().y)
     assert all(value >= 0.0 for value in result.primary.y)
+    assert ERB_ELECTRON_AL_NO_BREMSSTRAHLUNG_TRANSPORT in (
+        result.primary.incomplete_reasons
+    )
+    assert ERB_ELECTRON_AL_NO_SECONDARY_PARTICLES in (
+        result.primary.incomplete_reasons
+    )
 
 
 def test_erb_electron_shielding_requires_electron_al_table() -> None:
@@ -143,8 +167,19 @@ def test_erb_electron_shielding_requires_electron_al_table() -> None:
         calculate_erb_electron_shielding_spectrum(
             spectrum=_spectrum(),
             tables=_tables(electron_al_range=None),
-            thickness_g_cm2=0.0,
+            thickness_g_cm2=0.1,
         )
+
+
+def test_erb_electron_zero_thickness_does_not_require_electron_al_table() -> None:
+    result = calculate_erb_electron_shielding_spectrum(
+        spectrum=_spectrum(),
+        tables=_tables(electron_al_range=None),
+        thickness_g_cm2=0.0,
+    )
+
+    assert result.primary.y == _spectrum().y
+    assert not result.primary.incomplete_reasons
 
 
 def test_erb_electron_shielding_product_preserves_product_kind_and_units() -> None:

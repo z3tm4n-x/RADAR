@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
@@ -6,7 +8,8 @@ from radar.geomagnetic.ost import (
     OST_CUTOFF_REFERENCE_ALTITUDE_KM,
     ost_earth_shadow_factor,
 )
-from radar.geomagnetic.ost_orbit import OstOrbitSample
+from radar.geomagnetic import ost_penetration as penetration_module
+from radar.geomagnetic.ost_orbit import OstOrbitSample, OstOrbitTrace
 from radar.geomagnetic.ost_penetration import (
     OST_GEOMAGNETIC_PENETRATION_MODEL,
     build_ost_penetration_function_for_config,
@@ -58,7 +61,7 @@ def test_ost_penetration_values_are_cumulative_shadow_weighted_fraction() -> Non
     assert values == pytest.approx(
         (
             0.0,
-            weight / 2.0,
+            0.0,
             weight / 2.0,
             weight,
         )
@@ -241,3 +244,54 @@ def test_build_ost_penetration_function_for_config_can_disable_disturbance() -> 
 
     assert quiet.kp == config.kp
     assert quiet.values == pytest.approx(explicit_quiet.values)
+
+
+@pytest.mark.parametrize(
+    ("step_s", "capped"), [(1.0, False), (1.0 + 5e-13, False), (1.0 + 2e-12, True), (2.0, True)],
+)
+def test_orbit_sampling_cap_is_explicit_qualification_not_silent_density_loss(
+    monkeypatch: pytest.MonkeyPatch, step_s: float, capped: bool,
+) -> None:
+    samples = (
+        _sample(index=0, latitude_deg=85.0, longitude_deg=0.0),
+        replace(_sample(index=1, latitude_deg=0.0, longitude_deg=0.0), time_s=step_s),
+    )
+    trace = OstOrbitTrace(
+        samples=samples, semi_major_axis_km=EARTH_RADIUS_KM + 450.0, eccentricity=0.0,
+        orbital_period_s=12.0, window_s=2 * step_s, step_s=step_s,
+        node_precession_rad_s=0.0, perigee_precession_rad_s=0.0,
+    )
+    monkeypatch.setattr(penetration_module, "sample_ost_orbit", lambda *args, **kwargs: trace)
+    grid = RigidityGrid((0.001, 0.1, 1.0, 20.0))
+    weights = (1.0, 3.0)
+    local_times = (0.0, 12.0)
+    baseline = build_ost_penetration_function_from_samples(
+        samples=samples, rigidity_grid=grid, apply_disturbance=True,
+        sample_weights=weights, magnetic_local_times_hours=local_times,
+    )
+    result = build_ost_penetration_function_for_orbit(
+        OrbitConfig.circular(450.0, 0.0), rigidity_grid=grid,
+        raan_deg=37.0, min_days=16.0, steps_per_orbit=12, max_samples=4,
+        apply_disturbance=True, sample_weights=weights, magnetic_local_times_hours=local_times,
+    )
+    assert result.values == baseline.values
+    assert result.model_version == baseline.model_version
+    assert all(reason in result.incomplete_reasons for reason in baseline.incomplete_reasons)
+    cap_reasons = tuple(reason for reason in result.incomplete_reasons if "sample cap" in reason)
+    assert bool(cap_reasons) is capped
+    if capped:
+        assert "convergence is not established" in cap_reasons[0]
+    else:
+        assert result.incomplete_reasons == baseline.incomplete_reasons
+    parameters = dict(result.parameters)
+    assert parameters["orbit_sample_count"] == "2"
+    assert parameters["requested_steps_per_orbit"] == "12"
+    assert float(parameters["actual_step_s"]) == step_s
+    assert float(parameters["orbit_window_s"]) == 2 * step_s
+    assert parameters["orbit_sample_limit"] == "4"
+    assert parameters["orbit_sampling_capped"] == str(capped).lower()
+    assert parameters["initial_raan_deg"] == "37"
+    assert parameters["minimum_sampling_days"] == "16"
+    assert parameters["sample_weight_policy"] == "explicit_normalized"
+    assert parameters["orbit_quadrature"] == "left_time_nodes_with_explicit_relative_weights"
+    assert parameters["mlt_policy"] == "explicit_per_sample"

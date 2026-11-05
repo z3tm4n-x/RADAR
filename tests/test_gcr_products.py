@@ -1,17 +1,20 @@
+from dataclasses import replace
 from math import inf, nan
 
 import pytest
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
+from radar.core.spectra import ModelReference, Spectrum1D
 from radar.core.types import (
     Particle,
     RadiationProductKind,
     RadiationSource,
+    SpectrumCompleteness,
     SpectrumQuantity,
 )
 from radar.core.units import Unit
 from radar.gcr.products import (
+    GCR_FINITE_DOMAIN_INTEGRATION_STEP,
     GCR_MISSION_PRODUCTS_MODEL_SUFFIX,
     GcrFluxTimeBin,
     GcrMissionProducts,
@@ -62,6 +65,151 @@ def test_gcr_mission_products_calculate_mean_maximum_and_fluence() -> None:
     assert result.maximum_integral_flux.spectrum.y == pytest.approx((45.0, 0.0))
     assert result.mission_fluence.spectrum.y == pytest.approx((70.0, 140.0))
     assert result.mission_integral_fluence.spectrum.y == pytest.approx((1050.0, 0.0))
+
+
+@pytest.mark.parametrize("reverse", (False, True))
+@pytest.mark.parametrize("incomplete_values", ((0.0, 0.0), (0.5, 1.0)))
+def test_gcr_products_merge_all_bin_status_and_references(
+    reverse: bool,
+    incomplete_values: tuple[float, float],
+) -> None:
+    complete = replace(
+        _gcr_flux_spectrum(y=(2.0, 4.0)),
+        completeness=SpectrumCompleteness.COMPLETE,
+        model_reference=ModelReference(
+            name="gcr_test", version="test-v1",
+            document_refs=("document-a", "shared-document"), dataset_refs=("dataset-a",),
+        ),
+    )
+    incomplete = replace(
+        complete,
+        y=incomplete_values,
+        completeness=SpectrumCompleteness.INCOMPLETE,
+        incomplete_reasons=("unconfirmed later input", "additional input reason"),
+        model_reference=ModelReference(
+            name="gcr_test", version="test-v1",
+            document_refs=("document-b", "shared-document"), dataset_refs=("dataset-b",),
+        ),
+    )
+    bins: tuple[GcrFluxTimeBin, ...] = (
+        GcrFluxTimeBin(complete, 2.0),
+        GcrFluxTimeBin(incomplete, 3.0),
+    )
+    if reverse:
+        bins = tuple(reversed(bins))
+    result = calculate_gcr_mission_products(bins)
+    assert result.maximum_flux.spectrum.y == complete.y
+    assert result.mission_fluence.spectrum.y == pytest.approx(
+        tuple(2.0 * a + 3.0 * b for a, b in zip(complete.y, incomplete.y, strict=True))
+    )
+    for product in result.products:
+        spectrum = product.spectrum
+        assert spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        assert set(spectrum.incomplete_reasons) == set(incomplete.incomplete_reasons)
+        assert spectrum.model_reference is not None
+        assert set(spectrum.model_reference.document_refs) == {
+            "document-a", "document-b", "shared-document"
+        }
+        assert set(spectrum.model_reference.dataset_refs) == {"dataset-a", "dataset-b"}
+        aggregation = next(
+            step for step in spectrum.transformation_chain
+            if step.name == GCR_MISSION_PRODUCTS_MODEL_SUFFIX
+        )
+        assert aggregation.version == "3"
+        assert dict(aggregation.parameters)["time_bin_count"] == "2"
+        assert dict(aggregation.parameters)["input_provenance_policy"] == (
+            "all_bins_including_zero_and_nonmaximum_bins"
+        )
+
+
+@pytest.mark.parametrize("reverse", (False, True))
+def test_gcr_products_do_not_promote_unknown_input_completeness(reverse: bool) -> None:
+    known = replace(_gcr_flux_spectrum(), completeness=SpectrumCompleteness.COMPLETE)
+    unknown = _gcr_flux_spectrum()
+    bins = (GcrFluxTimeBin(known, 1.0), GcrFluxTimeBin(unknown, 1.0))
+    result = calculate_gcr_mission_products(tuple(reversed(bins)) if reverse else bins)
+    assert all(product.spectrum.completeness is None for product in result.products)
+
+
+def test_gcr_products_union_distinct_reasons_from_multiple_incomplete_bins() -> None:
+    bins = tuple(
+        GcrFluxTimeBin(
+            replace(
+                _gcr_flux_spectrum(y=(0.0, 0.0)),
+                completeness=SpectrumCompleteness.INCOMPLETE,
+                incomplete_reasons=(reason, "common issue"),
+            ),
+            1.0,
+        )
+        for reason in ("first issue", "second issue", "third issue")
+    )
+    result = calculate_gcr_mission_products(bins)
+    for product in result.products:
+        assert product.spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        assert product.spectrum.incomplete_reasons == (
+            "first issue", "common issue", "second issue", "third issue"
+        )
+        assert product.spectrum.y == (0.0, 0.0)
+
+
+@pytest.mark.parametrize("component", ("akl", "total"))
+def test_gcr_products_preserve_later_carbon_akl_gamma_guard(component: str) -> None:
+    from radar.gcr.components import OstGcrSolarState
+    from radar.gcr.source_spectra import (
+        OST_AKL_CONVENTIONS_INCOMPLETE_REASON,
+        OST_AKL_GAMMA_GUARD_INCOMPLETE_REASON,
+        calculate_ost_gcr_source_spectra_outside_magnetosphere,
+    )
+
+    state = OstGcrSolarState(60.0, 50.0, 10.0, 100.0, 24, True)
+    spectra = []
+    for time in (2.0, 6.0):
+        ion = calculate_ost_gcr_source_spectra_outside_magnetosphere(
+            energy_grid_mev_per_nucleon=(10.0, 100.0),
+            solar_state=state,
+            nek_wolf_number=60.0,
+            akl_years_from_cycle_start=time,
+            symbols=("C",),
+        ).ion("C")
+        spectra.append(ion.akl if component == "akl" else ion.total)
+    first, later = spectra
+    assert OST_AKL_GAMMA_GUARD_INCOMPLETE_REASON not in first.incomplete_reasons
+    assert OST_AKL_GAMMA_GUARD_INCOMPLETE_REASON in later.incomplete_reasons
+    if component == "akl":
+        assert later.y == (0.0, 0.0)
+    result = calculate_gcr_mission_products(
+        (GcrFluxTimeBin(first, 2.0), GcrFluxTimeBin(later, 3.0))
+    )
+    assert result.maximum_flux.spectrum.y == first.y
+    for product in result.products:
+        assert product.spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        assert set(product.spectrum.incomplete_reasons) == {
+            OST_AKL_CONVENTIONS_INCOMPLETE_REASON, OST_AKL_GAMMA_GUARD_INCOMPLETE_REASON
+        }
+
+
+def test_gcr_integral_products_stop_at_declared_finite_energy_boundary() -> None:
+    result = calculate_gcr_mission_products(
+        (
+            GcrFluxTimeBin(
+                spectrum=_gcr_flux_spectrum(
+                    x=(10.0, 20.0),
+                    y=(0.01, 0.0025),
+                ),
+                duration_seconds=1.0,
+            ),
+        ),
+        upper_energy_bound=40.0,
+    )
+
+    assert result.mean_integral_flux.spectrum.y == pytest.approx((0.075, 0.025))
+    finite_step = result.mean_integral_flux.spectrum.transformation_chain[-1]
+    assert finite_step.name == GCR_FINITE_DOMAIN_INTEGRATION_STEP
+    assert dict(finite_step.parameters) == {
+        "integration": "local_power_law_finite_domain",
+        "upper_energy_bound": "40",
+        "upper_energy_bound_unit": Unit.MEV.value,
+    }
 
 
 def test_gcr_mission_products_use_product_contract_quantities_and_units() -> None:

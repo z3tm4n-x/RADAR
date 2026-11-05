@@ -1,5 +1,8 @@
+from dataclasses import replace
+
 import pytest
 
+from radar.core.log import LogLevel
 from radar.core.profiles import MethodologyProfile
 from radar.core.project import (
     CalculationConfig,
@@ -9,7 +12,7 @@ from radar.core.project import (
 )
 from radar.core.result import ComponentStatus
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.types import Particle, RadiationSource, SpectrumCompleteness, SpectrumQuantity
 from radar.core.units import Unit
 from radar.geomagnetic.penetration import PenetrationFunction
 from radar.geomagnetic.rigidity import RigidityGrid
@@ -295,3 +298,78 @@ def test_sep_proton_pipeline_accepts_gost_sep_metadata_before_configuration() ->
             sep_model=GostSepModel(),
             penetration=_penetration(),
         )
+
+
+@pytest.mark.parametrize("source_incomplete", [False, True])
+@pytest.mark.parametrize("operator_incomplete", [False, True])
+def test_sep_proton_pipeline_preserves_source_and_operator_qualification(
+    source_incomplete: bool, operator_incomplete: bool,
+) -> None:
+    source_reasons = ("Synthetic source support is incomplete.",) if source_incomplete else ()
+    operator_reasons = ("Synthetic MLT qualification is unresolved.",) if operator_incomplete else ()
+    spectrum = replace(
+        _annual_sep_spectrum(),
+        completeness=SpectrumCompleteness.INCOMPLETE if source_incomplete
+        else SpectrumCompleteness.COMPLETE,
+        incomplete_reasons=source_reasons,
+    )
+    model = StaticSepModel(spectrum, model="qualified_source", document="test_document")
+    penetration = replace(
+        _penetration(), model_version="qualified_access_v2", incomplete_reasons=operator_reasons,
+    )
+    output = calculate_sep_proton_pipeline(_config(), model, penetration)
+    result = output.calculation_result
+    reasons = (*source_reasons, *operator_reasons)
+    expected = ComponentStatus.INCOMPLETE if reasons else ComponentStatus.COMPLETED
+    assert result.component_status(SEP_PROTON_PIPELINE_COMPONENT) is expected
+    assert result.component_status(GEOMAGNETIC_PENETRATION_COMPONENT) is expected
+    assert result.component_status(SEP_MODEL_COMPONENT) is (
+        ComponentStatus.INCOMPLETE if source_incomplete else ComponentStatus.COMPLETED
+    )
+    assert output.penetrated_spectrum.incomplete_reasons == reasons
+    assert output.penetrated_spectrum.y == pytest.approx((0.5, 5.0, 13.5))
+    assert output.raw_spectrum.y == pytest.approx((5.0, 10.0, 15.0))
+    info = {entry.name: entry for entry in result.model_info}
+    assert info[penetration.model].version == penetration.model_version
+    assert info[penetration.model].status == ("diagnostic" if reasons else "applied")
+    assert info[model.model].status == ("diagnostic" if source_reasons else "calculated")
+    for entry in result.log.entries:
+        if entry.stage not in (GEOMAGNETIC_PENETRATION_COMPONENT, SEP_PROTON_PIPELINE_COMPONENT):
+            continue
+        if entry.message.endswith("started."):
+            continue
+        assert entry.level is (LogLevel.WARNING if reasons else LogLevel.INFO)
+        details = dict(entry.details)
+        if reasons:
+            assert details["qualification_reasons"] == "; ".join(reasons)
+            assert "completed" not in entry.message.lower()
+        else:
+            assert "qualification_reasons" not in details
+
+
+def test_sep_proton_pipeline_does_not_promote_incomplete_flag_without_reason() -> None:
+    source = replace(_annual_sep_spectrum(), completeness=SpectrumCompleteness.INCOMPLETE)
+    output = calculate_sep_proton_pipeline(
+        _config(), StaticSepModel(source), _penetration(),
+    )
+    assert output.calculation_result.component_status(SEP_MODEL_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert (
+        output.calculation_result.component_status(SEP_PROTON_PIPELINE_COMPONENT)
+        is ComponentStatus.INCOMPLETE
+    )
+    final_details = dict(output.calculation_result.log.entries[-1].details)
+    assert "without a supplied qualification reason" in final_details["qualification_reasons"]
+
+
+def test_sep_proton_pipeline_merges_duplicate_source_operator_reasons() -> None:
+    reason = "Shared unresolved qualification."
+    source = replace(
+        _annual_sep_spectrum(), completeness=SpectrumCompleteness.INCOMPLETE,
+        incomplete_reasons=(reason,),
+    )
+    output = calculate_sep_proton_pipeline(
+        _config(), StaticSepModel(source), replace(_penetration(), incomplete_reasons=(reason,)),
+    )
+    assert output.penetrated_spectrum.incomplete_reasons == (reason,)
+    final_details = dict(output.calculation_result.log.entries[-1].details)
+    assert final_details["qualification_reasons"] == reason

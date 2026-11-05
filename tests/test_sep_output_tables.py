@@ -15,7 +15,7 @@ from radar.sep.pipeline_shielding import (
 )
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
+from radar.core.spectra import ParticleSpecies, Spectrum1D
 from radar.core.types import Particle, RadiationSource, SpectrumQuantity
 from radar.core.units import Unit
 from radar.shielding.hze_al import HzeAlRangeTable
@@ -100,7 +100,7 @@ def _tables() -> ShieldingNormativeTables:
         hze_al_ranges_by_z={26: _hze_al_table()},
         hze_si_let_by_z={26: _hze_si_table()},
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 300.0),
             sigma_barn=(0.0, 0.0),
         ),
@@ -114,6 +114,8 @@ def _spectrum(
     model: str,
     quantity: SpectrumQuantity,
     y_unit: Unit,
+    z: int = 26,
+    symbol: str = "Fe",
 ) -> Spectrum1D:
     return Spectrum1D(
         x=(10.0, 30.0, 100.0),
@@ -124,6 +126,11 @@ def _spectrum(
         particle=particle,
         source=RadiationSource.SEP,
         model=model,
+        species=(
+            ParticleSpecies(symbol="p", atomic_number=1, mass_number=1)
+            if particle is Particle.PROTON
+            else ParticleSpecies(symbol=symbol, atomic_number=z, mass_number=56)
+        ),
     )
 
 
@@ -161,6 +168,8 @@ def _product(
             ),
             quantity=quantity,
             y_unit=y_unit,
+            z=z,
+            symbol=symbol,
         ),
         label=f"SEP {symbol if particle is Particle.HZE else 'H'} {kind.value}",
     )
@@ -317,14 +326,18 @@ def test_sep_let_output_tables() -> None:
     assert tuple(table.table_id for table in tables) == (
         "sep_proton_let_behind_al",
         "sep_hze_z26_let_behind_al",
+        "sep_hze_aggregate_let_behind_al",
         "sep_combined_let_behind_al",
     )
     assert _metadata(tables[0], "stage") == "let"
-    assert _metadata(tables[0], "component") == "proton_let"
+    assert _metadata(tables[0], "component") == "proton_let_diagnostic"
     assert _metadata(tables[1], "component") == "hze_let"
-    assert _metadata(tables[2], "component") == "combined_let"
-    assert _metadata(tables[2], "hze_z_values") == "26"
-    assert _metadata(tables[2], "let_target") == "Si"
+    assert _metadata(tables[2], "component") == "hze_direct_ion_aggregate_let"
+    assert _metadata(tables[2], "semantic_role") == "hze_direct_ion"
+    assert _metadata(tables[3], "component") == "mixed_proton_hze_let_diagnostic"
+    assert _metadata(tables[3], "semantic_role") == "diagnostic_only"
+    assert _metadata(tables[3], "hze_z_values") == "26"
+    assert _metadata(tables[3], "let_target") == "Si"
 
 
 def test_sep_shielding_let_output_tables() -> None:
@@ -345,5 +358,6 @@ def test_sep_shielding_let_output_tables() -> None:
         "sep_hze_z26_energy_behind_al",
         "sep_proton_let_behind_al",
         "sep_hze_z26_let_behind_al",
+        "sep_hze_aggregate_let_behind_al",
         "sep_combined_let_behind_al",
     )

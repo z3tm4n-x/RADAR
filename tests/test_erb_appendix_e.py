@@ -102,9 +102,59 @@ def test_appendix_e_electron_approximation_uses_ost_coefficient_relations() -> N
     assert differential.c2 == pytest.approx(8.0)
     assert approximation.differential_flux(2.0) == pytest.approx(
         6.0 * math.exp(-6.0)
+        + 120.0 * math.exp(-24.0)
+        + 56.0 * math.exp(-16.0)
+    )
+    assert approximation.printed_differential_flux(2.0) == pytest.approx(
+        6.0 * math.exp(-6.0)
         + 30.0 * math.exp(-24.0)
         + 56.0 * math.exp(-16.0)
     )
+
+
+@pytest.mark.parametrize("energy", (0.2, 0.5, 1.0, 2.0, 5.0))
+@pytest.mark.parametrize(
+    "approximation",
+    (
+        OstErbProtonIntegralApproximation(
+            OstErbProtonApproximationCoefficients(3.0, 1.7, 0.3, 2.0, 0.8)
+        ),
+        OstErbElectronIntegralApproximation(
+            OstErbElectronApproximationCoefficients(2.0, 0.7, 5.0, 0.8, 3.0, 1.2)
+        ),
+        OstErbElectronIntegralApproximation(
+            OstErbElectronApproximationCoefficients(0.0, 1.0, 1.0, 1.0, 0.0, 1.0)
+        ),
+    ),
+)
+def test_appendix_e_differential_matches_negative_integral_derivative(
+    approximation: OstErbProtonIntegralApproximation | OstErbElectronIntegralApproximation,
+    energy: float,
+) -> None:
+    step = energy * 1.0e-4
+    integral = approximation.integral_flux_gt_e
+    numerical_negative_derivative = (
+        integral(energy + 2.0 * step)
+        - 8.0 * integral(energy + step)
+        + 8.0 * integral(energy - step)
+        - integral(energy - 2.0 * step)
+    ) / (12.0 * step)
+    assert approximation.differential_flux(energy) == pytest.approx(
+        numerical_negative_derivative, rel=1.0e-7, abs=1.0e-18
+    )
+
+
+def test_appendix_e_electron_gaussian_conserves_above_threshold_counts() -> None:
+    from scipy.integrate import quad
+
+    approximation = OstErbElectronIntegralApproximation(
+        OstErbElectronApproximationCoefficients(0.0, 1.0, 1.0, 1.0, 0.0, 1.0)
+    )
+    integrated, _ = quad(approximation.differential_flux, 1.0, 2.0)
+    printed_integrated, _ = quad(approximation.printed_differential_flux, 1.0, 2.0)
+    count = approximation.integral_flux_gt_e(1.0) - approximation.integral_flux_gt_e(2.0)
+    assert integrated == pytest.approx(count, rel=1.0e-12)
+    assert abs(printed_integrated - count) / count > 0.5
 
 
 @pytest.mark.parametrize(

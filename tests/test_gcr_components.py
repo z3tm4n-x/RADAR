@@ -8,6 +8,7 @@ from radar.gcr.components import (
     GOST_WOLF_1_MODULATION_SLOPE_GV,
     GOST_WOLF_2_MODULATION_SLOPE_GV,
     OST_MAIN_GCR_UNITS_NOTE,
+    OST_MAIN_GCR_NORMALIZATION,
     GostGcrSolarState,
     OstGcrSolarState,
     gost_main_gcr_differential_flux_directional_m2_s_sr_gev,
@@ -17,7 +18,7 @@ from radar.gcr.components import (
     ost_delta_exponent,
     ost_gcr_delay_months,
     ost_gcr_drift_m,
-    ost_main_gcr_differential_flux_directional_m2_s_sr_gev,
+    ost_main_gcr_differential_flux_directional_cm2_s_sr_mev,
     ost_modulation_potential_r0_gv,
     ost_nek_differential_flux_directional_cm2_s_sr_mev,
 )
@@ -187,23 +188,25 @@ def test_ost_main_gcr_formula_matches_manual_calculation() -> None:
     rigidity_power = rigidity**1.15
     modulation = (rigidity_power / (rigidity_power + r0)) ** delta
     expected = (
-        parameters.c
+        OST_MAIN_GCR_NORMALIZATION
+        * parameters.c
         * parameters.mass_to_charge
         * beta ** (parameters.alpha - 1.0)
         * rigidity ** (-parameters.gamma)
         * modulation
     )
 
-    assert ost_main_gcr_differential_flux_directional_m2_s_sr_gev(
+    assert ost_main_gcr_differential_flux_directional_cm2_s_sr_mev(
         kinetic_energy_gev_per_nucleon=energy_gev,
         parameters=parameters,
         solar_state=state,
     ) == pytest.approx(expected)
 
 
-def test_ost_main_gcr_units_note_documents_dimensional_correction() -> None:
-    assert "printed cm^-2/MeV unit label" in OST_MAIN_GCR_UNITS_NOTE
-    assert "no 1e-3 normalization factor" in OST_MAIN_GCR_UNITS_NOTE
+def test_ost_main_gcr_units_note_documents_literal_normative_units() -> None:
+    assert "1e-3 normalization" in OST_MAIN_GCR_UNITS_NOTE
+    assert "cm^-2 sr^-1 s^-1" in OST_MAIN_GCR_UNITS_NOTE
+    assert "No GOST m^-2/GeV conversion" in OST_MAIN_GCR_UNITS_NOTE
 
 
 def test_ost_nek_formula_uses_corrected_he_parameter() -> None:
@@ -286,7 +289,7 @@ def test_component_fluxes_reject_bad_energy(bad_energy: float) -> None:
         )
 
     with pytest.raises(ValueError, match="finite|positive"):
-        ost_main_gcr_differential_flux_directional_m2_s_sr_gev(
+        ost_main_gcr_differential_flux_directional_cm2_s_sr_mev(
             kinetic_energy_gev_per_nucleon=bad_energy,
             parameters=ost_parameters,
             solar_state=OstGcrSolarState(

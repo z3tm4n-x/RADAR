@@ -1,15 +1,18 @@
 import pytest
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
+from radar.core.spectra import ParticleSpecies, Spectrum1D
 from radar.core.types import (
+    LetSpectrumRole,
     Particle,
     RadiationProductKind,
     RadiationSource,
+    SpectrumLocation,
     SpectrumQuantity,
 )
 from radar.core.units import Unit
 from radar.sep.pipeline_shielding import (
+    calculate_sep_hze_shielding_spectrum,
     calculate_sep_shielding_let_products,
     calculate_sep_shielding_let_products_for_thickness,
 )
@@ -95,7 +98,7 @@ def _tables() -> ShieldingNormativeTables:
         hze_al_ranges_by_z={26: _hze_al_table()},
         hze_si_let_by_z={26: _hze_si_table()},
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 300.0),
             sigma_barn=(0.0, 0.0),
         ),
@@ -109,6 +112,8 @@ def _spectrum(
     model: str,
     quantity: SpectrumQuantity,
     y_unit: Unit,
+    z: int = 26,
+    symbol: str = "Fe",
 ) -> Spectrum1D:
     return Spectrum1D(
         x=(10.0, 30.0, 100.0),
@@ -119,6 +124,15 @@ def _spectrum(
         particle=particle,
         source=RadiationSource.SEP,
         model=model,
+        species=(
+            ParticleSpecies(symbol="p", atomic_number=1, mass_number=1)
+            if particle is Particle.PROTON
+            else ParticleSpecies(
+                symbol=symbol,
+                atomic_number=z,
+                mass_number=238 if z == 92 else 56,
+            )
+        ),
     )
 
 
@@ -156,6 +170,8 @@ def _product(
             ),
             quantity=quantity,
             y_unit=y_unit,
+            z=z,
+            symbol=symbol,
         ),
         label=f"SEP {symbol if particle is Particle.HZE else 'H'} {kind.value}",
     )
@@ -233,6 +249,36 @@ def test_sep_pipeline_shielding_let_products_for_one_thickness() -> None:
         "sep_shielded_let_products" in product.spectrum.model
         for product in result.let_products
     )
+    assert all(
+        product.spectrum.particle is Particle.HZE
+        and product.spectrum.let_role is LetSpectrumRole.HZE_DIRECT_ION
+        for product in result.let_products
+    )
+    assert len(result.diagnostic_let_products) == 6
+    assert {
+        product.spectrum.let_role for product in result.diagnostic_let_products
+    } == {
+        LetSpectrumRole.PROTON_DIAGNOSTIC,
+        LetSpectrumRole.MIXED_DIAGNOSTIC,
+    }
+
+
+def test_sep_assessment_let_is_independent_of_mixed_diagnostic_switch() -> None:
+    included = calculate_sep_shielding_let_products_for_thickness(
+        products=_products(),
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+        include_mixed_let_diagnostic=True,
+    )
+    excluded = calculate_sep_shielding_let_products_for_thickness(
+        products=_products(),
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+        include_mixed_let_diagnostic=False,
+    )
+
+    assert excluded.diagnostic_let_products == ()
+    assert excluded.let_products == included.let_products
 
 
 def test_sep_pipeline_shielding_let_products_for_multiple_thicknesses() -> None:
@@ -247,7 +293,7 @@ def test_sep_pipeline_shielding_let_products_for_multiple_thicknesses() -> None:
     assert all(len(result.let_products) == 3 for result in results)
 
 
-def test_sep_pipeline_shielding_skips_hze_without_tables_but_keeps_protons() -> None:
+def test_sep_pipeline_zero_shield_preserves_hze_without_transport_table() -> None:
     hze_product = _product(
         particle=Particle.HZE,
         kind=RadiationProductKind.PEAK_FLUX,
@@ -259,13 +305,106 @@ def test_sep_pipeline_shielding_skips_hze_without_tables_but_keeps_protons() -> 
 
     result = calculate_sep_shielding_let_products_for_thickness(
         products=(_products()[0], hze_product),
-        tables=_tables(),
+        tables=ShieldingNormativeTables(
+            **{
+                **_tables().__dict__,
+                "hze_al_ranges_by_z": {},
+            }
+        ),
         thickness_g_cm2=0.0,
+    )
+
+    assert len(result.shielded_products) == 2
+    shielded_hze = next(
+        product
+        for product in result.shielded_products
+        if product.spectrum.particle is Particle.HZE
+    )
+    assert shielded_hze.spectrum.x == hze_product.spectrum.x
+    assert shielded_hze.spectrum.y == hze_product.spectrum.y
+    assert shielded_hze.spectrum.location is SpectrumLocation.BEHIND_SHIELD
+    assert shielded_hze.spectrum.shielding is not None
+    assert shielded_hze.spectrum.shielding.material == "aluminium"
+    assert shielded_hze.spectrum.shielding.areal_density_g_cm2 == 0.0
+    assert result.incomplete_reasons == ()
+    assert result.hze_by_kind == {}
+
+
+def test_sep_direct_zero_hze_shield_does_not_require_transport_table() -> None:
+    hze_product = _product(
+        particle=Particle.HZE,
+        kind=RadiationProductKind.PEAK_FLUX,
+        quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+        z=92,
+        symbol="U",
+    )
+
+    result = calculate_sep_hze_shielding_spectrum(
+        z=92,
+        spectrum=hze_product.spectrum,
+        tables=ShieldingNormativeTables(
+            **{
+                **_tables().__dict__,
+                "hze_al_ranges_by_z": {},
+            }
+        ),
+        thickness_g_cm2=0.0,
+    )
+
+    assert result.spectrum.x == hze_product.spectrum.x
+    assert result.spectrum.y == hze_product.spectrum.y
+    assert result.spectrum.location is SpectrumLocation.BEHIND_SHIELD
+    assert result.spectrum.incomplete_reasons == hze_product.spectrum.incomplete_reasons
+
+
+def test_sep_pipeline_positive_shield_marks_missing_hze_table_incomplete() -> None:
+    hze_product = _product(
+        particle=Particle.HZE,
+        kind=RadiationProductKind.PEAK_FLUX,
+        quantity=SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+        z=92,
+        symbol="U",
+    )
+    result = calculate_sep_shielding_let_products_for_thickness(
+        products=(_products()[0], hze_product),
+        tables=ShieldingNormativeTables(
+            **{
+                **_tables().__dict__,
+                "hze_al_ranges_by_z": {},
+            }
+        ),
+        thickness_g_cm2=0.1,
     )
 
     assert len(result.shielded_products) == 1
     assert result.shielded_products[0].spectrum.particle is Particle.PROTON
+    assert "no HZE aluminium range table is available for Z=92" in set(
+        result.incomplete_reasons
+    )
+    assert result.hze_by_kind == {}
+
+
+def test_sep_pipeline_shielding_marks_missing_hze_let_table_incomplete() -> None:
+    tables = ShieldingNormativeTables(
+        **{
+            **_tables().__dict__,
+            "hze_si_let_by_z": {},
+        }
+    )
+
+    result = calculate_sep_shielding_let_products_for_thickness(
+        products=(_products()[0], _products()[3]),
+        tables=tables,
+        thickness_g_cm2=0.0,
+    )
+
+    assert len(result.shielded_products) == 2
     assert result.let_products == ()
+    assert result.incomplete_reasons == (
+        "no HZE silicon LET table is available for Z=26 (peak_flux)",
+    )
 
 
 def test_sep_pipeline_shielding_ignores_integral_energy_products() -> None:

@@ -6,6 +6,7 @@ from radar.core.spectra import Spectrum1D
 from radar.core.spectrum_ops import (
     add_spectra,
     check_spectra_compatible,
+    integrate_differential_spectrum_finite_upper_bound,
     integrate_differential_spectrum_tail_power_law,
     scale_spectrum,
 )
@@ -186,6 +187,38 @@ def test_integrate_differential_spectrum_integrates_power_law_with_finite_tail()
     )
 
     assert integral_values == pytest.approx((8.0, 4.0, 2.0))
+
+
+def test_integrate_differential_spectrum_uses_declared_finite_upper_bound() -> None:
+    integral_values = integrate_differential_spectrum_finite_upper_bound(
+        energies=(10.0, 20.0),
+        differential_values=(0.01, 0.0025),
+        upper_energy_bound=40.0,
+    )
+
+    assert integral_values == pytest.approx((0.075, 0.025))
+
+
+def test_integrate_differential_spectrum_can_end_at_last_sample() -> None:
+    integral_values = integrate_differential_spectrum_finite_upper_bound(
+        energies=(10.0, 20.0),
+        differential_values=(0.01, 0.0025),
+        upper_energy_bound=20.0,
+    )
+
+    assert integral_values == pytest.approx((0.05, 0.0))
+
+
+@pytest.mark.parametrize("upper_energy_bound", (0.0, float("inf"), 19.0))
+def test_integrate_differential_spectrum_rejects_invalid_finite_upper_bound(
+    upper_energy_bound: float,
+) -> None:
+    with pytest.raises(ValueError, match="upper energy bound"):
+        integrate_differential_spectrum_finite_upper_bound(
+            energies=(10.0, 20.0),
+            differential_values=(0.01, 0.0025),
+            upper_energy_bound=upper_energy_bound,
+        )
 
 
 @pytest.mark.parametrize(

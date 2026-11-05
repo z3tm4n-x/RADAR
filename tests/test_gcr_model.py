@@ -8,20 +8,30 @@ from radar.core.types import (
     Particle,
     RadiationProductKind,
     RadiationSource,
+    SpectrumAxisKind,
+    SpectrumCompleteness,
     SpectrumQuantity,
 )
 from radar.core.units import Unit
-from radar.gcr.components import GostGcrSolarState, OstGcrSolarState
+from radar.gcr.components import GostGcrSolarState, OstGcrSolarState, ost_gcr_delay_months
+from radar.gcr.kinematics import gcr_rigidity_gv_from_mev_per_nucleon
 from radar.gcr.model import (
     GCR_MODEL_SECONDS_PER_YEAR,
+    OST_GCR_NORMATIVE_ION_ROSTER_REASON_PREFIX,
     GcrModelInput,
     GcrModelProtocol,
     GcrModelResult,
     GostGcrModel,
     OstGcrModel,
     StaticGcrModel,
+    gost_gcr_delay_months_for_cycle,
+    gost_gcr_solar_state_for_timeline_month,
+    ost_gcr_delay_months_for_timeline_energy,
+    ost_gcr_solar_state_for_timeline_energy,
     validate_gcr_energy_spectrum,
 )
+from radar.solar_activity.model import build_mission_solar_activity
+from radar.solar_activity.ost import ost_wolf_number_cycle_table
 
 
 def _gcr_proton_flux_spectrum(
@@ -82,6 +92,23 @@ def test_validate_gcr_energy_spectrum_accepts_hze_flux() -> None:
     validate_gcr_energy_spectrum(_gcr_hze_flux_spectrum())
 
 
+def test_validate_gcr_energy_spectrum_rejects_typed_hze_total_mev() -> None:
+    spectrum = Spectrum1D(
+        x=(10.0, 100.0, 1000.0),
+        y=(4.0, 5.0, 6.0),
+        x_unit=Unit.MEV,
+        y_unit=Unit.DIFFERENTIAL_FLUX,
+        quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
+        particle=Particle.HZE,
+        source=RadiationSource.GCR,
+        model="typed_hze_total_mev",
+        axis_kind=SpectrumAxisKind.KINETIC_ENERGY,
+    )
+
+    with pytest.raises(ValueError, match="Typed GCR HZE.*MeV/nucleon"):
+        validate_gcr_energy_spectrum(spectrum)
+
+
 def test_validate_gcr_energy_spectrum_accepts_fluence_quantity() -> None:
     spectrum = _gcr_proton_flux_spectrum(
         quantity=SpectrumQuantity.DIFFERENTIAL_FLUENCE,
@@ -114,16 +141,12 @@ def test_validate_gcr_energy_spectrum_accepts_integral_quantities() -> None:
 
 def test_validate_gcr_energy_spectrum_rejects_electrons() -> None:
     with pytest.raises(ValueError, match="electrons"):
-        validate_gcr_energy_spectrum(
-            _gcr_proton_flux_spectrum(particle=Particle.ELECTRON)
-        )
+        validate_gcr_energy_spectrum(_gcr_proton_flux_spectrum(particle=Particle.ELECTRON))
 
 
 def test_validate_gcr_energy_spectrum_rejects_non_gcr_source() -> None:
     with pytest.raises(ValueError, match="GCR"):
-        validate_gcr_energy_spectrum(
-            _gcr_proton_flux_spectrum(source=RadiationSource.SEP)
-        )
+        validate_gcr_energy_spectrum(_gcr_proton_flux_spectrum(source=RadiationSource.SEP))
 
 
 def test_validate_gcr_energy_spectrum_rejects_let_quantity() -> None:
@@ -138,16 +161,12 @@ def test_validate_gcr_energy_spectrum_rejects_let_quantity() -> None:
 
 def test_validate_gcr_energy_spectrum_rejects_bad_x_unit() -> None:
     with pytest.raises(ValueError, match="MeV or GeV/nucleon"):
-        validate_gcr_energy_spectrum(
-            _gcr_proton_flux_spectrum(x_unit=Unit.LET)
-        )
+        validate_gcr_energy_spectrum(_gcr_proton_flux_spectrum(x_unit=Unit.LET))
 
 
 def test_validate_gcr_energy_spectrum_rejects_bad_flux_y_unit() -> None:
     with pytest.raises(ValueError, match="differential flux units"):
-        validate_gcr_energy_spectrum(
-            _gcr_proton_flux_spectrum(y_unit=Unit.DIFFERENTIAL_FLUENCE)
-        )
+        validate_gcr_energy_spectrum(_gcr_proton_flux_spectrum(y_unit=Unit.DIFFERENTIAL_FLUENCE))
 
 
 def test_validate_gcr_energy_spectrum_rejects_bad_fluence_y_unit() -> None:
@@ -162,9 +181,7 @@ def test_validate_gcr_energy_spectrum_rejects_bad_fluence_y_unit() -> None:
 
 def test_validate_gcr_energy_spectrum_rejects_zero_energy() -> None:
     with pytest.raises(ValueError, match="positive"):
-        validate_gcr_energy_spectrum(
-            _gcr_proton_flux_spectrum(x=(0.0, 10.0, 100.0))
-        )
+        validate_gcr_energy_spectrum(_gcr_proton_flux_spectrum(x=(0.0, 10.0, 100.0)))
 
 
 def test_gcr_model_input_exposes_mission_parameters() -> None:
@@ -202,11 +219,7 @@ def test_static_gcr_model_rejects_empty_spectra() -> None:
 
 def test_static_gcr_model_rejects_invalid_spectrum() -> None:
     with pytest.raises(ValueError, match="electrons"):
-        StaticGcrModel(
-            spectra=(
-                _gcr_proton_flux_spectrum(particle=Particle.ELECTRON),
-            )
-        )
+        StaticGcrModel(spectra=(_gcr_proton_flux_spectrum(particle=Particle.ELECTRON),))
 
 
 def test_gcr_model_result_requires_spectra() -> None:
@@ -237,6 +250,7 @@ def test_gcr_model_result_requires_document() -> None:
             model="test",
             document="",
         )
+
 
 def test_gcr_model_result_exposes_products() -> None:
     from radar.core.types import RadiationProductKind
@@ -279,6 +293,7 @@ def test_gcr_model_result_rejects_mismatched_products() -> None:
             ),
         )
 
+
 def test_gcr_model_result_rejects_ambiguous_differential_flux_product() -> None:
     spectrum = _gcr_proton_flux_spectrum(
         quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
@@ -293,6 +308,7 @@ def test_gcr_model_result_rejects_ambiguous_differential_flux_product() -> None:
             document="test",
         )
 
+
 def test_validate_gcr_energy_spectrum_rejects_daily_display_fluence_unit() -> None:
     with pytest.raises(ValueError, match="differential fluence units"):
         validate_gcr_energy_spectrum(
@@ -301,6 +317,7 @@ def test_validate_gcr_energy_spectrum_rejects_daily_display_fluence_unit() -> No
                 y_unit=Unit.DIFFERENTIAL_FLUENCE_PER_DAY,
             )
         )
+
 
 def test_gcr_model_result_rejects_product_with_wrong_source() -> None:
     spectrum = _gcr_proton_flux_spectrum(
@@ -332,12 +349,14 @@ def test_gcr_model_result_rejects_product_with_wrong_source() -> None:
             ),
         )
 
+
 def test_normative_gcr_model_metadata() -> None:
     from radar.core.profiles import (
         GOST_GCR_DOCUMENT,
         OST_134_1044_2007_DOCUMENT,
         SourceModelFamily,
     )
+    from radar.gcr.source_spectra import GOST_GCR_SOURCE_VERSION, OST_GCR_SOURCE_VERSION
 
     ost_model = OstGcrModel(symbols=("H",))
     gost_model = GostGcrModel(symbols=("H",))
@@ -345,12 +364,12 @@ def test_normative_gcr_model_metadata() -> None:
     assert ost_model.metadata.source is RadiationSource.GCR
     assert ost_model.metadata.model_family is SourceModelFamily.OST_134_1044_2007
     assert ost_model.metadata.document == OST_134_1044_2007_DOCUMENT
-    assert ost_model.metadata.version == "source_spectra_outside_magnetosphere_v1"
+    assert ost_model.metadata.version == OST_GCR_SOURCE_VERSION
 
     assert gost_model.metadata.source is RadiationSource.GCR
     assert gost_model.metadata.model_family is SourceModelFamily.GOST_GCR
     assert gost_model.metadata.document == GOST_GCR_DOCUMENT
-    assert gost_model.metadata.version == "source_spectra_outside_magnetosphere_v1"
+    assert gost_model.metadata.version == GOST_GCR_SOURCE_VERSION
 
 
 def test_gost_gcr_model_calculates_outside_magnetosphere_products() -> None:
@@ -452,6 +471,177 @@ def test_ost_gcr_model_calculates_outside_magnetosphere_products() -> None:
     assert result.products[4].spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
     assert result.products[4].spectrum.y == pytest.approx(
         tuple(value * duration for value in source_total.y)
+    )
+
+
+def test_ost_gcr_subset_marks_source_and_mission_products_incomplete() -> None:
+    model = OstGcrModel(
+        energy_grid_mev_per_nucleon=(1.0, 10.0**4.9),
+        symbols=("H", "Fe"),
+    )
+
+    source = model.calculate_source_spectra()
+    result = model.calculate(GcrModelInput(mission=_mission(lifetime_years=1)))
+
+    assert all(
+        spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        for spectrum in source.all_component_spectra
+    )
+    assert all(
+        any(
+            reason.startswith(OST_GCR_NORMATIVE_ION_ROSTER_REASON_PREFIX)
+            and "He" in reason
+            and "U" in reason
+            for reason in spectrum.incomplete_reasons
+        )
+        for spectrum in source.all_component_spectra
+    )
+    assert all(
+        product.spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        and any(
+            reason.startswith(OST_GCR_NORMATIVE_ION_ROSTER_REASON_PREFIX)
+            for reason in product.spectrum.incomplete_reasons
+        )
+        for product in result.products
+    )
+
+
+def test_ost_gcr_full_roster_has_no_ion_roster_blocker() -> None:
+    model = OstGcrModel(
+        energy_grid_mev_per_nucleon=(1.0, 10.0**4.9),
+    )
+
+    source = model.calculate_source_spectra()
+
+    assert len(source.ions) == 92
+    assert all(
+        not any(
+            reason.startswith(OST_GCR_NORMATIVE_ION_ROSTER_REASON_PREFIX)
+            for reason in spectrum.incomplete_reasons
+        )
+        for spectrum in source.all_component_spectra
+    )
+
+
+def test_custom_gcr_subset_is_not_subject_to_ost_roster_contract() -> None:
+    custom_spectrum = _gcr_proton_flux_spectrum()
+
+    result = StaticGcrModel(spectra=(custom_spectrum,)).calculate(
+        GcrModelInput(mission=_mission(lifetime_years=1))
+    )
+
+    assert len(result.spectra) == 1
+    assert not any(
+        reason.startswith(OST_GCR_NORMATIVE_ION_ROSTER_REASON_PREFIX)
+        for reason in result.spectra[0].incomplete_reasons
+    )
+
+
+def _calendar_timeline(*, cycle_number: int = 25, lifetime_years: int = 2):
+    mission = MissionConfig(launch_year=2020, lifetime_years=lifetime_years)
+    return build_mission_solar_activity(
+        mission=mission,
+        cycle_table=ost_wolf_number_cycle_table(mission.solar_activity_level),
+        reference_start_year=2020,
+        reference_cycle_number=cycle_number,
+    )
+
+
+def test_gost_gcr_delay_uses_numbered_cycle_parity() -> None:
+    assert gost_gcr_delay_months_for_cycle(24) == 5.5
+    assert gost_gcr_delay_months_for_cycle(25) == 15.5
+
+
+def test_gost_gcr_state_samples_required_premission_lag() -> None:
+    odd_state = gost_gcr_solar_state_for_timeline_month(
+        solar_activity=_calendar_timeline(cycle_number=25),
+        mission_month_index=0,
+    )
+    even_state = gost_gcr_solar_state_for_timeline_month(
+        solar_activity=_calendar_timeline(cycle_number=24),
+        mission_month_index=0,
+    )
+
+    assert odd_state.wolf_number == 21.3
+    assert even_state.wolf_number == 11.7
+
+
+def test_ost_gcr_lag_is_evaluated_per_energy_not_as_one_scalar() -> None:
+    timeline = _calendar_timeline(cycle_number=25)
+
+    low_energy_state = ost_gcr_solar_state_for_timeline_energy(
+        solar_activity=timeline,
+        mission_month_index=0,
+        energy_mev_per_nucleon=10.0,
+        mass_to_charge=1.0,
+    )
+    high_energy_state = ost_gcr_solar_state_for_timeline_energy(
+        solar_activity=timeline,
+        mission_month_index=0,
+        energy_mev_per_nucleon=10000.0,
+        mass_to_charge=1.0,
+    )
+
+    assert low_energy_state.wolf_lagged == 21.3
+    assert high_energy_state.wolf_lagged == 11.7
+    assert low_energy_state.wolf_lagged != high_energy_state.wolf_lagged
+
+
+def test_ost_gcr_tau_uses_wolf_number_at_t_minus_16_months() -> None:
+    timeline = _calendar_timeline(cycle_number=25)
+    rigidity = gcr_rigidity_gv_from_mev_per_nucleon(
+        kinetic_energy_mev_per_nucleon=10.0,
+        mass_to_charge=1.0,
+    )
+
+    actual = ost_gcr_delay_months_for_timeline_energy(
+        solar_activity=timeline,
+        mission_month_index=0,
+        energy_mev_per_nucleon=10.0,
+        mass_to_charge=1.0,
+    )
+    expected = ost_gcr_delay_months(
+        rigidity_gv=rigidity,
+        wolf_for_tau=21.3,  # W at the January-2020 midpoint minus 16 months.
+        wolf_min=7.1,
+        wolf_max=107.4,
+        cycle_number=25,
+    )
+    wrong_current_w = ost_gcr_delay_months(
+        rigidity_gv=rigidity,
+        wolf_for_tau=7.1,
+        wolf_min=7.1,
+        wolf_max=107.4,
+        cycle_number=25,
+    )
+
+    assert actual == pytest.approx(expected)
+    assert actual != pytest.approx(wrong_current_w)
+
+
+def test_calendar_gcr_products_use_monthly_bins_and_true_time_integral() -> None:
+    mission = MissionConfig(launch_year=2027, lifetime_years=2)
+    timeline = build_mission_solar_activity(
+        mission=mission,
+        cycle_table=ost_wolf_number_cycle_table(mission.solar_activity_level),
+        reference_start_year=2020,
+        reference_cycle_number=25,
+    )
+    model = GostGcrModel(
+        energy_grid_mev_per_nucleon=(10.0, 1000.0),
+        solar_activity=timeline,
+        symbols=("H",),
+    )
+
+    result = model.calculate(GcrModelInput(mission=mission, solar_activity=timeline))
+    mean_flux = result.products[0].spectrum
+    maximum_flux = result.products[2].spectrum
+    mission_fluence = result.products[4].spectrum
+
+    assert dict(result.method_metadata)["gcr_time_bin_count"] == "24"
+    assert maximum_flux.y != pytest.approx(mean_flux.y)
+    assert mission_fluence.y == pytest.approx(
+        tuple(value * 2.0 * GCR_MODEL_SECONDS_PER_YEAR for value in mean_flux.y)
     )
 
     assert result.products[5].kind is RadiationProductKind.MISSION_FLUENCE

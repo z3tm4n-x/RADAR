@@ -1,9 +1,40 @@
+"""Historical v1 backend regression and separate unmocked v2 contracts.
+
+The EXTERNAL_REFERENCE arrays were committed in 44cd50e (2026-06-27).
+No external program version, original export, or generator is retained in
+that commit. They are historical regression evidence, not independently
+verified external or normative validation. Their original numbers and
+tolerances stay unchanged; only the historical fixture freezes its v1
+magnetic coordinates. The current RK4 geometry is exercised separately.
+"""
+
 import pytest
 
 from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
-from radar.core.types import Particle, SolarActivityLevel, SpectrumQuantity
+from radar.core.types import (
+    Particle, SolarActivityLevel, SpectrumCompleteness, SpectrumQuantity,
+)
+from radar.core.units import Unit
 from radar.erb.constants import ERB_SECONDS_PER_YEAR
-from radar.erb.model import Ae8Ap8ErbModel, ErbModelInput
+from radar.erb.field import ErbFieldLineSample
+from radar.erb.model import AE8_AP8_PROVISIONAL_REASON, Ae8Ap8ErbModel, ErbModelInput
+
+
+# Reproduced by executing the historical field tracer, not by fitting the
+# spectral reference arrays. Orbit: 2000/2000 km, inclination 0 deg, 2x2
+# anomaly/RAAN nodes, IGRF epoch 1985, historical default step 0.06 R_E.
+# Source commit: 44cd50e57f5b6671ccece84922c1e1db11a80383
+# field.py Git blob: 8552a17b00733ad527bddda0838fb58fe9b26ac9
+# original test Git blob: 9043b4436f0b104e553ae1727555b84e760a93cd
+# Tuple columns: L, B/B0, local B [nT], minimum B0 [nT]. Node order is 0, pi,
+# pi, -2.4492935982947064e-16 radians in geographic longitude.
+HISTORICAL_V1_FIELD_COORDINATES = (
+    (1.3674757917475509, 1.0315326949341908, 12571.739375027735, 12187.436653018332),
+    (1.2922934613873873, 1.0372708039953007, 14978.903573317388, 14440.687538512122),
+    (1.2922934613873873, 1.0372708039953007, 14978.903573317388, 14440.687538512122),
+    (1.3674757917475509, 1.0315326949341908, 12571.739375027735, 12187.436653018332),
+)
+_CURRENT_FIELD_LINE_SAMPLES = Ae8Ap8ErbModel._field_line_samples
 
 
 EXTERNAL_REFERENCE_PROTON_MEAN_FLUX = (
@@ -74,6 +105,7 @@ EXTERNAL_REFERENCE_ELECTRON_INTEGRAL_FLUX = (
 
 
 def _external_reference_case_result():
+    """Calculate the configured orbit with whichever geometry the caller selects."""
     config = CalculationConfig(
         mission=MissionConfig(
             launch_year=2027,
@@ -96,6 +128,37 @@ def _external_reference_case_result():
 
 @pytest.fixture(scope="module")
 def external_reference_case_result():
+    """Replay only the historical backend; do not validate the current tracer here."""
+    def historical_geometry(self, model_input):
+        orbit = model_input.config.orbit
+        assert orbit.perigee_altitude_km == orbit.apogee_altitude_km == 2_000.0
+        assert orbit.inclination_deg == orbit.argument_of_perigee_deg == 0.0
+        assert self.anomaly_samples == self.node_samples == 2
+        assert self.igrf_epoch == 1985.0
+        return tuple(
+            ErbFieldLineSample(
+                l_shell=l_shell,
+                b_over_b0=b_over_b0,
+                local_b_nt=local_b,
+                mirror_b0_nt=minimum_b,
+                valid=True,
+                method="historical_v1_frozen_geometry_from_git_44cd50e",
+            )
+            for l_shell, b_over_b0, local_b, minimum_b in HISTORICAL_V1_FIELD_COORDINATES
+        )
+
+    # The temporary substitution is confined to this calculation. No map,
+    # spectrum, solar parameter, production default, or reference is replaced.
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(Ae8Ap8ErbModel, "_field_line_samples", historical_geometry)
+        result = _external_reference_case_result()
+    assert Ae8Ap8ErbModel._field_line_samples is _CURRENT_FIELD_LINE_SAMPLES
+    return result
+
+
+@pytest.fixture(scope="module")
+def current_v2_case_result():
+    assert Ae8Ap8ErbModel._field_line_samples is _CURRENT_FIELD_LINE_SAMPLES
     return _external_reference_case_result()
 
 
@@ -179,6 +242,46 @@ def test_ae8_ap8_model_external_reference_fluence_is_mean_flux_times_duration(
     )
     assert result.spectra[5].y == pytest.approx(
         tuple(value * mission_seconds for value in EXTERNAL_REFERENCE_ELECTRON_MEAN_FLUX),
+        rel=1.0e-12,
+        abs=1.0e-12,
+    )
+
+
+def test_current_ae8_ap8_v2_unmocked_integration_keeps_solver_and_provisional_status(
+    current_v2_case_result,
+) -> None:
+    result = current_v2_case_result
+    assert Ae8Ap8ErbModel._field_line_samples is _CURRENT_FIELD_LINE_SAMPLES
+    metadata = dict(result.method_metadata)
+    assert metadata["magnetic_coordinate_solver"] == "igrf_rk4_refined_minimum_b_polar_limit_v2"
+    assert metadata["radbelt_total_samples"] == metadata["radbelt_valid_samples"] == "4"
+    assert metadata["radbelt_invalid_samples"] == "0"
+    assert metadata["solar_fraction_max"] == "0.5"
+    assert len(result.spectra) == len(result.products) == 6
+    assert len(result.integral_spectra) == 2
+    for spectrum in result.spectra:
+        assert spectrum.model_reference is not None
+        assert spectrum.model_reference.version == "ae8_ap8_radbelt_asc_v2"
+        assert spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        assert AE8_AP8_PROVISIONAL_REASON in spectrum.incomplete_reasons
+        assert any(value > 0.0 for value in spectrum.y)
+
+
+@pytest.mark.parametrize("first_index", [0, 3], ids=["proton", "electron"])
+def test_current_ae8_ap8_v2_fluence_uses_its_own_mean_and_duration(
+    current_v2_case_result, first_index: int,
+) -> None:
+    result = current_v2_case_result
+    mean, peak, fluence = result.spectra[first_index : first_index + 3]
+    mission_seconds = 2 * ERB_SECONDS_PER_YEAR
+    assert mean.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
+    assert peak.quantity is SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
+    assert fluence.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
+    assert mean.y_unit is peak.y_unit is Unit.DIFFERENTIAL_FLUX
+    assert fluence.y_unit is Unit.DIFFERENTIAL_FLUENCE
+    assert fluence.mission_duration_s == mission_seconds
+    assert fluence.y == pytest.approx(
+        tuple(value * mission_seconds for value in mean.y),
         rel=1.0e-12,
         abs=1.0e-12,
     )

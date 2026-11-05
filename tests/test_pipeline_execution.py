@@ -7,7 +7,7 @@ from radar.core.project import (
 )
 from radar.core.profiles import MethodologyProfile
 from radar.core.result import ComponentStatus
-from radar.core.types import RadiationProductKind
+from radar.core.types import RadiationProductKind, SpectrumCompleteness
 from radar.erb.model import OstErbModel
 from radar.gcr.model import OstGcrModel
 from radar.pipelines.execution import (
@@ -62,13 +62,13 @@ def test_calculate_sep_pipeline_for_config_runs_full_sep_chain() -> None:
     result = pipeline_result.calculation_result
 
     assert result.has_errors() is False
-    assert result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.INCOMPLETE
     assert (
         result.component_status(SEP_GEOMAGNETIC_PENETRATION_COMPONENT)
-        is ComponentStatus.COMPLETED
+        is ComponentStatus.INCOMPLETE
     )
-    assert result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.COMPLETED
-    assert result.component_status(SEP_LET_COMPONENT) is ComponentStatus.COMPLETED
+    assert result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert result.component_status(SEP_LET_COMPONENT) is ComponentStatus.INCOMPLETE
     assert result.component_status(SEP_OUTPUT_TABLES_COMPONENT) is ComponentStatus.COMPLETED
 
     assert pipeline_result.source_products
@@ -80,6 +80,13 @@ def test_calculate_sep_pipeline_for_config_runs_full_sep_chain() -> None:
     assert any(
         product.kind is RadiationProductKind.MISSION_LET_FLUENCE
         for product in pipeline_result.let_products
+    )
+    # Computable spectra using provisional/quarantined transport data must not
+    # be reported as a completed normative chain by the public config wrapper.
+    assert all(
+        product.spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        and product.spectrum.incomplete_reasons
+        for product in (*pipeline_result.shielded_products, *pipeline_result.let_products)
     )
 
 
@@ -96,4 +103,4 @@ def test_calculate_sep_pipeline_for_config_can_disable_hze_grid() -> None:
     )
     assert pipeline_result.calculation_result.component_status(
         SEP_PIPELINE_COMPONENT
-    ) is ComponentStatus.COMPLETED
+    ) is ComponentStatus.INCOMPLETE

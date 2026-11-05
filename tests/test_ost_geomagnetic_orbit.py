@@ -60,7 +60,7 @@ def test_sample_ost_orbit_elliptic_altitude_range() -> None:
     assert max(trace.altitudes_km()) == pytest.approx(1500.0, abs=1.0)
 
 
-def test_sample_ost_orbit_expands_window_for_elliptic_perigee_drift() -> None:
+def test_sample_ost_orbit_window_is_bounded_independently_of_perigee_drift() -> None:
     trace = sample_ost_orbit(
         OrbitConfig(
             orbit_type=OrbitType.ELLIPTIC,
@@ -74,6 +74,9 @@ def test_sample_ost_orbit_expands_window_for_elliptic_perigee_drift() -> None:
 
     assert trace.window_s >= 0.1 * 86400.0
     assert trace.perigee_precession_rad_s != pytest.approx(0.0)
+    assert trace.requested_window_s == pytest.approx(10 * trace.orbital_period_s)
+    assert len(trace.samples) == 600
+    assert trace.window_s == len(trace.samples) * trace.step_s
 
 
 def test_sample_ost_orbit_rejects_bad_sampling_inputs() -> None:

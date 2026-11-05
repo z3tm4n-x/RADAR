@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import math
 
 import pytest
@@ -106,3 +107,34 @@ def test_ost_disturbance_rejects_bad_inputs() -> None:
             kp=1,
             mlt_sample_count=0,
         )
+
+
+_PUBLIC_HELPERS: tuple[tuple[Callable[..., object], dict[str, float | int]], ...] = (
+    (ost_disturbance_coefficients, {"kp": 3, "magnetic_local_time_hours": 12.0}),
+    (ost_cutoff_disturbance_factor, {
+        "kp": 3, "magnetic_local_time_hours": 12.0, "cutoff_rigidity_gv": 1.0,
+    }),
+    (ost_disturbed_cutoff_rigidity_gv, {
+        "kp": 3, "magnetic_local_time_hours": 12.0, "cutoff_rigidity_gv": 1.0,
+    }),
+    (ost_cutoff_disturbance_factor_mlt_average, {
+        "kp": 3, "mlt_sample_count": 24, "cutoff_rigidity_gv": 1.0,
+    }),
+    (ost_disturbed_cutoff_rigidity_mlt_average_gv, {
+        "kp": 3, "mlt_sample_count": 24, "cutoff_rigidity_gv": 1.0,
+    }),
+)
+
+
+@pytest.mark.parametrize("boolean", [False, True])
+@pytest.mark.parametrize(("function", "valid_arguments", "parameter"), [
+    (function, arguments, parameter)
+    for function, arguments in _PUBLIC_HELPERS
+    for parameter in arguments
+])
+def test_all_public_disturbance_helpers_reject_boolean_numeric_inputs(
+    function: Callable[..., object], valid_arguments: dict[str, float | int],
+    parameter: str, boolean: bool,
+) -> None:
+    with pytest.raises(ValueError, match="boolean"):
+        function(**{**valid_arguments, parameter: boolean})

@@ -1,0 +1,24 @@
+Fixture: srim_h_al_smoke.txt
+
+This is unchanged generated output from the user-supplied SR Module binary
+bundled with SRIM-2013, retained for parser regression testing. It is not
+SRIM program source or independently measured stopping/range data.
+
+The original output credits J.P. Biersack and J.F. Ziegler and retains its
+native copyright, engine title SRIM-2006 and version label SRIM-2012.01.
+Those differing labels have not been replaced by a guessed version.
+
+The adjacent fixture preserves its original CP1251 bytes, decimal commas,
+line endings and all columns, including explicitly projected (not CSDA) range.
+SHA256 cea7b04a00688166d7e51443d4be338d6193aab4a990d1da75352f34ca641592
+
+The RADAR parser/tests are new reader code, not an implementation of SRIM
+physics. No vendor endorsement, experimental validation, normative approval
+or permission to distribute SRIM executables is claimed.
+
+Provenance and local launch record:
+docs/validation/stage4_data_provenance.md
+outputs/srim_probe_h_al_privatevb_20261101/probe_report.json
+
+SRIM attribution and distribution terms:
+https://www.srim.org/SRIM/SRIMLEGL.htm

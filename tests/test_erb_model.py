@@ -12,10 +12,13 @@ from radar.core.types import (
 )
 from radar.core.units import Unit
 from radar.erb.igrf import IgrfCoefficients
+from radar.erb.field import ErbFieldLineSample
 from radar.erb.model import (
     ErbModelInput,
     ErbModelProtocol,
     ErbModelResult,
+    OST_ERB_ORBIT_SAMPLING_CONVERGENCE_REASON,
+    OST_ERB_ORBIT_TRAJECTORY_REASON,
     OstErbModel,
     StaticErbModel,
     validate_erb_energy_spectrum,
@@ -108,9 +111,7 @@ def test_validate_erb_energy_spectrum_accepts_maximum_and_mean_flux() -> None:
         SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX,
         SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX,
     ):
-        validate_erb_energy_spectrum(
-            _erb_flux_spectrum(quantity=quantity)
-        )
+        validate_erb_energy_spectrum(_erb_flux_spectrum(quantity=quantity))
 
 
 def test_validate_erb_energy_spectrum_rejects_peak_flux() -> None:
@@ -122,16 +123,12 @@ def test_validate_erb_energy_spectrum_rejects_peak_flux() -> None:
 
 def test_validate_erb_energy_spectrum_rejects_hze() -> None:
     with pytest.raises(ValueError, match="protons or electrons"):
-        validate_erb_energy_spectrum(
-            _erb_flux_spectrum(particle=Particle.HZE)
-        )
+        validate_erb_energy_spectrum(_erb_flux_spectrum(particle=Particle.HZE))
 
 
 def test_validate_erb_energy_spectrum_rejects_non_erb_source() -> None:
     with pytest.raises(ValueError, match="ERB"):
-        validate_erb_energy_spectrum(
-            _erb_flux_spectrum(source=RadiationSource.SEP)
-        )
+        validate_erb_energy_spectrum(_erb_flux_spectrum(source=RadiationSource.SEP))
 
 
 def test_validate_erb_energy_spectrum_accepts_fluence_quantity() -> None:
@@ -145,23 +142,17 @@ def test_validate_erb_energy_spectrum_accepts_fluence_quantity() -> None:
 
 def test_validate_erb_energy_spectrum_rejects_non_mev_grid() -> None:
     with pytest.raises(ValueError, match="MeV"):
-        validate_erb_energy_spectrum(
-            _erb_flux_spectrum(x_unit=Unit.GEV_PER_NUCLEON)
-        )
+        validate_erb_energy_spectrum(_erb_flux_spectrum(x_unit=Unit.GEV_PER_NUCLEON))
 
 
 def test_validate_erb_energy_spectrum_rejects_bad_y_unit() -> None:
     with pytest.raises(ValueError, match="differential flux units"):
-        validate_erb_energy_spectrum(
-            _erb_flux_spectrum(y_unit=Unit.DIFFERENTIAL_FLUENCE)
-        )
+        validate_erb_energy_spectrum(_erb_flux_spectrum(y_unit=Unit.DIFFERENTIAL_FLUENCE))
 
 
 def test_validate_erb_energy_spectrum_rejects_zero_energy() -> None:
     with pytest.raises(ValueError, match="positive"):
-        validate_erb_energy_spectrum(
-            _erb_flux_spectrum(x=(0.0, 1.0, 10.0))
-        )
+        validate_erb_energy_spectrum(_erb_flux_spectrum(x=(0.0, 1.0, 10.0)))
 
 
 def test_erb_model_input_exposes_config_parameters() -> None:
@@ -200,11 +191,7 @@ def test_static_erb_model_rejects_empty_spectra() -> None:
 
 def test_static_erb_model_rejects_invalid_spectrum() -> None:
     with pytest.raises(ValueError, match="protons or electrons"):
-        StaticErbModel(
-            spectra=(
-                _erb_flux_spectrum(particle=Particle.HZE),
-            )
-        )
+        StaticErbModel(spectra=(_erb_flux_spectrum(particle=Particle.HZE),))
 
 
 def test_erb_model_result_requires_spectra() -> None:
@@ -250,6 +237,7 @@ def test_erb_model_result_requires_document() -> None:
             document="",
         )
 
+
 def test_erb_model_result_exposes_products() -> None:
     from radar.core.types import RadiationProductKind
 
@@ -273,9 +261,7 @@ def test_erb_model_result_exposes_products() -> None:
 def test_erb_model_result_maps_maximum_and_mean_products() -> None:
     from radar.core.types import RadiationProductKind
 
-    maximum_spectrum = _erb_flux_spectrum(
-        quantity=SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX
-    )
+    maximum_spectrum = _erb_flux_spectrum(quantity=SpectrumQuantity.MAXIMUM_DIFFERENTIAL_FLUX)
     mean_spectrum = _erb_flux_spectrum(quantity=SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX)
 
     result = ErbModelResult(
@@ -333,6 +319,7 @@ def test_erb_model_result_rejects_mismatched_products() -> None:
             ),
         )
 
+
 def test_erb_model_result_rejects_product_with_wrong_source() -> None:
     spectrum = _erb_flux_spectrum(
         quantity=SpectrumQuantity.DIFFERENTIAL_FLUX,
@@ -363,6 +350,7 @@ def test_erb_model_result_rejects_product_with_wrong_source() -> None:
                 ),
             ),
         )
+
 
 def test_normative_erb_model_stub_metadata() -> None:
     from radar.core.profiles import OST_134_1044_2007_DOCUMENT, SourceModelFamily
@@ -408,6 +396,15 @@ def test_normative_ost_erb_model_calculates_products() -> None:
     assert result.spectra[2].y_unit is Unit.DIFFERENTIAL_FLUENCE
     assert any(value > 0.0 for value in result.spectra[0].y)
     assert any(value > 0.0 for value in result.spectra[3].y)
+    assert all(
+        OST_ERB_ORBIT_SAMPLING_CONVERGENCE_REASON in spectrum.incomplete_reasons
+        for spectrum in result.spectra
+    )
+    assert all(
+        OST_ERB_ORBIT_TRAJECTORY_REASON in spectrum.incomplete_reasons
+        for spectrum in result.spectra
+    )
+
 
 def test_ost_erb_model_records_appendix_e_method_metadata() -> None:
     model = OstErbModel(
@@ -428,16 +425,69 @@ def test_ost_erb_model_records_appendix_e_method_metadata() -> None:
     assert "Appendix A" in metadata["appendix_a_reference"]
     assert "Appendix D" in metadata["appendix_d_reference"]
     assert "Appendix E" in metadata["appendix_e_reference"]
-    assert metadata["appendix_e_interpolation"] == "three_point_lagrange_with_log_positive_flux_values"
+    assert (
+        metadata["appendix_e_interpolation"] == "three_point_lagrange_with_log_positive_flux_values"
+    )
     assert metadata["appendix_e_averaging"] == "equal_weight_mean_anomaly_samples"
+    assert metadata["appendix_e_average_denominator"] == "all_orbit_time_samples"
+    assert metadata["appendix_e_electron_differential_policy"] == (
+        "negative_derivative_of_e11_with_2E_gaussian_factor"
+    )
+    assert metadata["appendix_e_formula_errata_status"] == (
+        "internal_mathematical_consistency_correction_not_confirmed_official_errata"
+    )
+    assert metadata["appendix_e_approximation_use"] == (
+        "diagnostic_fit_not_source_for_production_spectra"
+    )
     assert (
         metadata["appendix_e_time_weighting_status"]
         == "approximated_by_uniform_mean_anomaly_sampling"
     )
-    assert metadata["solar_reference_start_year"] == "2027"
+    assert metadata["solar_reference_start_year"] == "2020"
     assert metadata["anomaly_samples"] == "2"
     assert metadata["node_samples"] == "2"
     assert metadata["peak_state"] == "worst"
+    assert (
+        metadata["orbit_sampling_convergence_status"]
+        == "not_established_below_1_percent_for_every_energy_node"
+    )
+    assert metadata["orbit_sampling_convergence_release_eligible"] == "false"
+
+
+@pytest.mark.parametrize("valid_count", (0, 1, 3))
+def test_ost_erb_failed_traces_do_not_renormalize_the_orbit_duration(
+    monkeypatch: pytest.MonkeyPatch,
+    valid_count: int,
+) -> None:
+    from radar.core.types import SpectrumCompleteness
+
+    valid = ErbFieldLineSample(2.0, 1.0, 3000.0, 3000.0, True)
+    invalid = ErbFieldLineSample(float("nan"), float("nan"), 0.0, 0.0, False)
+    samples = (valid,) * 4
+    monkeypatch.setattr(OstErbModel, "_field_line_samples", lambda self, model_input: samples)
+    model = OstErbModel()
+    inputs = ErbModelInput(config=_leo_ost_config(lifetime_years=2))
+    reference = model.calculate(inputs)
+    samples = (valid,) * valid_count + (invalid,) * (4 - valid_count)
+    partial = model.calculate(inputs)
+
+    for expected, actual in zip(reference.products, partial.products, strict=True):
+        fraction = (
+            float(valid_count > 0)
+            if actual.kind is RadiationProductKind.MAXIMUM_FLUX
+            else valid_count / 4.0
+        )
+        assert actual.spectrum.y == pytest.approx(
+            tuple(value * fraction for value in expected.spectrum.y)
+        )
+        assert actual.spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        assert any(
+            f"{4 - valid_count}/4 orbit samples" in reason
+            for reason in actual.spectrum.incomplete_reasons
+        )
+    assert dict(partial.method_metadata)["appendix_e_average_denominator"] == (
+        "all_orbit_time_samples"
+    )
 
 
 def test_ost_erb_model_allows_explicit_solar_reference_start_year() -> None:
@@ -458,6 +508,28 @@ def test_ost_erb_model_allows_explicit_solar_reference_start_year() -> None:
 
     assert metadata["solar_reference_start_year"] == "2024"
 
+
+def test_ost_erb_table_spectra_do_not_use_differentiated_fits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from radar.erb.appendix_e import (
+        OstErbElectronIntegralApproximation,
+        OstErbProtonIntegralApproximation,
+    )
+
+    def forbidden(*args: object, **kwargs: object) -> float:
+        raise AssertionError("A diagnostic differential fit entered the source calculation")
+
+    monkeypatch.setattr(OstErbElectronIntegralApproximation, "differential_flux", forbidden)
+    monkeypatch.setattr(OstErbProtonIntegralApproximation, "differential_flux", forbidden)
+    model = OstErbModel(
+        anomaly_samples=2, node_samples=2, igrf_coefficients=_dipole_coefficients(),
+    )
+    result = model.calculate(ErbModelInput(config=_leo_ost_config()))
+    assert len(result.products) == 6
+    assert any(value > 0.0 for spectrum in result.spectra for value in spectrum.y)
+
+
 def test_ost_erb_model_records_orbit_table_coverage_diagnostics() -> None:
     model = OstErbModel(
         anomaly_samples=2,
@@ -477,20 +549,16 @@ def test_ost_erb_model_records_orbit_table_coverage_diagnostics() -> None:
     assert metadata["electron_total_samples"] == "4"
     assert int(metadata["proton_valid_samples"]) > 0
     assert int(metadata["electron_valid_samples"]) > 0
-    assert (
-        int(metadata["proton_valid_samples"])
-        + int(metadata["proton_invalid_samples"])
-        == 4
-    )
-    assert (
-        int(metadata["electron_valid_samples"])
-        + int(metadata["electron_invalid_samples"])
-        == 4
-    )
+    assert int(metadata["proton_valid_samples"]) + int(metadata["proton_invalid_samples"]) == 4
+    assert int(metadata["electron_valid_samples"]) + int(metadata["electron_invalid_samples"]) == 4
     assert float(metadata["proton_valid_sample_fraction"]) > 0.0
     assert float(metadata["electron_valid_sample_fraction"]) > 0.0
     assert float(metadata["proton_table_l_min"]) > 0.0
     assert float(metadata["electron_table_l_min"]) > 0.0
+    assert "proton_bb0_above_interpolation_stencil_samples" in metadata
+    assert "electron_bb0_above_interpolation_stencil_samples" in metadata
+    assert "proton_max_bb0_above_interpolation_stencil_samples" in metadata
+    assert "electron_max_bb0_above_interpolation_stencil_samples" in metadata
 
 
 def test_ost_erb_model_fluence_matches_mean_flux_times_mission_duration() -> None:
@@ -521,6 +589,7 @@ def test_ost_erb_model_fluence_matches_mean_flux_times_mission_duration() -> Non
     assert electron_fluence.y == pytest.approx(
         tuple(value * mission_seconds for value in electron_mean_flux.y)
     )
+
 
 def test_erb_integral_spectrum_validates_inputs() -> None:
     from radar.erb.model import ErbIntegralSpectrum
@@ -646,6 +715,7 @@ def test_ost_erb_model_records_appendix_e_integral_metadata() -> None:
 
     assert metadata["appendix_e_integral_spectrum"] == "tail_power_law_numeric_quadrature"
 
+
 def test_erb_model_result_rejects_integral_approximation_fit_with_wrong_document() -> None:
     from radar.erb.appendix_e import (
         OstErbApproximationFitQuality,
@@ -727,14 +797,10 @@ def test_ost_erb_model_returns_appendix_e_approximation_fits() -> None:
     assert electron_fit.document == result.document
 
     proton_positive_samples = sum(
-        1
-        for value in result.integral_spectra[0].integral_flux_gt_e
-        if value > 0.0
+        1 for value in result.integral_spectra[0].integral_flux_gt_e if value > 0.0
     )
     electron_positive_samples = sum(
-        1
-        for value in result.integral_spectra[1].integral_flux_gt_e
-        if value > 0.0
+        1 for value in result.integral_spectra[1].integral_flux_gt_e if value > 0.0
     )
 
     assert proton_fit.quality.sample_count == proton_positive_samples
@@ -772,15 +838,12 @@ def test_ost_erb_model_records_appendix_e_fit_metadata() -> None:
         "success",
         "solver_reported_failure",
     }
-    assert metadata["proton_appendix_e_fit_sample_count"] == str(
-        proton_fit.quality.sample_count
-    )
+    assert metadata["proton_appendix_e_fit_sample_count"] == str(proton_fit.quality.sample_count)
     assert metadata["electron_appendix_e_fit_sample_count"] == str(
         electron_fit.quality.sample_count
     )
     assert float(metadata["proton_appendix_e_fit_rms_relative_error"]) >= 0.0
     assert float(metadata["electron_appendix_e_fit_rms_relative_error"]) >= 0.0
-
 
 
 def test_ae8_ap8_erb_model_metadata_declares_ae8_ap8_family() -> None:

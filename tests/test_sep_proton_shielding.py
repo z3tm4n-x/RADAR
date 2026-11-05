@@ -1,8 +1,14 @@
 ﻿import pytest
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.spectra import ModelReference, Spectrum1D
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumCompleteness,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.shielding.proton_al import ProtonAlRangeEnergyTable
 from radar.shielding.proton_al_secondary import (
@@ -97,7 +103,7 @@ def _tables(
         hze_al_ranges_by_z={26: _hze_al_table()},
         hze_si_let_by_z={26: _hze_si_table()},
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 1000.0),
             sigma_barn=(survival_sigma_barn, survival_sigma_barn),
         ),
@@ -137,6 +143,33 @@ def test_sep_proton_shielding_zero_thickness_preserves_total_spectrum() -> None:
     assert result.total.y == pytest.approx((10.0, 10.0, 10.0))
     assert result.nonelastic_survival is True
     assert result.secondary_protons is True
+
+
+def test_sep_proton_zero_thickness_inherits_only_source_blockers_and_provenance() -> None:
+    source = Spectrum1D(
+        **{
+            **_spectrum().__dict__,
+            "model_reference": ModelReference(
+                name="source",
+                version="test",
+                dataset_refs=("source/proton.csv",),
+            ),
+            "completeness": SpectrumCompleteness.INCOMPLETE,
+            "incomplete_reasons": ("source pending",),
+        }
+    )
+
+    result = calculate_sep_proton_shielding_spectrum(
+        spectrum=source,
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+        include_nonelastic_survival=False,
+        include_secondary_protons=False,
+    )
+
+    assert result.total.incomplete_reasons == source.incomplete_reasons
+    assert result.total.model_reference is not None
+    assert result.total.model_reference.dataset_refs == ("source/proton.csv",)
 
 
 def test_sep_proton_shielding_total_includes_secondary_when_enabled() -> None:

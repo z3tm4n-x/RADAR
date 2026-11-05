@@ -113,7 +113,9 @@ def test_average_daily_spectrum_for_mission_years() -> None:
         lifetime_years=1,
     )
 
-    assert daily_spectrum.y == pytest.approx((1.0, 2.0, 3.0))
+    assert daily_spectrum.y == pytest.approx(
+        (365.0 / 365.25, 730.0 / 365.25, 1095.0 / 365.25)
+    )
     assert daily_spectrum.y_unit is Unit.DIFFERENTIAL_FLUENCE_PER_DAY
 
 

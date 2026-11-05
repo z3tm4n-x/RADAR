@@ -8,8 +8,11 @@ from radar.gcr.parameters import (
     GcrIonParameters,
     NekParameters,
     OST_NEK_HE_BC_CORRECTION_NOTE,
+    OST_NEK_HE_BC_ENGINEERING_ALTERNATIVE,
     OST_NEK_HE_BC_PRINTED,
+    OST_NEK_HE_BC_RELEASE_ELIGIBLE,
     OST_NEK_HE_BC_USED,
+    OST_NEK_HE_BC_VALIDATION_STATUS,
     get_gost_gcr_ion_parameters,
     get_ost_akl_parameters,
     get_ost_gcr_ion_parameters,
@@ -32,10 +35,10 @@ def test_gcr_element_symbol_table_covers_h_to_u() -> None:
     [
         ("H", 1, 1.0, 1.98e4, 2.80, 3.60),
         ("He", 2, 4.0, 3.69e3, 2.77, 3.12),
-        ("O", 8, 16.0, 82.7, 2.70, 3.60),
-        ("Fe", 26, 55.8, 11.2, 2.70, 3.60),
-        ("Ni", 28, 58.7, 0.49, 2.70, 3.60),
-        ("U", 92, 238.0, 4.57e-7, 2.70, 3.60),
+        ("O", 8, 16.0, 82.7, 2.70, 4.00),
+        ("Fe", 26, 55.8, 11.2, 2.70, 4.00),
+        ("Ni", 28, 58.7, 0.49, 2.70, 4.00),
+        ("U", 92, 238.0, 4.57e-7, 2.70, 4.00),
     ],
 )
 def test_gost_gcr_ion_parameters_exact_values(
@@ -96,7 +99,7 @@ def test_ost_gcr_parameters_do_not_swap_gamma_and_alpha() -> None:
     assert parameters["Fe"].alpha == pytest.approx(3.01)
 
 
-def test_ost_nek_parameters_use_corrected_he_bc_with_traceability() -> None:
+def test_ost_nek_parameters_use_printed_he_bc_with_traceability() -> None:
     parameters = get_ost_nek_parameters()
 
     assert parameters[1].ac == pytest.approx(4.1e-2)
@@ -105,8 +108,12 @@ def test_ost_nek_parameters_use_corrected_he_bc_with_traceability() -> None:
     assert parameters[1].bg == pytest.approx(0.0)
 
     assert OST_NEK_HE_BC_PRINTED == pytest.approx(6.6e-2)
-    assert OST_NEK_HE_BC_USED == pytest.approx(6.6e-3)
-    assert "probable misprint correction" in OST_NEK_HE_BC_CORRECTION_NOTE
+    assert OST_NEK_HE_BC_ENGINEERING_ALTERNATIVE == pytest.approx(6.6e-3)
+    assert OST_NEK_HE_BC_USED == pytest.approx(OST_NEK_HE_BC_PRINTED)
+    assert OST_NEK_HE_BC_VALIDATION_STATUS == "pending_cosrad_comparison"
+    assert OST_NEK_HE_BC_RELEASE_ELIGIBLE is False
+    assert "used provisionally" in OST_NEK_HE_BC_CORRECTION_NOTE
+    assert "COSRAD" in OST_NEK_HE_BC_CORRECTION_NOTE
 
     assert parameters[2].ac == pytest.approx(3.6e-2)
     assert parameters[2].bc == pytest.approx(OST_NEK_HE_BC_USED)

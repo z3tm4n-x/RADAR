@@ -1,6 +1,6 @@
 import pytest
 
-from radar.calculation import execute_calculation
+from radar.calculation import SINGLE_EVENT_EFFECTS_COMPONENT, execute_calculation
 from radar.core.log import LogLevel
 from radar.core.project import (
     CalculationConfig,
@@ -8,8 +8,12 @@ from radar.core.project import (
     OrbitConfig,
     ShieldingConfig,
 )
-from radar.core.result import CalculationResult, ComponentStatus
-from radar.core.types import DoseQuantity, SolarActivityLevel
+from radar.core.result import (
+    NORMATIVE_RELEASE_COMPONENT,
+    CalculationResult,
+    ComponentStatus,
+)
+from radar.core.types import AssessmentMode, DoseQuantity, SolarActivityLevel
 from radar.core.units import Unit
 from radar.pipelines.erb import (
     ERB_MODEL_COMPONENT,
@@ -64,6 +68,20 @@ def _maximum_activity_config() -> CalculationConfig:
     )
 
 
+def _peak_config() -> CalculationConfig:
+    base_config = _config()
+    return CalculationConfig(
+        mission=base_config.mission,
+        orbit=base_config.orbit,
+        shielding=base_config.shielding,
+        kp=base_config.kp,
+        methodology=base_config.methodology,
+        assessment_mode=AssessmentMode.PEAK,
+        dose_quantity=DoseQuantity.DOSE_RATE,
+        dose_unit=Unit.RAD_PER_SECOND,
+    )
+
+
 @pytest.fixture(scope="module")
 def calculation_result() -> CalculationResult:
     return execute_calculation(_config())
@@ -74,104 +92,90 @@ def maximum_activity_result() -> CalculationResult:
     return execute_calculation(_maximum_activity_config())
 
 
+@pytest.fixture(scope="module")
+def peak_calculation_result() -> CalculationResult:
+    return execute_calculation(_peak_config())
+
+
 def test_execute_calculation_returns_result_for_config(
     calculation_result: CalculationResult,
 ) -> None:
     assert calculation_result.config == _config()
     assert not calculation_result.has_errors()
+    assert not calculation_result.is_release_ready()
+    assert (
+        calculation_result.component_status(NORMATIVE_RELEASE_COMPONENT)
+        is ComponentStatus.INCOMPLETE
+    )
+    assert (
+        calculation_result.component_status(SINGLE_EVENT_EFFECTS_COMPONENT)
+        is ComponentStatus.INCOMPLETE
+    )
+
+
+def test_normative_release_state_includes_profile_resource_audit(
+    calculation_result: CalculationResult,
+) -> None:
+    release_entry = next(
+        entry
+        for entry in calculation_result.log.entries
+        if entry.stage == NORMATIVE_RELEASE_COMPONENT
+    )
+
+    assert "normative-resource audit for profile ost_134_1044_2007 failed" in dict(
+        release_entry.details,
+    )["reasons"]
 
 
 def test_execute_calculation_sets_source_component_statuses(
     calculation_result: CalculationResult,
 ) -> None:
+    assert calculation_result.component_status("\u0421\u041a\u041b") is ComponentStatus.INCOMPLETE
+    assert calculation_result.component_status("\u0413\u041a\u041b") is ComponentStatus.INCOMPLETE
     assert (
-        calculation_result.component_status("\u0421\u041a\u041b")
-        is ComponentStatus.COMPLETED
-    )
-    assert (
-        calculation_result.component_status("\u0413\u041a\u041b")
-        is ComponentStatus.COMPLETED
-    )
-    assert (
-        calculation_result.component_status("\u0415\u0420\u041f\u0417")
-        is ComponentStatus.COMPLETED
+        calculation_result.component_status("\u0415\u0420\u041f\u0417") is ComponentStatus.INCOMPLETE
     )
 
-    assert (
-        calculation_result.component_status(SEP_PIPELINE_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
-    assert (
-        calculation_result.component_status(SEP_MODEL_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
+    assert calculation_result.component_status(SEP_PIPELINE_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert calculation_result.component_status(SEP_MODEL_COMPONENT) is ComponentStatus.COMPLETED
     assert (
         calculation_result.component_status(SEP_GEOMAGNETIC_PENETRATION_COMPONENT)
-        is ComponentStatus.COMPLETED
+        is ComponentStatus.INCOMPLETE
     )
-    assert (
-        calculation_result.component_status(SEP_SHIELDING_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
-    assert (
-        calculation_result.component_status(SEP_LET_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
+    assert calculation_result.component_status(SEP_SHIELDING_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert calculation_result.component_status(SEP_LET_COMPONENT) is ComponentStatus.INCOMPLETE
     assert (
         calculation_result.component_status(SEP_OUTPUT_TABLES_COMPONENT)
         is ComponentStatus.COMPLETED
     )
 
-    assert (
-        calculation_result.component_status(GCR_PIPELINE_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
-    assert (
-        calculation_result.component_status(GCR_MODEL_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
+    assert calculation_result.component_status(GCR_PIPELINE_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert calculation_result.component_status(GCR_MODEL_COMPONENT) is ComponentStatus.INCOMPLETE
     assert (
         calculation_result.component_status(GCR_GEOMAGNETIC_PENETRATION_COMPONENT)
-        is ComponentStatus.COMPLETED
+        is ComponentStatus.INCOMPLETE
     )
-    assert (
-        calculation_result.component_status(GCR_SHIELDING_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
-    assert (
-        calculation_result.component_status(GCR_LET_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
+    assert calculation_result.component_status(GCR_SHIELDING_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert calculation_result.component_status(GCR_LET_COMPONENT) is ComponentStatus.INCOMPLETE
     assert (
         calculation_result.component_status(GCR_OUTPUT_TABLES_COMPONENT)
         is ComponentStatus.COMPLETED
     )
 
-    assert (
-        calculation_result.component_status(ERB_PIPELINE_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
-    assert (
-        calculation_result.component_status(ERB_MODEL_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
-    assert (
-        calculation_result.component_status(ERB_SHIELDING_COMPONENT)
-        is ComponentStatus.COMPLETED
-    )
+    assert calculation_result.component_status(ERB_PIPELINE_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert calculation_result.component_status(ERB_MODEL_COMPONENT) is ComponentStatus.INCOMPLETE
+    assert calculation_result.component_status(ERB_SHIELDING_COMPONENT) is ComponentStatus.INCOMPLETE
     assert (
         calculation_result.component_status(ERB_OUTPUT_TABLES_COMPONENT)
         is ComponentStatus.COMPLETED
     )
+    assert calculation_result.component_status("dose_pipeline") is ComponentStatus.INCOMPLETE
 
 
 def test_execute_calculation_records_model_information(
     calculation_result: CalculationResult,
 ) -> None:
-    model_versions = {
-        model.name: model.version
-        for model in calculation_result.model_info
-    }
+    model_versions = {model.name: model.version for model in calculation_result.model_info}
     assert {
         "ost_sep_model",
         "ost_gcr_model",
@@ -182,19 +186,19 @@ def test_execute_calculation_records_model_information(
         "gcr_si_let",
         "ost_erb_model",
         "erb_al_shielding",
-        "radar_dose_pipeline",
     } <= set(model_versions)
-    assert model_versions["ost_sep_model"] == "unversioned"
-    assert model_versions["ost_gcr_model"] == "unversioned"
-    assert model_versions["ost_erb_model"] == "unversioned"
+    assert model_versions["ost_sep_model"] == (
+        "ost_134_1044_2007_change_2_appendix_b_v1"
+    )
+    assert model_versions["ost_gcr_model"] == (
+        "ost_134_1044_2007_change_2_appendix_v_v3"
+    )
+    assert model_versions["ost_erb_model"] == "ost_appendix_a_v3"
     assert model_versions["erb_al_shielding"] == (
         "al_spherical_csda_proton_secondary_electron_primary_v1"
     )
 
-    model_statuses = {
-        model.name: model.status
-        for model in calculation_result.model_info
-    }
+    model_statuses = {model.name: model.status for model in calculation_result.model_info}
     assert model_statuses["ost_sep_model"] == "calculated"
     assert model_statuses["ost_gcr_model"] == "calculated"
     assert model_statuses["sep_al_shielding"] == "calculated"
@@ -203,7 +207,7 @@ def test_execute_calculation_records_model_information(
     assert model_statuses["gcr_si_let"] == "calculated"
     assert model_statuses["ost_erb_model"] == "calculated"
     assert model_statuses["erb_al_shielding"] == "calculated"
-    assert model_statuses["radar_dose_pipeline"] == "calculated"
+    assert "radar_dose_pipeline" not in model_statuses
 
 
 def test_execute_calculation_writes_log_entries(
@@ -215,73 +219,43 @@ def test_execute_calculation_writes_log_entries(
         == "\u0437\u0430\u043f\u0443\u0441\u043a \u0440\u0430\u0441\u0447\u0451\u0442\u0430"
     )
     assert calculation_result.log.warnings()
-    assert any(
-        "SHIELDOSE-2" in entry.message
-        for entry in calculation_result.log.entries
-    )
+    assert any("SHIELDOSE-2" in entry.message for entry in calculation_result.log.entries)
     assert all(entry.level is not LogLevel.ERROR for entry in calculation_result.log.entries)
 
 
-def test_execute_calculation_builds_calculated_dose_and_pipeline_output_tables(
+def test_execute_calculation_omits_partial_dose_but_keeps_spectral_output_tables(
     calculation_result: CalculationResult,
 ) -> None:
     output_table_ids = {table.table_id for table in calculation_result.output_tables}
+    assert "single_event_effects" in output_table_ids
     assert {
         "dose_by_thickness",
         "source_contributions",
         "dose_components",
-        "single_event_effects",
-    } <= output_table_ids
+    }.isdisjoint(output_table_ids)
     assert any(table_id.startswith("sep_") for table_id in output_table_ids)
     assert any(table_id.startswith("gcr_") for table_id in output_table_ids)
     assert any(table_id.startswith("erb_") for table_id in output_table_ids)
-    assert "erb_electron_mean_flux_mean_differential_flux_on_orbit" in output_table_ids
-    assert "erb_t1_mean_flux_erb_proton_total_energy_behind_al" in output_table_ids
     assert (
-        "erb_t1_mean_flux_erb_electron_primary_energy_behind_al"
+        "erb_electron_mission_fluence_differential_fluence_on_orbit"
         in output_table_ids
     )
+    assert "erb_t1_mission_fluence_erb_proton_total_energy_behind_al" in output_table_ids
+    assert (
+        "erb_t1_mission_fluence_erb_electron_primary_energy_behind_al"
+        in output_table_ids
+    )
+    assert "erb_electron_mean_flux_mean_differential_flux_on_orbit" not in output_table_ids
 
-    dose_table = next(
-        table
-        for table in calculation_result.output_tables
-        if table.table_id == "dose_by_thickness"
+    dose_log = next(
+        entry
+        for entry in calculation_result.log.entries
+        if entry.stage == "dose_pipeline"
     )
-    assert dose_table.rows[0].cells[0] == 1.0
-    assert dose_table.rows[0].cells[1] > 0.0
-    assert ("status", "calculated") in dose_table.metadata
-    assert ("optional_let_dose_included_in_total", "false") in dose_table.metadata
-
-    source_table = next(
-        table
-        for table in calculation_result.output_tables
-        if table.table_id == "source_contributions"
-    )
-    assert ("status", "calculated") in source_table.metadata
-    assert ("optional_let_dose_included_in_total", "false") in source_table.metadata
-    assert any(row.cells[1] > 0.0 for row in source_table.rows)
-
-    dose_components_table = next(
-        table
-        for table in calculation_result.output_tables
-        if table.table_id == "dose_components"
-    )
-    dose_component_column_keys = tuple(
-        column.key for column in dose_components_table.columns
-    )
-    assert ("status", "calculated") in dose_components_table.metadata
-    assert ("optional_let_dose_included_in_total", "false") in (
-        dose_components_table.metadata
-    )
-    assert any(
-        row.cells[dose_component_column_keys.index("included_in_total")] is False
-        for row in dose_components_table.rows
-    )
-    assert any(
-        row.cells[dose_component_column_keys.index("component")]
-        == "erb_electron_shieldose2"
-        for row in dose_components_table.rows
-    )
+    assert dict(dose_log.details)["status"] == "incomplete"
+    assert "proton Si electronic LET dose domain is incomplete" in dict(
+        dose_log.details
+    )["reasons"]
 
     see_table = next(
         table
@@ -297,8 +271,33 @@ def test_execute_calculation_builds_calculated_dose_and_pipeline_output_tables(
         for row in see_table.rows
     )
     assert all(
-        row.cells[see_column_keys.index("total_expected_events")] == 0.0
-        for row in see_table.rows
+        row.cells[see_column_keys.index("total_expected_events")] == 0.0 for row in see_table.rows
+    )
+
+
+def test_peak_calculation_outputs_only_peak_spectra_and_never_relabels_dose(
+    peak_calculation_result: CalculationResult,
+) -> None:
+    output_table_ids = {table.table_id for table in peak_calculation_result.output_tables}
+    spectrum_table_ids = {
+        table_id
+        for table_id in output_table_ids
+        if table_id.startswith(("sep_", "gcr_", "erb_"))
+    }
+
+    assert peak_calculation_result.config == _peak_config()
+    assert peak_calculation_result.component_status("dose_pipeline") is ComponentStatus.SKIPPED
+    assert not peak_calculation_result.is_release_ready()
+    assert "dose_by_thickness" not in output_table_ids
+    assert "source_contributions" not in output_table_ids
+    assert "dose_components" not in output_table_ids
+    assert any("peak_flux" in table_id for table_id in spectrum_table_ids)
+    assert any("maximum_flux" in table_id for table_id in spectrum_table_ids)
+    assert all("mission_fluence" not in table_id for table_id in spectrum_table_ids)
+    assert any(
+        entry.stage == "dose_pipeline"
+        and dict(entry.details).get("status") == "explicitly_unavailable"
+        for entry in peak_calculation_result.log.entries
     )
 
 
@@ -318,15 +317,15 @@ def test_execute_calculation_records_ost_solar_activity_input_data(
     maximum_activity_result: CalculationResult,
 ) -> None:
     solar_data = next(
-        info
-        for info in maximum_activity_result.input_data_info
-        if info.name == "\u0421\u0410"
+        info for info in maximum_activity_result.input_data_info if info.name == "\u0421\u0410"
     )
     assert solar_data.source == "\u041e\u0421\u0422 134-1044-2007"
     assert solar_data.table_id == "ost_134_1044_2007_table_g_1_wolf_numbers"
     assert ("level", "maximum") in solar_data.values
-    assert ("cycle_years", "1, 2, 3") in solar_data.values
-    assert ("wolf_numbers", "11.5, 33.9, 100.8") in solar_data.values
+    assert ("cycle_years", "9, 10, 11") in solar_data.values
+    assert ("wolf_numbers", "43.4, 29.4, 16") in solar_data.values
+    assert ("reference_start_year", "2020") in solar_data.values
+    assert ("reference_cycle_number", "25") in solar_data.values
 
 
 def test_execute_calculation_logs_ost_wolf_numbers_for_mission(
@@ -335,6 +334,6 @@ def test_execute_calculation_logs_ost_wolf_numbers_for_mission(
     messages = tuple(entry.message for entry in maximum_activity_result.log.entries)
     assert any(
         message
-        == "\u0427\u0438\u0441\u043b\u0430 \u0412\u043e\u043b\u044c\u0444\u0430 \u043f\u043e \u0442\u0430\u0431\u043b\u0438\u0446\u0435 \u0413.1 \u041e\u0421\u0422: 11.5, 33.9, 100.8"
+        == "\u0427\u0438\u0441\u043b\u0430 \u0412\u043e\u043b\u044c\u0444\u0430 \u043f\u043e \u0442\u0430\u0431\u043b\u0438\u0446\u0435 \u0413.1 \u041e\u0421\u0422: 43.4, 29.4, 16"
         for message in messages
     )

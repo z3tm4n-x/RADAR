@@ -1,7 +1,13 @@
 ﻿import pytest
 
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.shielding.resources import load_normative_shielding_tables
 from radar.shielding.sep_hze import calculate_sep_hze_shielding_spectra
@@ -133,25 +139,31 @@ def test_sep_let_sfxm_peak_flux_mini_chain_with_normative_resources() -> None:
     assert all(right > left for left, right in zip(result.let_centers, result.let_centers[1:]))
     assert any(value > 0.0 for value in result.proton_let.y)
     assert any(value > 0.0 for spectrum in result.hze_let_by_z.values() for value in spectrum.y)
-    assert any(value > 0.0 for value in result.combined_let.y)
+    assert any(value > 0.0 for value in result.hze_aggregate_let.y)
 
     expected_combined = tuple(
         result.proton_let.y[index]
         + sum(spectrum.y[index] for spectrum in result.hze_let_by_z.values())
         for index in range(len(result.let_centers))
     )
-    assert result.combined_let.y == pytest.approx(expected_combined)
+    assert result.mixed_let_diagnostic.y == pytest.approx(expected_combined)
+    expected_hze = tuple(
+        sum(spectrum.y[index] for spectrum in result.hze_let_by_z.values())
+        for index in range(len(result.let_centers))
+    )
+    assert result.hze_aggregate_let.y == pytest.approx(expected_hze)
 
-    assert result.combined_let.x_unit is Unit.LET
-    assert result.combined_let.y_unit is Unit.DIFFERENTIAL_LET_FLUX
-    assert result.combined_let.quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUX
-    assert result.combined_let.particle is Particle.HZE
+    assert result.hze_aggregate_let.x_unit is Unit.LET
+    assert result.hze_aggregate_let.y_unit is Unit.DIFFERENTIAL_LET_FLUX
+    assert result.hze_aggregate_let.quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUX
+    assert result.hze_aggregate_let.particle is Particle.HZE
+    assert result.hze_aggregate_let.let_role is LetSpectrumRole.HZE_DIRECT_ION
 
-    assert SEP_LET_PRODUCTS_MODEL in result.combined_let.model
-    assert SEP_LET_PROTON_TOTAL_AFTER_AL in result.combined_let.model
-    assert SEP_LET_HZE_PRIMARY_AFTER_AL in result.combined_let.model
-    assert SEP_LET_SILICON_TARGET in result.combined_let.model
-    assert SEP_LET_NO_HIDDEN_4PI in result.combined_let.model
+    assert SEP_LET_PRODUCTS_MODEL in result.hze_aggregate_let.model
+    assert SEP_LET_PROTON_TOTAL_AFTER_AL not in result.hze_aggregate_let.model
+    assert SEP_LET_HZE_PRIMARY_AFTER_AL in result.hze_aggregate_let.model
+    assert SEP_LET_SILICON_TARGET in result.hze_aggregate_let.model
+    assert SEP_LET_NO_HIDDEN_4PI in result.hze_aggregate_let.model
 
 
 def test_sep_combined_let_sfxm_peak_flux_product_kind() -> None:

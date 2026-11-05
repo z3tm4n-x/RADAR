@@ -27,7 +27,13 @@ from radar.core.project_snapshot import (
     shielding_config_snapshot,
     source_model_selection_snapshot,
 )
-from radar.core.types import ShieldGeometry, SolarActivityLevel
+from radar.core.types import (
+    AssessmentMode,
+    DoseQuantity,
+    ShieldGeometry,
+    SolarActivityLevel,
+)
+from radar.core.units import Unit
 
 
 def test_mission_config_snapshot() -> None:
@@ -122,6 +128,7 @@ def test_calculation_config_snapshot_contains_project_sections() -> None:
         "methodology",
         "source_model_selection",
         "kp",
+        "assessment_mode",
         "dose",
     }
     assert snapshot["kp"] == 4
@@ -142,6 +149,7 @@ def test_calculation_config_snapshot_json_is_json_compatible() -> None:
     decoded = json.loads(encoded)
 
     assert decoded == calculation_config_snapshot(config)
+
 
 def test_mission_config_from_snapshot_round_trip() -> None:
     mission = MissionConfig(
@@ -183,10 +191,7 @@ def test_source_model_selection_from_snapshot_round_trip() -> None:
 def test_methodology_config_from_snapshot_round_trip() -> None:
     methodology = MethodologyConfig(profile=MethodologyProfile.OST_WITH_GOST_GCR)
 
-    assert (
-        methodology_config_from_snapshot(methodology_config_snapshot(methodology))
-        == methodology
-    )
+    assert methodology_config_from_snapshot(methodology_config_snapshot(methodology)) == methodology
 
 
 def test_calculation_config_from_snapshot_round_trip() -> None:
@@ -248,3 +253,54 @@ def test_calculation_config_from_snapshot_rejects_model_selection_mismatch() -> 
 def test_calculation_config_from_snapshot_json_rejects_non_object_root() -> None:
     with pytest.raises(ValueError, match="Project JSON root must be an object"):
         calculation_config_from_snapshot_json("[]")
+
+
+def test_solar_cycle_anchor_and_assessment_mode_round_trip() -> None:
+    methodology = MethodologyConfig(
+        solar_cycle_reference_start_year=2031,
+        solar_cycle_reference_number=26,
+    )
+    config = CalculationConfig(
+        mission=MissionConfig(launch_year=2034, lifetime_years=3),
+        orbit=OrbitConfig.circular(altitude_km=500.0, inclination_deg=51.6),
+        methodology=methodology,
+        assessment_mode=AssessmentMode.PEAK,
+        dose_quantity=DoseQuantity.DOSE_RATE,
+        dose_unit=Unit.RAD_PER_SECOND,
+    )
+
+    restored = calculation_config_from_snapshot(calculation_config_snapshot(config))
+
+    assert restored == config
+    assert restored.assessment_mode is AssessmentMode.PEAK
+    assert restored.methodology.solar_cycle_reference_start_year == 2031
+    assert restored.methodology.solar_cycle_reference_number == 26
+
+
+def test_old_snapshot_without_solar_anchor_uses_explicit_application_defaults() -> None:
+    methodology = MethodologyConfig()
+    snapshot = methodology_config_snapshot(methodology)
+    del snapshot["solar_cycle_reference_start_year"]
+    del snapshot["solar_cycle_reference_number"]
+    del snapshot["solar_activity_wolf_version"]
+    del snapshot["solar_activity_monthly_policy"]
+
+    restored = methodology_config_from_snapshot(snapshot)
+
+    assert restored.solar_cycle_reference_start_year == 2020
+    assert restored.solar_cycle_reference_number == 25
+    assert restored.solar_activity_wolf_version == "1.0"
+    assert restored.solar_activity_monthly_policy == "ost_g1_annual_step_12_months"
+
+
+def test_old_calculation_snapshot_without_assessment_mode_defaults_to_cumulative() -> None:
+    config = CalculationConfig(
+        mission=MissionConfig(launch_year=2028, lifetime_years=2),
+        orbit=OrbitConfig.circular(altitude_km=500.0, inclination_deg=51.6),
+    )
+    snapshot = calculation_config_snapshot(config)
+    del snapshot["assessment_mode"]
+
+    restored = calculation_config_from_snapshot(snapshot)
+
+    assert restored.assessment_mode is AssessmentMode.CUMULATIVE

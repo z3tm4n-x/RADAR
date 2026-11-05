@@ -14,6 +14,7 @@ from radar.core.display_units import (
 
 
 def test_mission_duration_conversions_for_integer_years() -> None:
+    assert DAYS_PER_YEAR == pytest.approx(365.25)
     assert days_for_mission_years(2) == pytest.approx(2.0 * DAYS_PER_YEAR)
     assert seconds_for_mission_years(2) == pytest.approx(
         2.0 * DAYS_PER_YEAR * SECONDS_PER_DAY

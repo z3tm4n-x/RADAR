@@ -8,6 +8,7 @@ from radar.core.types import Particle, RadiationProductKind, RadiationSource, Sp
 from radar.core.units import Unit
 from radar.dose.constants import MEV_PER_MG_TO_MEV_PER_G, MEV_TO_RAD
 from radar.dose.proton import (
+    ProtonDoseDomainError,
     calculate_proton_dose_from_shielded_fluence,
     integrate_proton_energy_deposition_MeV_per_mg,
 )
@@ -179,5 +180,8 @@ def test_rejects_energy_outside_stopping_table() -> None:
         let_nuclear_mev_cm2_mg=(1.0, 1.0),
     )
 
-    with pytest.raises(ValueError, match="outside the tabulated range"):
+    with pytest.raises(
+        ProtonDoseDomainError,
+        match="outside the tabulated support",
+    ):
         calculate_proton_dose_from_shielded_fluence(product, table=short_table)

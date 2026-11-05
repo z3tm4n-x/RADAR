@@ -70,7 +70,7 @@ def test_calculation_protocol_entries_include_methodology_information() -> None:
     assert _value(entries, "Методика расчёта", "Расчёт электронов ГКЛ") == "нет"
     assert _value(entries, "Методика расчёта", "Учёт тормозного излучения") == "да"
     assert (
-        _value(entries, "Методика расчёта", "Учёт протонов при расчёте ЛПЭ")
+        _value(entries, "Методика расчёта", "Диагностический суммарный ЛПЭ протоны+ТЗЧ")
         == "да"
     )
 

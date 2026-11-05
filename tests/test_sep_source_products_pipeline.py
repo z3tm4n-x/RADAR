@@ -255,13 +255,13 @@ def test_sep_source_products_pipeline_applies_ost_proton_penetration() -> None:
 
     assert pipeline_result.calculation_result.component_status(
         SEP_GEOMAGNETIC_PENETRATION_COMPONENT
-    ) is ComponentStatus.COMPLETED
+    ) is ComponentStatus.INCOMPLETE
 
     completed_entries = [
         entry
         for entry in pipeline_result.calculation_result.log.entries
         if entry.stage == SEP_GEOMAGNETIC_PENETRATION_COMPONENT
-        and entry.message == "SEP geomagnetic penetration completed."
+        and entry.message == "SEP geomagnetic penetration calculated with unresolved qualification."
     ]
     assert len(completed_entries) == 1
     completed_details = dict(completed_entries[0].details)
@@ -270,6 +270,11 @@ def test_sep_source_products_pipeline_applies_ost_proton_penetration() -> None:
         SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION
     )
     assert completed_details["rigidity_grid_points"] == "1"
+    assert "shadow qualification unresolved" in completed_details["qualification_reasons"]
+    assert "Uniform MLT ensemble" in completed_details["qualification_reasons"]
+    for product in pipeline_result.products:
+        assert any("shadow qualification unresolved" in reason
+                   for reason in product.spectrum.incomplete_reasons)
 
     assert pipeline_result.source_products == pipeline_result.sep_model_result.products
 
@@ -277,11 +282,14 @@ def test_sep_source_products_pipeline_applies_ost_proton_penetration() -> None:
         info.name: info
         for info in pipeline_result.calculation_result.model_info
     }
-    assert model_info_by_name["ost_sep_model"].version == "protons_only_v1"
+    assert model_info_by_name["ost_sep_model"].version == (
+        "protons_only_v1+diagnostic.caller_coefficients"
+    )
 
     penetration_info = model_info_by_name[OST_GEOMAGNETIC_PENETRATION_MODEL]
     assert penetration_info.version == SEP_GEOMAGNETIC_PENETRATION_MODEL_VERSION
     assert penetration_info.source == SEP_GEOMAGNETIC_PENETRATION_DOCUMENT
+    assert penetration_info.status == "diagnostic"
 
 
 def test_sep_source_products_pipeline_rejects_profile_model_mismatch() -> None:
@@ -301,7 +309,7 @@ def test_sep_source_products_pipeline_result_rejects_products_not_from_model_res
         spectrum=_sep_proton_fluence_spectrum(model="other"),
     )
 
-    with pytest.raises(ValueError, match="must identify their source model"):
+    with pytest.raises(ValueError, match="structured source transformation chain"):
         SepSourceProductsPipelineResult(
             calculation_result=calculate_sep_source_products_pipeline(
                 config=_config(),

@@ -1,8 +1,16 @@
 ﻿import pytest
 
 from radar.core.products import SpectrumProduct
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.spectra import ModelReference, ParticleSpecies, Spectrum1D
+from radar.core.types import (
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumAxisKind,
+    SpectrumCompleteness,
+    SpectrumLocation,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.shielding.hze_al import HzeAlRangeTable
 from radar.shielding.hze_si_let import HzeSiLetTable
@@ -87,7 +95,7 @@ def _tables() -> ShieldingNormativeTables:
             26: _hze_si_table(z=26, symbol="Fe", mass_number=56.0),
         },
         al27_nonelastic_xs=Al27NonelasticCrossSectionTable(
-            mt=5,
+            mt=3,
             energy_mev=(1.0, 10.0),
             sigma_barn=(0.0, 0.0),
         ),
@@ -133,16 +141,47 @@ def test_sep_hze_shielding_zero_thickness_preserves_spectrum() -> None:
     assert result.fragmentation is False
 
 
-def test_sep_hze_shielding_positive_thickness_changes_spectrum() -> None:
+def test_sep_hze_zero_thickness_inherits_only_source_blockers_and_provenance() -> None:
+    source = Spectrum1D(
+        **{
+            **_spectrum().__dict__,
+            "model_reference": ModelReference(
+                name="source",
+                version="test",
+                dataset_refs=("source/hze.csv",),
+            ),
+            "completeness": SpectrumCompleteness.INCOMPLETE,
+            "incomplete_reasons": ("source pending",),
+        }
+    )
+
     result = calculate_sep_hze_shielding_spectrum(
         z=26,
-        spectrum=_spectrum(),
+        spectrum=source,
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+    )
+
+    assert result.spectrum.incomplete_reasons == source.incomplete_reasons
+    assert result.spectrum.model_reference is not None
+    assert result.spectrum.model_reference.dataset_refs == ("source/hze.csv",)
+
+
+def test_sep_hze_shielding_positive_thickness_changes_spectrum() -> None:
+    source = _spectrum()
+    result = calculate_sep_hze_shielding_spectrum(
+        z=26,
+        spectrum=source,
         tables=_tables(),
         thickness_g_cm2=0.5,
     )
 
-    assert result.spectrum.x == (10.0, 30.0, 100.0)
-    assert result.spectrum.y != pytest.approx((10.0, 10.0, 10.0))
+    assert result.spectrum.x != source.x
+    assert result.spectrum.y != source.y
+    assert all(
+        right > left
+        for left, right in zip(result.spectrum.x, result.spectrum.x[1:])
+    )
 
 
 def test_sep_hze_shielding_multiple_ions() -> None:
@@ -246,6 +285,65 @@ def test_sep_hze_shielding_rejects_missing_z_table() -> None:
             spectrum=_spectrum(),
             tables=_tables(),
             thickness_g_cm2=0.0,
+        )
+
+
+def test_sep_hze_zero_shield_without_table_is_typed_identity() -> None:
+    source = Spectrum1D(
+        **{
+            **_spectrum().__dict__,
+            "x_unit": Unit.MEV_PER_NUCLEON,
+            "y_unit": Unit.DIFFERENTIAL_FLUENCE_PER_NUCLEON_ENERGY,
+            "axis_kind": SpectrumAxisKind.KINETIC_ENERGY_PER_NUCLEON,
+            "species": ParticleSpecies(
+                symbol="U",
+                atomic_number=92,
+                mass_number=238,
+            ),
+            "model_reference": ModelReference(
+                name="source",
+                version="test",
+                dataset_refs=("source/u.csv",),
+            ),
+            "completeness": SpectrumCompleteness.INCOMPLETE,
+            "incomplete_reasons": ("source pending",),
+        }
+    )
+
+    result = calculate_sep_hze_shielding_spectrum(
+        z=92,
+        spectrum=source,
+        tables=_tables(),
+        thickness_g_cm2=0.0,
+    )
+
+    assert result.symbol == "U"
+    assert result.spectrum.x == source.x
+    assert result.spectrum.y == source.y
+    assert result.spectrum.location is SpectrumLocation.BEHIND_SHIELD
+    assert result.spectrum.incomplete_reasons == source.incomplete_reasons
+    assert result.spectrum.model_reference is not None
+    assert result.spectrum.model_reference.dataset_refs == ("source/u.csv",)
+
+
+def test_sep_hze_positive_shield_without_table_is_rejected() -> None:
+    source = Spectrum1D(
+        **{
+            **_spectrum().__dict__,
+            "species": ParticleSpecies(
+                symbol="U",
+                atomic_number=92,
+                mass_number=238,
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="Z=92"):
+        calculate_sep_hze_shielding_spectrum(
+            z=92,
+            spectrum=source,
+            tables=_tables(),
+            thickness_g_cm2=0.1,
         )
 
 

@@ -2,10 +2,16 @@
 
 import pytest
 
-from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationSource, SpectrumQuantity
+from radar.core.spectra import ParticleSpecies, Spectrum1D
+from radar.core.types import (
+    Particle,
+    RadiationSource,
+    SpectrumAxisKind,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.shielding.hze_si_let import (
+    HZE_SI_LET_MASS_NUMBER_MISMATCH_REASON_PREFIX,
     HzeSiLetTable,
     hze_energy_spectrum_to_let_spectrum,
     load_hze_si_let_tables,
@@ -62,6 +68,9 @@ def test_hze_energy_spectrum_to_let_fluence_spectrum() -> None:
     assert let_spectrum.particle is Particle.HZE
     assert let_spectrum.source is RadiationSource.SEP
     assert any(value > 0.0 for value in let_spectrum.y)
+    metadata = dict(let_spectrum.transformation_chain[-1].parameters)
+    assert metadata["stopping_component_used"] == "legacy_table_total"
+    assert metadata["direct_ionization_let_convention"] == "not_qualified"
 
 
 def test_hze_energy_spectrum_to_let_flux_spectrum() -> None:
@@ -85,6 +94,77 @@ def test_hze_let_conversion_rejects_non_hze_particles() -> None:
             table=_table(),
             let_centers=(10.0, 20.0, 50.0),
         )
+
+
+def test_typed_hze_let_conversion_rejects_total_mev_axis() -> None:
+    spectrum = Spectrum1D(
+        **{
+            **_spectrum().__dict__,
+            "axis_kind": SpectrumAxisKind.KINETIC_ENERGY,
+            "species": ParticleSpecies(
+                symbol="Fe",
+                atomic_number=26,
+                mass_number=56,
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="energy-per-nucleon axis"):
+        hze_energy_spectrum_to_let_spectrum(
+            spectrum=spectrum,
+            table=_table(),
+            let_centers=(10.0, 20.0, 50.0),
+        )
+
+
+def test_typed_hze_let_conversion_rejects_species_table_mismatch() -> None:
+    spectrum = Spectrum1D(
+        **{
+            **_spectrum().__dict__,
+            "x_unit": Unit.MEV_PER_NUCLEON,
+            "y_unit": Unit.DIFFERENTIAL_FLUENCE_PER_NUCLEON_ENERGY,
+            "axis_kind": SpectrumAxisKind.KINETIC_ENERGY_PER_NUCLEON,
+            "species": ParticleSpecies(
+                symbol="He",
+                atomic_number=2,
+                mass_number=4,
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="does not match.*Z=26"):
+        hze_energy_spectrum_to_let_spectrum(
+            spectrum=spectrum,
+            table=_table(),
+            let_centers=(10.0, 20.0, 50.0),
+        )
+
+
+def test_typed_hze_let_conversion_marks_mass_mismatch_incomplete() -> None:
+    spectrum = Spectrum1D(
+        **{
+            **_spectrum().__dict__,
+            "x_unit": Unit.MEV_PER_NUCLEON,
+            "y_unit": Unit.DIFFERENTIAL_FLUENCE_PER_NUCLEON_ENERGY,
+            "axis_kind": SpectrumAxisKind.KINETIC_ENERGY_PER_NUCLEON,
+            "species": ParticleSpecies(
+                symbol="Fe",
+                atomic_number=26,
+                mass_number=55,
+            ),
+        }
+    )
+
+    output = hze_energy_spectrum_to_let_spectrum(
+        spectrum=spectrum,
+        table=_table(),
+        let_centers=(10.0, 20.0, 50.0),
+    )
+
+    assert any(
+        reason.startswith(HZE_SI_LET_MASS_NUMBER_MISMATCH_REASON_PREFIX)
+        for reason in output.incomplete_reasons
+    )
 
 
 def test_load_hze_si_let_tables(tmp_path: Path) -> None:

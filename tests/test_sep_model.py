@@ -1,4 +1,5 @@
 import math
+from dataclasses import replace
 import pytest
 
 from radar.core.products import SpectrumProduct
@@ -9,6 +10,8 @@ from radar.core.types import (
     Particle,
     RadiationProductKind,
     RadiationSource,
+    SpectrumAxisKind,
+    SpectrumCompleteness,
     SpectrumQuantity,
 )
 from radar.core.units import Unit
@@ -16,9 +19,16 @@ from radar.sep.model import (
     SepModelInput,
     SepModelProtocol,
     GostSepModel,
+    OST_SEP_NORMATIVE_ION_ROSTER_REASON_PREFIX,
+    SEP_CALLER_COEFFICIENT_RECORDS_DATASET_REF,
+    SEP_CALLER_COEFFICIENT_RECORDS_INCOMPLETE_REASON,
+    SEP_CALLER_HZE_ION_RECORDS_DATASET_REF,
+    SEP_CALLER_HZE_ION_RECORDS_INCOMPLETE_REASON,
+    SEP_NONDEFAULT_HZE_GAMMA2_INCOMPLETE_REASON_PREFIX,
     OstSepModel,
     SepModelResult,
     StaticSepModel,
+    ost_sep_required_hze_ions,
     validate_sep_energy_spectrum,
     validate_sep_proton_fluence_spectrum,
 )
@@ -143,6 +153,18 @@ def test_validate_sep_energy_spectrum_accepts_hze_energy_products() -> None:
         validate_sep_energy_spectrum(spectrum)
 
 
+def test_validate_sep_energy_spectrum_rejects_typed_hze_total_mev() -> None:
+    spectrum = Spectrum1D(
+        **{
+            **_sep_hze_fluence_spectrum().__dict__,
+            "axis_kind": SpectrumAxisKind.KINETIC_ENERGY,
+        }
+    )
+
+    with pytest.raises(ValueError, match="Typed SEP HZE.*MeV/nucleon"):
+        validate_sep_energy_spectrum(spectrum)
+
+
 def test_validate_sep_proton_fluence_spectrum_rejects_non_proton() -> None:
     with pytest.raises(ValueError, match="protons"):
         validate_sep_proton_fluence_spectrum(
@@ -212,6 +234,10 @@ def test_static_sep_model_scales_annual_fluence_by_integer_lifetime() -> None:
     assert result.exceedance_probability == pytest.approx(0.1)
     assert result.model == "static_test"
     assert result.document == "test_document"
+    assert not any(
+        reason.startswith(OST_SEP_NORMATIVE_ION_ROSTER_REASON_PREFIX)
+        for reason in result.spectrum.incomplete_reasons
+    )
 
 
 def test_static_sep_model_preserves_annual_spectrum() -> None:
@@ -596,6 +622,16 @@ def test_ost_sep_model_calculates_proton_source_products() -> None:
 
     assert result.model == "ost_sep_model"
     assert result.document == "OST 134-1044-2007"
+    assert all(
+        product.spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        and any(
+            reason.startswith(OST_SEP_NORMATIVE_ION_ROSTER_REASON_PREFIX)
+            and "He(Z=2)" in reason
+            and "Ni(Z=28)" in reason
+            for reason in product.spectrum.incomplete_reasons
+        )
+        for product in result.products
+    )
 
 
 def test_gost_sep_model_calculates_proton_source_products_with_w1_policy() -> None:
@@ -607,6 +643,7 @@ def test_gost_sep_model_calculates_proton_source_products_with_w1_policy() -> No
         version="protons_only_v1",
         monthly_smoothed_wolf_numbers=(2.0 / (60.0 * 0.0130),) * 60,
         coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+        coefficient_model="ost_134_1044_2007",
     )
 
     result = model.calculate(
@@ -651,6 +688,7 @@ def test_gost_sep_w1_matches_ost_sep_when_expected_event_count_is_equal() -> Non
         version="protons_only_v1",
         monthly_smoothed_wolf_numbers=gost_monthly_wolf_numbers,
         coefficient_records=coefficient_records,
+        coefficient_model="ost_134_1044_2007",
     )
 
     ost_event_count = calculate_sep_expected_events(
@@ -713,6 +751,29 @@ def test_ost_sep_model_uses_real_coefficient_tables() -> None:
     assert len(result.products) == 3
     assert result.spectrum.x == (10.0, 20.0)
     assert all(value > 0.0 for value in result.spectrum.y)
+
+
+def test_ost_and_gost_models_select_distinct_normative_coefficient_tables() -> None:
+    """Guard the printed OST B.2 / GOST table 2 control-point difference."""
+
+    mission = _mission_with_probability(lifetime_years=1, probability=0.5)
+    ost_model = OstSepModel(
+        energy_grid_mev=(9.175,),
+        monthly_smoothed_wolf_numbers=(1.0 / (12.0 * 0.0135),) * 12,
+    )
+    gost_model = GostSepModel(
+        energy_grid_mev=(9.715,),
+        monthly_smoothed_wolf_numbers=(1.0 / (12.0 * 0.0130),) * 12,
+    )
+
+    ost_result = ost_model.calculate(SepModelInput(mission=mission))
+    gost_result = gost_model.calculate(SepModelInput(mission=mission))
+
+    assert ost_model.coefficient_model == "ost_134_1044_2007"
+    assert gost_model.coefficient_model == "gost_r_25645_165_2025"
+    assert ost_model.coefficient_resource != gost_model.coefficient_resource
+    assert ost_result.spectrum.y[0] == pytest.approx(10.0**6.041)
+    assert gost_result.spectrum.y[0] == pytest.approx(10.0**6.041)
 
 
 def test_ost_sep_model_rejects_partial_configuration() -> None:
@@ -857,18 +918,119 @@ def test_ost_sep_model_calculates_hze_source_products_when_configured() -> None:
     mean_product = hze_products_by_kind[RadiationProductKind.MEAN_FLUX]
 
     assert mission_product.spectrum.x == (5.0,)
-    assert mission_product.spectrum.x_unit is Unit.MEV
+    assert mission_product.spectrum.x_unit is Unit.MEV_PER_NUCLEON
+    assert (
+        mission_product.spectrum.y_unit
+        is Unit.DIFFERENTIAL_FLUENCE_PER_NUCLEON_ENERGY
+    )
     assert mission_product.spectrum.quantity is SpectrumQuantity.DIFFERENTIAL_FLUENCE
     assert mission_product.spectrum.y == pytest.approx(expected_mission)
 
     assert peak_product.spectrum.quantity is SpectrumQuantity.PEAK_DIFFERENTIAL_FLUX
+    assert peak_product.spectrum.y_unit is Unit.DIFFERENTIAL_FLUX_PER_NUCLEON_ENERGY
     assert peak_product.spectrum.y == pytest.approx(expected_peak)
 
     assert mean_product.spectrum.quantity is SpectrumQuantity.MEAN_DIFFERENTIAL_FLUX
+    assert mean_product.spectrum.y_unit is Unit.DIFFERENTIAL_FLUX_PER_NUCLEON_ENERGY
     assert mean_product.spectrum.y == pytest.approx(expected_mean)
 
     assert "He Z=2" in mission_product.label
     assert "z02_he" in mission_product.spectrum.model
+
+    for product in hze_products:
+        scaling_step = next(
+            step
+            for step in product.spectrum.transformation_chain
+            if step.name == "ost_sep_hze_scaling"
+        )
+        parameters = dict(scaling_step.parameters)
+        assert float(parameters["gamma2_multiplier"]) == pytest.approx(1.68)
+        assert parameters["gamma2_multiplier_policy"].startswith("corrected_1.68")
+
+
+def test_ost_sep_required_hze_roster_is_positive_appendix_b9_subset() -> None:
+    assert ost_sep_required_hze_ions() == (
+        (2, "He"),
+        (6, "C"),
+        (7, "N"),
+        (8, "O"),
+        (9, "F"),
+        (10, "Ne"),
+        (11, "Na"),
+        (12, "Mg"),
+        (13, "Al"),
+        (14, "Si"),
+        (15, "P"),
+        (16, "S"),
+        (17, "Cl"),
+        (18, "Ar"),
+        (19, "K"),
+        (20, "Ca"),
+        (21, "Sc"),
+        (22, "Ti"),
+        (23, "V"),
+        (24, "Cr"),
+        (25, "Mn"),
+        (26, "Fe"),
+        (27, "Co"),
+        (28, "Ni"),
+    )
+
+
+def test_ost_sep_subset_marks_every_source_product_incomplete() -> None:
+    model = OstSepModel(
+        energy_grid_mev=(1.0, 10.0**4.1),
+        hze_energy_grid_mev_per_nucleon=(1.0, 10.0**4.1),
+        version="subset_roster_v1",
+        monthly_smoothed_wolf_numbers=(2.0 / (60.0 * 0.0135),) * 60,
+        coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+        hze_ion_records=_simple_hze_ion_records(),
+    )
+
+    result = model.calculate(
+        SepModelInput(
+            mission=_mission_with_probability(lifetime_years=5, probability=0.5),
+        )
+    )
+
+    assert len(result.products) == 6
+    assert all(
+        product.spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        for product in result.products
+    )
+    assert all(
+        any(
+            reason.startswith(OST_SEP_NORMATIVE_ION_ROSTER_REASON_PREFIX)
+            and "C(Z=6)" in reason
+            and "Ni(Z=28)" in reason
+            for reason in product.spectrum.incomplete_reasons
+        )
+        for product in result.products
+    )
+
+
+def test_ost_sep_full_table_has_no_ion_roster_blocker() -> None:
+    model = OstSepModel(
+        energy_grid_mev=(1.0, 10.0**4.1),
+        hze_energy_grid_mev_per_nucleon=(1.0, 10.0**4.1),
+        monthly_smoothed_wolf_numbers=(2.0 / (60.0 * 0.0135),) * 60,
+        coefficient_records=_simple_ost_sep_proton_coefficient_records(),
+    )
+
+    result = model.calculate(
+        SepModelInput(
+            mission=_mission_with_probability(lifetime_years=5, probability=0.5),
+        )
+    )
+
+    assert len(result.products) == 3 + 3 * len(ost_sep_required_hze_ions())
+    assert all(
+        not any(
+            reason.startswith(OST_SEP_NORMATIVE_ION_ROSTER_REASON_PREFIX)
+            for reason in product.spectrum.incomplete_reasons
+        )
+        for product in result.products
+    )
 
 
 def test_ost_sep_model_rejects_bad_hze_energy_grid() -> None:
@@ -878,6 +1040,87 @@ def test_ost_sep_model_rejects_bad_hze_energy_grid() -> None:
             hze_energy_grid_mev_per_nucleon=(5.0, 5.0),
             monthly_smoothed_wolf_numbers=(100.0,),
         )
+
+
+def _full_domain_ost_model() -> OstSepModel:
+    return OstSepModel(
+        energy_grid_mev=(1.0, 10.0**4.1),
+        hze_energy_grid_mev_per_nucleon=(1.0, 10.0**4.1),
+        monthly_smoothed_wolf_numbers=(2.0 / (60.0 * 0.0135),) * 60,
+    )
+
+
+def test_sep_default_168_has_official_provenance_without_override_blocker() -> None:
+    model = _full_domain_ost_model()
+    result = model.calculate(SepModelInput(mission=_mission_with_probability(
+        lifetime_years=5, probability=0.5,
+    )))
+    assert model.hze_gamma2_multiplier == 1.68
+    assert model.metadata.version == model.version
+    for product in result.products:
+        spectrum = product.spectrum
+        assert spectrum.completeness is SpectrumCompleteness.COMPLETE
+        assert spectrum.model_reference is not None
+        assert spectrum.model_reference.version == model.version
+        assert all(not ref.startswith("diagnostic://") for ref in spectrum.model_reference.dataset_refs)
+        assert all(step.name != "sep_diagnostic_input_override" for step in spectrum.transformation_chain)
+
+
+def test_sep_printed_134_is_diagnostic_only_for_hze_products() -> None:
+    model = replace(_full_domain_ost_model(), hze_gamma2_multiplier=1.34)
+    result = model.calculate(SepModelInput(mission=_mission_with_probability(
+        lifetime_years=5, probability=0.5,
+    )))
+    assert model.metadata.version.endswith("+diagnostic.nondefault_gamma2")
+    for product in result.products:
+        spectrum = product.spectrum
+        assert spectrum.model_reference is not None
+        if spectrum.particle is Particle.HZE:
+            assert spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+            assert any(reason.startswith(SEP_NONDEFAULT_HZE_GAMMA2_INCOMPLETE_REASON_PREFIX)
+                       for reason in spectrum.incomplete_reasons)
+            scaling = next(step for step in spectrum.transformation_chain
+                           if step.name == "ost_sep_hze_scaling")
+            assert float(dict(scaling.parameters)["gamma2_multiplier"]) == 1.34
+        else:
+            assert spectrum.completeness is SpectrumCompleteness.COMPLETE
+            assert spectrum.model_reference.version == model.version
+
+
+def test_sep_caller_coefficients_never_claim_official_dataset() -> None:
+    model = replace(_full_domain_ost_model(),
+                    coefficient_records=_simple_ost_sep_proton_coefficient_records())
+    result = model.calculate(SepModelInput(mission=_mission_with_probability(
+        lifetime_years=5, probability=0.5,
+    )))
+    assert model.metadata.version.endswith("+diagnostic.caller_coefficients")
+    for product in result.products:
+        spectrum = product.spectrum
+        assert spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+        assert SEP_CALLER_COEFFICIENT_RECORDS_INCOMPLETE_REASON in spectrum.incomplete_reasons
+        assert spectrum.model_reference is not None
+        assert model.coefficient_resource not in spectrum.model_reference.dataset_refs
+        assert SEP_CALLER_COEFFICIENT_RECORDS_DATASET_REF in spectrum.model_reference.dataset_refs
+        assert any(step.name == "sep_diagnostic_input_override" for step in spectrum.transformation_chain)
+
+
+def test_sep_caller_b9_records_never_claim_official_dataset_even_with_full_roster() -> None:
+    official_model = _full_domain_ost_model()
+    model = replace(official_model, hze_ion_records=official_model._hze_ion_records())
+    result = model.calculate(SepModelInput(mission=_mission_with_probability(
+        lifetime_years=5, probability=0.5,
+    )))
+    assert model.metadata.version.endswith("+diagnostic.caller_hze_ions")
+    for product in result.products:
+        spectrum = product.spectrum
+        assert spectrum.model_reference is not None
+        if spectrum.particle is Particle.HZE:
+            assert spectrum.completeness is SpectrumCompleteness.INCOMPLETE
+            assert SEP_CALLER_HZE_ION_RECORDS_INCOMPLETE_REASON in spectrum.incomplete_reasons
+            assert SEP_CALLER_HZE_ION_RECORDS_DATASET_REF in spectrum.model_reference.dataset_refs
+            assert "sep_hze/ost_134_1044_2007_b9.csv" not in spectrum.model_reference.dataset_refs
+        else:
+            assert spectrum.completeness is SpectrumCompleteness.COMPLETE
 
 
 def test_ost_sep_model_rejects_hze_grid_without_proton_configuration() -> None:

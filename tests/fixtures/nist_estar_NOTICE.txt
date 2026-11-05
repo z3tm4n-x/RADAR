@@ -1,0 +1,29 @@
+Fixture: nist_estar_al_1_2.txt
+
+Derived output from the NIST STAR 1.2 ESTAR program, written by Martin J.
+Berger, National Institute of Standards and Technology, with archive source
+revisions credited in ESTAR.f to Johnathan S. Coursey.
+
+Official source archive:
+https://physics.nist.gov/PhysRefData/Star/STAR.tar.gz
+SHA256 b8241beb0e721b6b89dd316e32b23ac6c80e9a8908bd43da1570216de51de2c6
+
+NIST's distribution terms and disclaimer:
+https://physics.nist.gov/PhysRefData/Star/Text/download.html
+
+This test fixture is generated output, not the original Fortran source.
+It is the unchanged, byte-identical two-page output for electrons in
+aluminium (material 13), calculated locally from the unchanged source.
+The RADAR Python parser and tests are new derivative work, not NIST code.
+No NIST endorsement or independent physical validation is claimed.
+
+Fixture SHA256:
+e2806353a9eff3c1e3902dee93ac61414e0857fd22225c5941c9dc2b862063b4
+
+Build details, compiler warnings, numerical comparison, limitations and
+source/build fingerprints are recorded in:
+docs/validation/stage4_data_provenance.md
+outputs/nist_estar_reproduction_final_20261101/report.json
+
+The adjacent notice is separate so that the native fixture bytes, page
+break and printed precision remain unchanged.

@@ -151,7 +151,7 @@ def test_erb_proton_shielding_output_tables_can_include_components() -> None:
 
     total_metadata = dict(tables[0].metadata)
 
-    assert total_metadata["location"] == "behind_shielding"
+    assert total_metadata["location"] == "behind_shield"
     assert total_metadata["shielding"] == "applied"
     assert total_metadata["shield_material"] == "Al"
     assert total_metadata["shield_geometry"] == "centered_spherical_shell"
@@ -180,7 +180,7 @@ def test_erb_electron_shielding_output_tables_include_deferred_effects_metadata(
 
     metadata = dict(tables[0].metadata)
 
-    assert metadata["location"] == "behind_shielding"
+    assert metadata["location"] == "behind_shield"
     assert metadata["shielding"] == "applied"
     assert metadata["shield_material"] == "Al"
     assert metadata["shield_geometry"] == "centered_spherical_shell"

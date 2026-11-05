@@ -2,11 +2,18 @@ from __future__ import annotations
 
 from radar.core.products import SpectrumProduct
 from radar.core.spectra import Spectrum1D
-from radar.core.types import Particle, RadiationProductKind, RadiationSource, SpectrumQuantity
+from radar.core.types import (
+    LetSpectrumRole,
+    Particle,
+    RadiationProductKind,
+    RadiationSource,
+    SpectrumQuantity,
+)
 from radar.core.units import Unit
 from radar.dose.inputs import (
     select_erb_electron_shieldose2_inputs,
     select_hze_let_dose_inputs,
+    select_mixed_ion_let_dose_inputs,
     select_proton_dose_inputs,
 )
 
@@ -42,6 +49,8 @@ def _let_product(
     kind: RadiationProductKind = RadiationProductKind.MISSION_LET_FLUENCE,
     quantity: SpectrumQuantity = SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE,
     model: str = "let_model",
+    particle: Particle = Particle.HZE,
+    let_role: LetSpectrumRole = LetSpectrumRole.HZE_DIRECT_ION,
 ) -> SpectrumProduct:
     return SpectrumProduct(
         kind=kind,
@@ -53,9 +62,10 @@ def _let_product(
             if quantity is SpectrumQuantity.LET_DIFFERENTIAL_FLUENCE
             else Unit.DIFFERENTIAL_LET_FLUX,
             quantity=quantity,
-            particle=Particle.HZE,
+            particle=particle,
             source=source,
             model=model,
+            let_role=let_role,
         ),
     )
 
@@ -141,3 +151,14 @@ def test_select_hze_let_dose_inputs_uses_only_sep_gcr_mission_let_fluence() -> N
     assert select_hze_let_dose_inputs(
         (sep, gcr, erb, sep_flux, proton_energy),
     ) == (sep, gcr)
+
+
+def test_mixed_let_dose_selector_is_explicitly_diagnostic() -> None:
+    mixed = _let_product(
+        source=RadiationSource.SEP,
+        particle=Particle.MIXED_ION,
+        let_role=LetSpectrumRole.MIXED_DIAGNOSTIC,
+    )
+    hze = _let_product(source=RadiationSource.SEP)
+
+    assert select_mixed_ion_let_dose_inputs((hze, mixed)) == (mixed,)

@@ -1,6 +1,6 @@
 import pytest
 
-from radar.core.project import MissionConfig
+from radar.core.project import CalculationConfig, MissionConfig, OrbitConfig
 from radar.core.types import SolarActivityLevel
 from radar.solar_activity.cycle import (
     SolarCycleTable,
@@ -9,6 +9,7 @@ from radar.solar_activity.cycle import (
 )
 from radar.solar_activity.model import (
     build_mission_solar_activity,
+    build_calculation_solar_activity,
     expand_annual_wolf_numbers_to_monthly,
     mission_solar_activity_monthly_wolf_numbers,
 )
@@ -121,6 +122,7 @@ def test_build_mission_solar_activity_rejects_level_mismatch() -> None:
             reference_start_year=2024,
         )
 
+
 def test_ost_wolf_number_cycle_table_uses_first_11_cycle_points() -> None:
     table = ost_wolf_number_cycle_table(SolarActivityLevel.MEAN)
 
@@ -200,8 +202,6 @@ def test_build_mission_solar_activity_with_ost_wolf_number_table() -> None:
     assert activity.table_id == OST_WOLF_NUMBER_TABLE_ID
 
 
-
-
 def test_expand_annual_wolf_numbers_to_monthly_repeats_each_year_12_times() -> None:
     monthly = expand_annual_wolf_numbers_to_monthly((100.0, 120.0))
 
@@ -240,3 +240,50 @@ def test_mission_solar_activity_monthly_wolf_numbers_uses_mission_sequence() -> 
     monthly = mission_solar_activity_monthly_wolf_numbers(solar_activity)
 
     assert monthly == (10.0,) * 12 + (20.0,) * 12
+
+
+def test_default_calendar_anchor_does_not_restart_cycle_at_launch() -> None:
+    config = CalculationConfig(
+        mission=MissionConfig(launch_year=2027, lifetime_years=5),
+        orbit=OrbitConfig.circular(altitude_km=500.0, inclination_deg=51.6),
+    )
+
+    timeline = build_calculation_solar_activity(config)
+
+    assert timeline.reference_start_year == 2020
+    assert timeline.reference_cycle_number == 25
+    assert timeline.cycle_years == (8, 9, 10, 11, 1)
+    assert timeline.wolf_numbers == (55.1, 34.5, 21.3, 11.7, 7.1)
+    assert timeline.point_at_calendar_month(2031, 1).cycle_number == 26
+    assert timeline.point_at_calendar_month(2031, 1).cycle_year == 1
+
+
+def test_timeline_supports_premission_months_for_gcr_lag() -> None:
+    config = CalculationConfig(
+        mission=MissionConfig(launch_year=2020, lifetime_years=1),
+        orbit=OrbitConfig.circular(altitude_km=500.0, inclination_deg=51.6),
+    )
+
+    timeline = build_calculation_solar_activity(config)
+    december_before_launch = timeline.point_at_mission_month_coordinate(-0.5)
+
+    assert december_before_launch.calendar_year == 2019
+    assert december_before_launch.calendar_month == 12
+    assert december_before_launch.cycle_number == 24
+    assert december_before_launch.cycle_year == 11
+    assert december_before_launch.wolf_number == 11.7
+
+
+def test_timeline_records_normative_monthly_expansion_policy() -> None:
+    config = CalculationConfig(
+        mission=MissionConfig(launch_year=2020, lifetime_years=1),
+        orbit=OrbitConfig.circular(altitude_km=500.0, inclination_deg=51.6),
+    )
+
+    timeline = build_calculation_solar_activity(config)
+    metadata = dict(timeline.metadata)
+
+    assert timeline.monthly_policy == "ost_g1_annual_step_12_months"
+    assert tuple(point.wolf_number for point in timeline.months) == (7.1,) * 12
+    assert metadata["solar_activity_monthly_evaluation"] == "calendar_month_midpoint"
+    assert "not specified by OST" in metadata["solar_activity_anchor_basis"]

@@ -5,7 +5,11 @@ import pytest
 
 from radar.sep.hze_spectrum import (
     OST_SEP_HZE_GAMMA1_MULTIPLIER,
+    OST_SEP_HZE_GAMMA2_CORRECTED_MULTIPLIER,
+    OST_SEP_HZE_GAMMA2_CORRECTION_POLICY,
     OST_SEP_HZE_GAMMA2_MULTIPLIER,
+    OST_SEP_HZE_GAMMA2_ENGINEERING_MULTIPLIER,
+    OST_SEP_HZE_GAMMA2_PRINTED_MULTIPLIER,
     OST_SEP_HZE_REFERENCE_ENERGY_MEV_PER_NUCLEON,
     OstSepHzeIonRecord,
     evaluate_ost_sep_hze_spectrum,
@@ -88,16 +92,37 @@ def test_hze_coefficients_follow_appendix_b_relations() -> None:
     assert hze.ion is ion
 
 
-def test_hze_gamma2_uses_corrected_multiplier() -> None:
+def test_hze_gamma2_uses_corrected_multiplier_by_default() -> None:
     hze = ost_sep_hze_coefficients_from_proton(
         proton_coefficients=_proton_coefficients(),
         ion=_helium_record(),
     )
 
-    printed_typo_value = 1.34 * _proton_coefficients().gamma2**0.62
+    corrected_value = 1.68 * _proton_coefficients().gamma2**0.62
 
-    assert hze.gamma2 == pytest.approx(1.68 * _proton_coefficients().gamma2**0.62)
-    assert hze.gamma2 != pytest.approx(printed_typo_value)
+    assert (
+        OST_SEP_HZE_GAMMA2_MULTIPLIER
+        == OST_SEP_HZE_GAMMA2_CORRECTED_MULTIPLIER
+    )
+    assert OST_SEP_HZE_GAMMA2_CORRECTION_POLICY.startswith("corrected_1.68")
+    assert hze.gamma2 == pytest.approx(corrected_value)
+
+
+def test_hze_gamma2_printed_value_requires_explicit_selection() -> None:
+    hze = ost_sep_hze_coefficients_from_proton(
+        proton_coefficients=_proton_coefficients(),
+        ion=_helium_record(),
+        gamma2_multiplier=OST_SEP_HZE_GAMMA2_PRINTED_MULTIPLIER,
+    )
+
+    assert hze.gamma2 == pytest.approx(1.34 * _proton_coefficients().gamma2**0.62)
+
+
+def test_hze_gamma2_legacy_engineering_alias_points_to_corrected_value() -> None:
+    assert (
+        OST_SEP_HZE_GAMMA2_ENGINEERING_MULTIPLIER
+        == OST_SEP_HZE_GAMMA2_CORRECTED_MULTIPLIER
+    )
 
 
 def test_evaluate_hze_spectrum_value_below_and_above_break() -> None:
