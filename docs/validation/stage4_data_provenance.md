@@ -5455,3 +5455,151 @@ of the SRIM/relativistic-model overlap and its effect on protected energy/LET
 spectra. No forced endpoint scaling, extrapolation or automatic model join is
 authorized by the close ATIMA/CATIMA point values. Full ion coverage, remaining
 support/residual checks and the orbital acceptance matrix remain separate gates.
+
+## Paired model impact on protected energy and LET spectra (2026-11-09)
+
+The first protected-spectrum comparison is complete, **not** an approval of a
+production replacement. [Full shield/threshold tables, including rare and zero
+bins](paired_impact_results_20261109.md) show the result for all 84 cases.
+
+**Experiment.** The runner regenerated the same OST external spectra as the
+retained upper-bundle baseline and dense runs (launch 2026, five years, mean
+activity, SEP exceedance probability 0.1). The typed unshielded inputs match
+the zero-shield energy arrays, quantities, angular conventions, time modes and
+literal source masses. Positive pilot roster: He, Ne, Fe, U for GCR; He, Ne, Fe
+for SEP; two modes and six Al depths 0, 0.01, 0.1, 1, 3, 10 g/cm². U is not
+an OST SEP source in this roster, not a measured zero. No orbital transmission,
+extra mission-time multiplier, reaction attenuation or nuclear fragmentation is
+included. These are primary-ion external-source diagnostics, not total radiation
+behind a spacecraft wall.
+
+**Operator.** `build_paired_stopping_controls.py` authenticates 1182 common
+material/energy rows and 820 CATIMA-only rows. SRIM and CATIMA share exact native
+energy nodes in the common interval. Per-ion lower limits are 0.0100..0.01114
+MeV/source A (first native node at or above 0.01); last nodes span
+4621.848739..5000 MeV/source A. Upper CATIMA totals are sampled through the
+actual last GCR centre (79432.82347242821 MeV/source A); no SRIM values exist
+or are fabricated in this extension. The 48 prior CATIMA anchor records and
+the 1070 overlapping high-band rows reproduce exactly on like inputs.
+
+Al transport uses differences of a relative CSDA range: integrate
+`A * d(E/A) / S_total`, with whole-ion `S_total` in MeV cm²/g. The same log-log
+stopping interpolation and analytic inversion apply to both models. The arbitrary
+range origin cancels; native projected ranges are not used. In Si, interpolate
+the **electronic** stopping only, in MeV cm²/mg, in energy. Integrate the source
+over every preimage of an output energy/LET bin, including nonmonotone LET and
+flat segments. At 50000 MeV/A the left value and the right-hand radiative limit
+belong to their respective segments; adjacent one-ULP probes do not create fake
+range increments or smear the jump over the preceding interpolation interval.
+
+SS, CS, SC, CC select S=SRIM or C=CATIMA for Al followed by Si, on the same
+**incident** energy interval. Each is compared with SS, including the explicit
+interaction `CC−CS−SC+SS`. A separate, all-CATIMA calculation transports only
+ions incident above the common maximum. Those particles still count if their
+exit energy is below that boundary: e.g. behind 10 g/cm² this happens to
+1.4010% of the finite incoming GCR peak **U** count. The upper-only column is
+not an additive correction to an arbitrary common variant or a joined model.
+Missing low residual support is reported, never treated as established physical
+stopping. At 10 g/cm² for peak GCR U it accounts for 52.56% / 54.82% of that
+ion's full finite count (SRIM / CATIMA Al respectively).
+
+**Dominant contrast.** At zero shield, U, cumulative GCR, `L >= 17.5 MeV cm²/mg`,
+the supported common contribution changes from 32.424% to 46.801% of the
+incoming **U** fluence, not of all GCR ions. The difference is 9.649/cm² over
+the mission, out of 67.112/cm² incoming U. With zero Al the range model cannot
+be responsible. On the descending LET branch the threshold is crossed at
+550.9931 MeV/A (SRIM) and 854.4903 MeV/A (CATIMA); the other crossings, at
+0.04557 and 0.05719 MeV/A, are below the 1-MeV/A source minimum. Directly
+integrating the incoming fluence between the two upper crossings recovers the
+14.3774 percentage-point difference. This effect is **below 1 GeV/A**, not an
+artifact of the decision about how to continue beyond the SRIM endpoint.
+
+For peak GCR behind 10 g/cm², Ne at `L >= 0.2` gives 28.8121% (SS), 28.7962%
+(CS), 31.1408% (SC), 31.1182% (CC) of incoming Ne, plus a **separately
+identified** 0.7611% from the pure-C upper incident interval. U at `L >= 20`
+gives 6.5826% (SS) and 9.0861% (CC), with no resolved upper contribution
+above this particular threshold. Changing Si yields identically zero change
+in the energy-only integrals, and changing Al yields identically zero change
+at zero shield. All values are supported contributions; the report also gives
+unresolved counts. A zero reference is not a denominator for a relative error.
+
+**Numerics and limitations.** Doubling the CATIMA-only extension mesh from
+nominally 40 to 80 nodes/decade changes no common result. The worst positive
+upper-threshold change relative to the **coarse upper value** is 0.09494%;
+the largest absolute change normalized to the entire ion input is 0.0017061
+percentage points. Doubling the **input source** mesh is a different test.
+118 common model/threshold rows change by more than 1% of their positive base
+value (28 CC rows); the worst CS change is 7.956% for peak GCR Fe, 0.1 g/cm²,
+`L >= 20`, but only 0.00493 percentage points of incoming Fe. No universal 1%
+claim is made. Neither mesh test measures the physical accuracy of either model.
+
+Independent quadrature, nonlinear range inversion and source integration (without
+importing the new numerical operator) reproduced 32760 threshold/support/seam
+integrals and 210420 histogram values/densities across the three reports. The
+largest absolute discrepancy normalized to the source integral is below
+2.8e-15. A separate check against earlier SRIM results found differences bounded
+by the newly excluded low-residual interval on the compared thresholds, not by
+an assumption of physically stopped particles.
+
+| Artifact in `outputs/` | SHA256 |
+| --- | --- |
+| paired_stopping_controls_20261109.json and repeat | 82cfa0d857020bc30f10971b5b18de97e47f71b75419085add85241c54f4de22 |
+| paired_impact_base_20261109.json and pilot replay | 390b4b3d4810970f101d0b9a31d9a68caf5a7db08e0d6b5998c3426ee1c0a000 |
+| paired_impact_dense_20261109.json | 2cd06248c868f883deba8af280e65fb689f4dd9d39679f0779fa14a56fe9ca45 |
+| paired_impact_coarse_20261109.json | bcd804b5ae5fcaba850766c8bc40b0188a0ff4229e80b57a32c88e9065c8a8a2 |
+
+**Decision:** do not drop the high-energy GCR tail, normalize one model to the
+other, or replace a production table based on these model comparisons. Check
+the energy intervals actually controlling threshold crossings separately from
+the high-energy transport choice. The main numerical exception is now localized
+to selected rare source-tail integrals; the broad roster, orbital matrix and
+physical/low-residual qualification remain open. The strict OST audit still
+finds five blocking findings in 15 resources. Stage 4 is not release-ready.
+
+### Focused input-grid follow-up: the 118 exceptional rows
+
+The follow-up freezes the rows selected by the original 1→2 comparison; it
+does not select new favourable rows at each step. All are GCR LET thresholds:
+84 He, 20 Ne and 14 Fe model/threshold rows over 12 distinct source/shield
+cases, including 28 CC rows. `probe_paired_source_refinement.py` evaluates the
+OST GCR model again on nested grids for these ions, using the original mission
+solar state. It reproduces the archived source ordinates and integral values
+at factors 1 and 2, and verifies that each new grid retains every previous
+ordinate at the previous energy. **No refinement is simulated by interpolating
+old source values.** The 16→32 comparison was added once because four rows
+still exceeded 1%; 32 is the fixed ceiling for this diagnostic.
+
+| Source-grid nodes | Rows changing by >1% of previous positive threshold integral | Largest absolute relative change |
+| --- | ---: | ---: |
+| 81→161 | 118 | 7.95581% |
+| 161→321 | 16 | 4.49978% |
+| 321→641 | 8 | 2.22458% |
+| 641→1281 | 4 | 1.07699% |
+| 1281→2561 | 0 | 0.54714% |
+
+All four 641→1281 exceedances are peak Fe at 0.1 g/cm² and `L >= 20`, one
+per model combination. The maximum final change normalized to the full incoming
+ion count is 0.00035766 percentage points on these selected rows. This is a
+successive-grid observation, **not** a certified truncation-error bound, a test
+of all fine-grid bins or an instruction to use 2561 nodes on every orbit. The
+production source grids are unchanged. The new source-probe output and repeat
+`outputs/paired_refinement_probe_final[_repeat]_20261109.json` share SHA256
+`52d5487b7ef84a67db307ac164b0e376368e1107a41b5aaf961286e8566ed12f`.
+The exploratory file without `final` stops at factor 16 and is not this result.
+
+To reproduce the local experiment from the pinned external inputs: generate
+paired controls with `build_paired_stopping_controls.py` (bundled CPython 3.12,
+`-B`); use their SHA as `--sha256` for `run_paired_stopping_impact.py` with
+`(--source-grid, --upper-grid)` = `(1,80)`, `(2,80)`, `(1,40)`. The renderer
+`report_paired_stopping_impact.py` reads those three pinned reports. Use the
+documented filenames for the optional focused probe; every output path must
+be new. The public table is a generated diagnostic report, not a substitute
+for any underlying reference data.
+
+Independent replay reproduced the 118-row selection, six actual OST input grids,
+708 integral values and 590 successive differences; the independent value for
+the largest last step is 0.54714387%. The final targeted regression run passed
+**2307 tests**, zero skipped, failed or errored. Ruff and strict mypy pass the
+nine new Python code/test files. JUnit record:
+`outputs/pytest_paired_confirmed_20261109.xml`, SHA256
+`1fc1a064652520c9ae0d8673490531343b97a7eaebded457d2c2271616f7a001`.
